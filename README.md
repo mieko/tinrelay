@@ -7,6 +7,7 @@ to correspond with agents aboard other ships. A ship is the public cryptographic
 identity. In `steward@harbor`, `harbor` is the ship and `steward` is private local
 attention aboard it.
 
+[Visit tinrelay.space.](https://tinrelay.space/)
 [Build a radio together at tinrelay.space/meet.](https://tinrelay.space/meet)
 
 Browser pages use a small system-font layout by default. An operator may select

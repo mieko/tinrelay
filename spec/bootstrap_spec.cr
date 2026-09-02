@@ -1,6 +1,55 @@
 require "./spec_helper"
 
 describe "the canonical bootstrap representations" do
+  it "serves one canonical public homepage as Markdown and HTML" do
+    TinrelaySpec.with_server do |_root, _token, origin, api|
+      expected = api.bootstrap_page.static("home.md")
+      markdown = HTTP::Client.get(
+        origin, headers: HTTP::Headers{"Accept" => "text/markdown"}
+      )
+      markdown.status_code.should eq(200)
+      markdown.headers["Content-Type"].should eq("text/markdown; charset=utf-8")
+      markdown.headers["Vary"].should eq("Accept")
+      markdown.body.should eq(expected)
+
+      explicit = HTTP::Client.get("#{origin}/index.md")
+      explicit.status_code.should eq(200)
+      explicit.headers["Content-Type"].should eq("text/markdown; charset=utf-8")
+      explicit.body.should eq(expected)
+
+      browser = HTTP::Client.get(
+        origin, headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      browser.body.should eq(
+        api.bootstrap_page.html(expected, false, "/index.md", "home")
+      )
+      browser.body.should contain(%(data-page="home"))
+      browser.body.should contain(%(<link rel="canonical" href="https://tinrelay.space/">))
+      browser.body.should contain(%(<link rel="alternate" type="text/markdown" href="/index.md">))
+      browser.headers["Link"].should contain("/index.md")
+      browser.headers["X-Robots-Tag"]?.should be_nil
+
+      with_fragment = HTTP::Client.get("#{origin}/#private-fragment")
+      with_fragment.body.should eq(browser.body)
+      with_fragment.body.should_not contain("private-fragment")
+
+      head = HTTP::Client.head(
+        origin, headers: HTTP::Headers{"Accept" => "text/markdown"}
+      )
+      head.status_code.should eq(200)
+      head.body.should be_empty
+      head.headers["Content-Length"].to_i.should eq(expected.bytesize)
+
+      browser_head = HTTP::Client.head(
+        origin, headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      browser_head.status_code.should eq(200)
+      browser_head.body.should be_empty
+      browser_head.headers["Content-Type"].should eq("text/html; charset=utf-8")
+      browser_head.headers["Content-Length"].to_i.should eq(browser.body.bytesize)
+    end
+  end
+
   it "serves exact canonical Markdown and renders only those bytes for browsers" do
     TinrelaySpec.with_server do |_root, _token, origin, api|
       expected = api.bootstrap_page.markdown
@@ -247,11 +296,18 @@ describe "the canonical bootstrap representations" do
       File.write(
         manifest,
         {
+          "home"             => "/tinrelay-art/home.71ae.css",
           "meet"             => "/tinrelay-art/meet.a81c.css",
           "open-the-channel" => "/tinrelay-art/open-the-channel.918e.css",
         }.to_json
       )
       TinrelaySpec.with_server(manifest) do |_server_root, _token, origin, api|
+        home = HTTP::Client.get(
+          origin, headers: HTTP::Headers{"Accept" => "text/html"}
+        )
+        home.body.should contain(%(data-page="home"))
+        home.body.should contain(%(href="/tinrelay-art/home.71ae.css"))
+
         entry = HTTP::Client.get(
           "#{origin}/meet", headers: HTTP::Headers{"Accept" => "text/html"}
         )
@@ -334,14 +390,17 @@ describe "the canonical bootstrap representations" do
       trailing.status_code.should eq(308)
       trailing.headers["Location"].should eq("/meet")
       HTTP::Client.get("#{origin}/join").status_code.should eq(404)
-      HTTP::Client.get(origin).status_code.should eq(404)
+      HTTP::Client.get(origin).status_code.should eq(200)
 
       llms = HTTP::Client.get("#{origin}/llms.txt")
       llms.status_code.should eq(200)
+      llms.body.should contain("/index.md")
       llms.body.should contain("/meet/index.md")
       robots = HTTP::Client.get("#{origin}/robots.txt")
+      robots.body.should contain("Allow: /$")
       robots.body.should contain("Disallow: /v1/")
       sitemap = HTTP::Client.get("#{origin}/sitemap.xml")
+      sitemap.body.should contain("<loc>https://tinrelay.space/</loc>")
       sitemap.body.should contain("https://tinrelay.space/meet")
       sitemap.body.should_not contain("steward@harbor")
 

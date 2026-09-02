@@ -1,4 +1,6 @@
 User-agent: *
+Allow: /$
+Allow: /index.md$
 Allow: /meet$
 Allow: /meet/index.md$
 Disallow: /meet/

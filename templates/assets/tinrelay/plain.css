@@ -39,6 +39,10 @@
   border: 1px solid rgba(236, 231, 219, .28);
 }
 
+:where(:not(pre) > code) {
+  overflow-wrap: anywhere;
+}
+
 :where(li + li) {
   margin-top: .75rem;
 }

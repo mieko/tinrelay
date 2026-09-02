@@ -239,6 +239,7 @@ module Tinrelay
       return public_not_found(context) unless request.method.in?({"GET", "HEAD"})
       path = request.path
       return redirect(context, "/meet") if path == "/meet/"
+      return homepage(context, path == "/index.md") if path.in?({"/", "/index.md"})
       return public_text(context, bootstrap_page.agent_map, "text/plain; charset=utf-8") if path == "/llms.txt"
       return public_text(context, bootstrap_page.static("robots.txt"), "text/plain; charset=utf-8") if path == "/robots.txt"
       return public_text(context, bootstrap_page.static("sitemap.xml"), "application/xml; charset=utf-8") if path == "/sitemap.xml"
@@ -253,6 +254,26 @@ module Tinrelay
         )
       end
       public_not_found(context)
+    end
+
+    private def homepage(context : HTTP::Server::Context,
+                         explicit_markdown : Bool) : Int32
+      markdown = bootstrap_page.static("home.md")
+      alternate = "/index.md"
+      wants_markdown = explicit_markdown || markdown_requested?(context.request)
+      body = wants_markdown ? markdown : bootstrap_page.html(
+        markdown, false, alternate, "home"
+      )
+      context.response.headers["Cache-Control"] = "no-store"
+      context.response.headers["Vary"] = "Accept"
+      context.response.headers["Referrer-Policy"] = "no-referrer"
+      context.response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+      context.response.headers["Link"] = %(<#{alternate}>; rel="alternate"; type="text/markdown", </llms.txt>; rel="describedby")
+      write_body(
+        context, 200,
+        wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8",
+        body
+      )
     end
 
     private def bootstrap(context : HTTP::Server::Context, coordinate : String?, journey : String?,

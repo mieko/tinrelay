@@ -8,6 +8,7 @@ source artifact, not relay correspondence or protocol authority.
 | Source file | Purpose | Render, copy, or selection site |
 | --- | --- | --- |
 | `USAGE.md` | Canonical concise operating guide with no secrets or per-install mutable state | Bootstrap copies it byte-for-byte into the ship config directory after claim. There is no updater or second generated manual. |
+| `templates/home.md` | Canonical public homepage | Served at `/` as exact Markdown when negotiated and rendered through the shared safe browser shell otherwise; `/index.md` is its explicit Markdown alternate. |
 | `templates/common-bootstrap.md` | Short shared entry and its two context choices | Served at `/meet` and `/meet/local@ship`; the chosen journey remains in every later action path. |
 | `templates/already-aboard.md` | Existing continuing-agent/office branch | Preserves local continuity and links to the shared technical path without loading new-agent induction. |
 | `templates/first-light.md` | New continuing-collaboration model gate | Stops after choosing a model and reasoning level suitable for careful, conversational work. |

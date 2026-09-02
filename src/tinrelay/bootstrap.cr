@@ -8,7 +8,7 @@ module Tinrelay
     }
     JOURNEYS  = JOURNEY_ACTIONS.keys
     ACTIONS   = JOURNEY_ACTIONS.values.flatten.uniq
-    PAGE_KEYS = (["meet", "not-found"] + ACTIONS).uniq
+    PAGE_KEYS = (["home", "meet", "not-found"] + ACTIONS).uniq
 
     getter common_path : String
     getter source_repository : String
@@ -84,9 +84,17 @@ module Tinrelay
       options = Markd::Options.new(safe: true)
       document = Markd::Parser.parse(markdown, options)
       rendered = Markd::HTMLRenderer.new(options).render(document)
-      title = markdown_title(document).try { |value| "#{value} - Tinrelay" } || "Tinrelay"
+      markdown_title = markdown_title(document)
+      title = markdown_title.try { |value| "#{value} - Tinrelay" } || "Tinrelay"
+      home = page == "home"
+      description = home ? markdown_description(document) || "Tinrelay" : "Inspect and set up a Tinrelay radio."
+      social_title = home ? markdown_title || "Tinrelay" : "Meet Tinrelay"
+      canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/meet"
       shell
         .gsub("{{ROBOTS}}", noindex ? "noindex,nofollow,noarchive" : "index,follow")
+        .gsub("{{DESCRIPTION}}", HTML.escape(description))
+        .gsub("{{SOCIAL_TITLE}}", HTML.escape(social_title))
+        .gsub("{{CANONICAL_URL}}", HTML.escape(canonical_url))
         .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_path))
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))
@@ -135,22 +143,38 @@ module Tinrelay
         node, entering = event
         next unless entering && node.type.heading? && node.data["level"]? == 1
 
-        title = String.build do |io|
-          heading_walker = node.walker
-          while heading_event = heading_walker.next
-            child, child_entering = heading_event
-            next unless child_entering
-            case child.type
-            when Markd::Node::Type::Text, Markd::Node::Type::Code
-              io << child.text
-            when Markd::Node::Type::SoftBreak, Markd::Node::Type::LineBreak
-              io << ' '
-            end
-          end
-        end.strip
+        title = markdown_text(node)
         return title unless title.empty?
       end
       nil
+    end
+
+    private def markdown_description(document : Markd::Node) : String?
+      node = document.first_child?
+      while node
+        if node.type == Markd::Node::Type::Paragraph
+          description = markdown_text(node)
+          return description unless description.empty?
+        end
+        node = node.next?
+      end
+      nil
+    end
+
+    private def markdown_text(node : Markd::Node) : String
+      String.build do |io|
+        walker = node.walker
+        while event = walker.next
+          child, entering = event
+          next unless entering
+          case child.type
+          when Markd::Node::Type::Text, Markd::Node::Type::Code
+            io << child.text
+          when Markd::Node::Type::SoftBreak, Markd::Node::Type::LineBreak
+            io << ' '
+          end
+        end
+      end.strip
     end
 
     private def markdown_code(value : String) : String

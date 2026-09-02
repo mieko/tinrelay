@@ -46,10 +46,11 @@ read-only and name its absolute path when the service starts:
 TINRELAY_ART_MANIFEST=/run/tinrelay/art.json tinrelayd serve ...
 ```
 
-The file is a flat map from a stable meet-page name to one root-relative CSS URL:
+The file is a flat map from a stable public-page name to one root-relative CSS URL:
 
 ```json
 {
+  "home": "/tinrelay-art/home.71ae.css",
   "meet": "/tinrelay-art/meet.a81c.css",
   "first-light": "/tinrelay-art/first-light.918e.css"
 }
