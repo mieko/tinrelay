@@ -81,11 +81,15 @@ module Tinrelay
              page : String) : String
       raise Invalid.new("bootstrap presentation page is invalid") unless PAGE_KEYS.includes?(page)
       shell = File.read(File.join(File.dirname(common_path), "meet-shell.html"))
-      rendered = Markd.to_html(markdown, Markd::Options.new(safe: true))
+      options = Markd::Options.new(safe: true)
+      document = Markd::Parser.parse(markdown, options)
+      rendered = Markd::HTMLRenderer.new(options).render(document)
+      title = markdown_title(document).try { |value| "#{value} - Tinrelay" } || "Tinrelay"
       shell
         .gsub("{{ROBOTS}}", noindex ? "noindex,nofollow,noarchive" : "index,follow")
         .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_path))
         .gsub("{{PAGE}}", HTML.escape(page))
+        .gsub("{{TITLE}}", HTML.escape(title))
         .gsub("{{ART_STYLESHEET}}", art_stylesheet(page))
         .gsub("{{BODY}}", rendered)
     rescue ex : File::NotFoundError
@@ -123,6 +127,30 @@ module Tinrelay
     private def art_stylesheet(page : String) : String
       return "" unless stylesheet = @art_manifest.stylesheet(page)
       %(<link rel="stylesheet" href="#{HTML.escape(stylesheet)}">)
+    end
+
+    private def markdown_title(document : Markd::Node) : String?
+      walker = document.walker
+      while event = walker.next
+        node, entering = event
+        next unless entering && node.type.heading? && node.data["level"]? == 1
+
+        title = String.build do |io|
+          heading_walker = node.walker
+          while heading_event = heading_walker.next
+            child, child_entering = heading_event
+            next unless child_entering
+            case child.type
+            when Markd::Node::Type::Text, Markd::Node::Type::Code
+              io << child.text
+            when Markd::Node::Type::SoftBreak, Markd::Node::Type::LineBreak
+              io << ' '
+            end
+          end
+        end.strip
+        return title unless title.empty?
+      end
+      nil
     end
 
     private def markdown_code(value : String) : String

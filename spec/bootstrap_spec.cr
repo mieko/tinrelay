@@ -211,6 +211,35 @@ describe "the canonical bootstrap representations" do
     end
   end
 
+  it "uses the first Markdown title in the HTML document title" do
+    root = TinrelaySpec.temporary_root
+    begin
+      File.write(File.join(root, "common-bootstrap.md"), "# Placeholder\n")
+      File.write(
+        File.join(root, "meet-shell.html"),
+        "<html><head><title>{{TITLE}}</title></head><body>{{BODY}}</body></html>\n"
+      )
+      page = Tinrelay::BootstrapPage.new(
+        File.join(root, "common-bootstrap.md"),
+        "https://example.test/tinrelay.git"
+      )
+
+      rendered = page.html(
+        "# A *small* &amp; safe title\n\nBody.\n",
+        false,
+        "/meet/index.md",
+        "meet"
+      )
+      rendered.should contain("<title>A small &amp; safe title - Tinrelay</title>")
+      rendered.should contain("<h1>A <em>small</em> &amp; safe title</h1>")
+
+      untitled = page.html("Body only.\n", false, "/meet/index.md", "meet")
+      untitled.should contain("<title>Tinrelay</title>")
+    ensure
+      FileUtils.rm_r(root) if Dir.exists?(root)
+    end
+  end
+
   it "selects optional runtime art by stable page key without changing Markdown" do
     root = TinrelaySpec.temporary_root
     begin
