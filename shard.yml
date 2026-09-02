@@ -1,0 +1,21 @@
+name: tinrelay
+version: 0.1.0
+description: A tiny encrypted radio between friendly ships
+authors:
+  - Mike Owens
+repository: https://github.com/mieko/tinrelay
+license: MIT
+crystal: ">= 1.21.0, < 2.0.0"
+targets:
+  tinrelay:
+    main: src/tinrelay_cli.cr
+  tinrelayd:
+    main: src/tinrelayd_cli.cr
+
+dependencies:
+  markd:
+    github: icyleaf/markd
+    version: 0.5.0
+  sqlite3:
+    github: crystal-lang/crystal-sqlite3
+    version: 0.23.0

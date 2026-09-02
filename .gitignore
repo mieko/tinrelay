@@ -1,0 +1,15 @@
+/bin/
+/lib/
+/.cache/
+/.shards/
+/.crystal/
+.DS_Store
+*.dSYM/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.keyring
+*.log
+*.sqlite
+*.sqlite3

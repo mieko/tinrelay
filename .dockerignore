@@ -1,0 +1,15 @@
+*
+!.dockerignore
+!Dockerfile
+!shard.yml
+!shard.lock
+!src/
+!src/**
+!sql/
+!sql/**
+!templates/
+!templates/**
+templates/assets/tinrelay/**
+!templates/assets/tinrelay/plain.css
+!container/
+!container/tinrelayd-entrypoint

@@ -1,0 +1,152 @@
+require "./spec_helper"
+
+describe "relationship closure and finite radio retune" do
+  it "retains only acknowledged peers and restores a missed prior contact explicitly through a hail" do
+    TinrelaySpec.with_server do |root, token, origin, api|
+      passphrase = "finite retune test passphrase"
+      alpha = Tinrelay::Client.bootstrap(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      )
+      spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
+
+      peers = {} of String => Tinrelay::Client
+      %w(beta gamma delta).each do |ship|
+        peer = TinrelaySpec.admit_contact(
+          root, origin, api, ship, passphrase,
+          alpha.create_invitation("steward", 3600)
+        )
+        peer.send("steward@alpha", "establish #{ship}")
+        event = alpha.radio_wait(spool, hold_seconds: 0)
+        spool.routed(event.local_id)
+        peers[ship] = peer
+      end
+
+      alpha.rotate_owner.should eq(2)
+      alpha.close_contact("beta").should eq(2)
+      alpha.keyring.data.contact!("beta").blocked?.should be_true
+      expect_raises(Tinrelay::Unauthorized, /blocked/) do
+        alpha.send("steward@beta", "must not leave")
+      end
+
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'beta'",
+        as: String
+      ).should eq("transitioning")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM relationship_transitions WHERE owner_ship = 'alpha'"
+      ).as(Int64).should eq(2)
+
+      # A newly submitted old-generation transmission is accepted opaquely but
+      # cannot become relay payload once the positive relationship is closing.
+      discarded = peers["beta"].send("steward@alpha", "old generation")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", discarded.transmission_id
+      ).as(Int64).should eq(0)
+
+      # Gamma returns during the finite window. Its poll receives the public,
+      # owner/prior-radio-authenticated chain and acknowledges the transition
+      # before the next ordinary transmission is surfaced.
+      gamma_spool = Tinrelay::Spool.new(File.join(root, "gamma-inbox"))
+      gamma_events = Channel(Tinrelay::RadioEvent).new
+      spawn do
+        gamma_events.send(peers["gamma"].radio_wait(gamma_spool, hold_seconds: 1))
+      end
+      TinrelaySpec.eventually do
+        api.database.db.query_one(
+          "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'gamma'",
+          as: String
+        ) == "active"
+      end
+      alpha.send("steward@gamma", "retune checkpoint")
+      gamma_event = TinrelaySpec.receive(gamma_events)
+      gamma_event.kind.should eq("transmission")
+      gamma_spool.routed(gamma_event.local_id)
+      peers["gamma"].keyring.data.contact!("alpha")
+        .radio_certificate.generation.should eq(2)
+      peers["gamma"].keyring.data.contact!("alpha")
+        .owner_generation.should eq(2)
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'gamma'",
+        as: String
+      ).should eq("active")
+
+      deadline = Time.utc.to_unix + Tinrelay::FALLBACK_LIFETIME_SECONDS + 1
+      api.store.cleanup(deadline)
+      api.database.db.query_one?(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'beta'",
+        as: String
+      ).should be_nil
+      api.database.db.query_one?(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'delta'",
+        as: String
+      ).should be_nil
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'gamma'",
+        as: String
+      ).should eq("active")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM relationship_transitions"
+      ).as(Int64).should eq(0)
+
+      # The public certificate is not withheld. Alpha can hail the missed peer;
+      # Delta verifies the continuity chain and sees it as a known prior contact,
+      # but only Delta's explicit allow recreates positive relay state.
+      hail = alpha.hail(
+        "delta", Tinrelay::HailOutbox.new(File.join(root, "alpha-hail-outbox"))
+      )
+      delta_spool = Tinrelay::Spool.new(File.join(root, "delta-inbox"))
+      delta_event = peers["delta"].radio_wait(
+        delta_spool, hold_seconds: 0
+      )
+      delta_event.kind.should eq("hail")
+      delta_event.wrapper.should contain("Local contact state: known_prior_contact")
+      peers["delta"].keyring.data.contact!("alpha")
+        .radio_certificate.generation.should eq(2)
+      api.database.db.query_one?(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'delta'",
+        as: String
+      ).should be_nil
+
+      relay_hail_id = delta_spool.get(delta_event.local_id)
+        .as(Tinrelay::HailSpoolRecord).hail_id
+      relay_hail_id.should eq(hail.hail_id)
+      peers["delta"].allow_contact(
+        "alpha", relay_hail_id,
+        Tinrelay::HailOutbox.new(File.join(root, "delta-hail-outbox"))
+      )
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'delta'",
+        as: String
+      ).should eq("active")
+
+      # Consume Delta's bodyless return hail before proving the blocked path.
+      alpha_return = alpha.radio_wait(spool, hold_seconds: 0)
+      alpha_return.kind.should eq("hail")
+      spool.routed(alpha_return.local_id)
+
+      # A deliberately blocked prior ship's identical hail is consumed without
+      # plaintext, spool evidence, or radio attention. The next valid item moves.
+      blocked_hail = peers["beta"].hail(
+        "alpha", Tinrelay::HailOutbox.new(File.join(root, "beta-hail-outbox"))
+      )
+      valid = peers["gamma"].send("steward@alpha", "still connected")
+      delivered = alpha.radio_wait(spool, hold_seconds: 0)
+      delivered.kind.should eq("transmission")
+      spool.get(delivered.local_id).as(Tinrelay::TransmissionSpoolRecord)
+        .relay_transmission_id.should eq(valid.transmission_id)
+      spool.list.any? do |record|
+        record.is_a?(Tinrelay::HailSpoolRecord) &&
+          record.hail_id == blocked_hail.hail_id
+      end.should be_false
+      api.database.db.query_one(
+        "SELECT collected_at IS NOT NULL FROM hails WHERE id = ?",
+        blocked_hail.hail_id, as: Int64
+      ).should eq(1_i64)
+
+      # Old receive private material exists only for the finite fallback window.
+      alpha.keyring.data.radios.map(&.generation).should contain(1)
+      alpha.keyring.prune_retired_radios!(deadline).should be_true
+      alpha.keyring.data.radios.map(&.generation).should eq([2])
+    end
+  end
+end

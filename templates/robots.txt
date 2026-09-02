@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /meet$
+Allow: /meet/index.md$
+Disallow: /meet/
+Disallow: /v1/

@@ -1,0 +1,101 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+suffix=$$
+image="tinrelay-container-check:$suffix"
+volume="tinrelay-container-check-$suffix"
+container="tinrelay-container-check-$suffix"
+build_label=${TINRELAY_CONTAINER_BUILD_LABEL:-container-check}
+repository=${TINRELAY_CONTAINER_SOURCE_REPOSITORY:-https://example.invalid/tinrelay.git}
+
+cleanup() {
+  docker container rm --force "$container" >/dev/null 2>&1 || true
+  docker volume rm "$volume" >/dev/null 2>&1 || true
+  docker image rm "$image" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT HUP INT TERM
+
+docker buildx build \
+  --platform linux/amd64 \
+  --build-arg "TINRELAY_BUILD_LABEL=$build_label" \
+  --build-arg "TINRELAY_SOURCE_REPOSITORY=$repository" \
+  --load \
+  --tag "$image" \
+  "$root"
+
+docker volume create "$volume" >/dev/null
+docker run --rm \
+  --platform linux/amd64 \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  "$image" prepare
+
+owner=$(docker run --rm \
+  --platform linux/amd64 \
+  --entrypoint /bin/busybox \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  "$image" stat -c '%u:%g:%a' /var/lib/tinrelay)
+[ "$owner" = "10001:10001:700" ]
+
+version=$(docker run --rm \
+  --platform linux/amd64 \
+  --entrypoint /usr/local/bin/tinrelayd \
+  "$image" version)
+case "$version" in
+  "tinrelayd "*" protocol "*" build "*) ;;
+  *) exit 1 ;;
+esac
+[ "${version##* build }" = "$build_label" ]
+
+docker run --detach \
+  --name "$container" \
+  --platform linux/amd64 \
+  --user 10001:10001 \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  --publish 127.0.0.1::8787 \
+  "$image" >/dev/null
+
+port=$(docker port "$container" 8787/tcp | sed -n 's/.*://p')
+[ -n "$port" ]
+attempt=0
+until curl --fail --silent --show-error "http://127.0.0.1:$port/readyz" \
+  | grep -Fq '"status":"ready"'; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 60 ]; then
+    docker logs "$container" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+[ "$(docker inspect "$container" --format '{{.Config.User}}')" = "10001:10001" ]
+[ "$(docker inspect "$container" --format '{{.HostConfig.ReadonlyRootfs}}')" = "true" ]
+[ "$(docker inspect "$container" --format '{{json .HostConfig.CapDrop}}')" = '["ALL"]' ]
+[ "$(docker inspect "$container" --format '{{json .HostConfig.SecurityOpt}}')" = '["no-new-privileges"]' ]
+
+docker stop --time 10 "$container" >/dev/null
+[ "$(docker inspect "$container" --format '{{.State.ExitCode}}')" = 0 ]
+
+database=$(docker run --rm \
+  --platform linux/amd64 \
+  --entrypoint /bin/busybox \
+  --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  "$image" stat -c '%u:%g:%a' /var/lib/tinrelay/tinrelay.db)
+[ "$database" = "10001:10001:600" ]
+
+docker run --rm --platform linux/amd64 --entrypoint /bin/busybox "$image" sh -eu -c '
+  test -x /usr/local/bin/tinrelayd
+  test -x /usr/local/bin/tinrelayd-entrypoint
+  test -f /opt/tinrelay/templates/common-bootstrap.md
+  test -f /opt/tinrelay/templates/assets/tinrelay/plain.css
+  test ! -e /src
+  test ! -e /spec
+  test ! -e /.git
+  test ! -e /usr/local/bin/tinrelay
+  test ! -e /usr/share/tinrelay/runtime-libraries.txt
+'
+
+printf '%s\n' 'Tinrelay linux/amd64 container contract is ready.'

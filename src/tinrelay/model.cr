@@ -1,0 +1,679 @@
+module Tinrelay
+  module Names
+    SHIP  = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
+    LABEL = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
+
+    def self.ship!(value : String) : String
+      raise Invalid.new("invalid ship name") unless SHIP.matches?(value)
+      value
+    end
+
+    def self.label!(value : String) : String
+      raise Invalid.new("invalid local attention label") unless LABEL.matches?(value)
+      value
+    end
+
+    def self.coordinate!(value : String) : Tuple(String, String)
+      parts = value.split('@')
+      raise Invalid.new("coordinate must be local-label@ship") unless parts.size == 2
+      {label!(parts[0]), ship!(parts[1])}
+    end
+  end
+
+  class ShipRadioCertificate
+    include JSON::Serializable
+
+    property ship : String
+    property generation : Int32
+    property signing_public_key : String
+    property encryption_public_key : String
+    property issued_at : Int64
+    property owner_generation : Int32
+    property owner_signature : String
+
+    def initialize(@ship, @generation, @signing_public_key,
+                   @encryption_public_key, @issued_at, @owner_generation,
+                   @owner_signature = "")
+    end
+
+    def unsigned_bytes : Bytes
+      Canonical.fields(
+        "tinrelay-ship-radio-certificate-v1", ship, generation.to_s,
+        signing_public_key, encryption_public_key, issued_at.to_s,
+        owner_generation.to_s
+      )
+    end
+
+    # This is the complete public certificate identity embedded in operations
+    # that must bind the owner's authorization, independently of JSON ordering.
+    def canonical_bytes : Bytes
+      Canonical.fields(
+        "tinrelay-ship-radio-certificate-fields-v1", ship,
+        generation.to_s, signing_public_key, encryption_public_key,
+        issued_at.to_s, owner_generation.to_s, owner_signature
+      )
+    end
+  end
+
+  class OwnerKeyLink
+    include JSON::Serializable
+
+    property generation : Int32
+    property public_key : String
+    property authorization_signature : String?
+
+    def initialize(@generation, @public_key, @authorization_signature = nil)
+    end
+  end
+
+  # SignedRelayEnvelope authenticates the sealed radio emission. The repeater and
+  # recipient can reject changed visible routing facts or ciphertext without opening it.
+  class SignedRelayEnvelope
+    include JSON::Serializable
+
+    property object_version : Int32
+    property protocol : Int32
+    property transmission_id : String
+    property thread_id : String
+    property reply_to : String?
+    property sender_ship : String
+    property sender_signing_generation : Int32
+    property recipient_ship : String
+    property recipient_encryption_generation : Int32
+    property created_at : Int64
+    property expires_at : Int64
+    property ciphertext : String
+    property invitation_id : String?
+    property pairing_proof : String?
+    property signature : String
+
+    def initialize(@transmission_id, @thread_id, @sender_ship,
+                   @sender_signing_generation, @recipient_ship,
+                   @recipient_encryption_generation, @created_at, @expires_at,
+                   @ciphertext, @reply_to = nil, @invitation_id = nil,
+                   @pairing_proof = nil, @signature = "",
+                   @protocol = PROTOCOL, @object_version = 1)
+    end
+
+    def signing_bytes : Bytes
+      Canonical.fields(
+        "tinrelay-signed-relay-envelope-v1", object_version.to_s,
+        protocol.to_s, transmission_id, thread_id, reply_to || "", sender_ship,
+        sender_signing_generation.to_s, recipient_ship,
+        recipient_encryption_generation.to_s, created_at.to_s,
+        expires_at.to_s, ciphertext, invitation_id || "", pairing_proof || ""
+      )
+    end
+
+    def submission_evidence
+      {
+        state:           "accepted",
+        sender_ship:     sender_ship,
+        recipient_ship:  recipient_ship,
+        transmission_id: transmission_id,
+        thread_id:       thread_id,
+      }
+    end
+  end
+
+  # SignedTransmission preserves ship-level provenance of the exact words and
+  # private context independently of relay retention and private receive-key lifetime.
+  class SignedTransmission
+    include JSON::Serializable
+
+    property object_version : Int32
+    property protocol : Int32
+    property transmission_id : String
+    property thread_id : String
+    property reply_to : String?
+    property sender_ship : String
+    property sender_signing_generation : Int32
+    property recipient_ship : String
+    property recipient_encryption_generation : Int32
+    property created_at : Int64
+    property to_label : String
+    property from_label : String?
+    property body : String
+    property signature : String
+
+    def initialize(@transmission_id, @thread_id, @sender_ship,
+                   @sender_signing_generation, @recipient_ship,
+                   @recipient_encryption_generation, @created_at, @to_label,
+                   @body, @reply_to = nil, @from_label = nil,
+                   @signature = "", @protocol = PROTOCOL,
+                   @object_version = 1)
+    end
+
+    def signing_bytes : Bytes
+      Canonical.fields(
+        "tinrelay-signed-transmission-v1", object_version.to_s,
+        protocol.to_s, transmission_id, thread_id, reply_to || "", sender_ship,
+        sender_signing_generation.to_s, recipient_ship,
+        recipient_encryption_generation.to_s, created_at.to_s, to_label,
+        from_label || "", body
+      )
+    end
+  end
+
+  class ContactInvitation
+    include JSON::Serializable
+
+    property kind : String
+    property protocol : Int32
+    property server : String
+    property invitation_id : String
+    property relationship_admission_secret : String
+    property peer_pairing_secret : String
+    property expires_at : Int64
+    property recipient_ship : String
+    property recipient_label : String
+    property ship_owner_generation : Int32
+    property ship_owner_public_key : String
+    property radio_certificate : ShipRadioCertificate
+
+    def initialize(@server, @invitation_id,
+                   @relationship_admission_secret, @peer_pairing_secret,
+                   @expires_at, @recipient_ship, @recipient_label,
+                   @ship_owner_generation, @ship_owner_public_key,
+                   @radio_certificate, @protocol = PROTOCOL,
+                   @kind = "contact_invitation")
+    end
+
+    def coordinate : String
+      "#{recipient_label}@#{recipient_ship}"
+    end
+
+    def radio_fingerprint : String
+      Crypto.fingerprint(Crypto.unb64(radio_certificate.encryption_public_key))
+    end
+  end
+
+  class ShipAdmission
+    include JSON::Serializable
+
+    property kind : String
+    property protocol : Int32
+    property server : String
+    property admission_id : String
+    property ship : String
+    property ship_claim_admission_secret : String
+    property expires_at : Int64
+
+    def initialize(@server, @admission_id, @ship,
+                   @ship_claim_admission_secret,
+                   @expires_at, @protocol = PROTOCOL,
+                   @kind = "ship_admission")
+    end
+  end
+
+  class RadioAuth
+    include JSON::Serializable
+
+    property ship : String
+    property radio_generation : Int32
+    property timestamp : Int64
+    property signature : String
+
+    def initialize(@ship, @radio_generation, @timestamp, @signature = "")
+    end
+
+    def signing_bytes(action : String, payload : Bytes) : Bytes
+      Canonical.fields(
+        "tinrelay-radio-action-v1", action, ship,
+        radio_generation.to_s, timestamp.to_s,
+        Digest::SHA256.hexdigest(payload)
+      )
+    end
+  end
+
+  class OwnerAuth
+    include JSON::Serializable
+
+    property ship : String
+    property owner_generation : Int32
+    property admin_generation : Int64
+    property timestamp : Int64
+    property signature : String
+
+    def initialize(@ship, @owner_generation, @admin_generation,
+                   @timestamp, @signature = "")
+    end
+
+    def signing_bytes(action : String, payload : Bytes) : Bytes
+      Canonical.fields(
+        "tinrelay-owner-action-v1", action, ship,
+        owner_generation.to_s, admin_generation.to_s, timestamp.to_s,
+        Digest::SHA256.hexdigest(payload)
+      )
+    end
+  end
+
+  class ShipClaim
+    include JSON::Serializable
+
+    property ship : String
+    property owner_public_key : String
+    property radio_certificate : ShipRadioCertificate
+    property bootstrap_token : String?
+    property ship_claim_admission_id : String?
+    property ship_claim_admission_secret : String?
+
+    def initialize(@ship, @owner_public_key, @radio_certificate,
+                   @bootstrap_token = nil, @ship_claim_admission_id = nil,
+                   @ship_claim_admission_secret = nil)
+    end
+  end
+
+  class InvitationCreate
+    include JSON::Serializable
+
+    property id : String
+    property relationship_admission_secret_hash : String
+    property expires_at : Int64
+    property auth : RadioAuth
+
+    def initialize(@id, @relationship_admission_secret_hash, @expires_at, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(id, relationship_admission_secret_hash, expires_at.to_s)
+    end
+  end
+
+  class InvitationRevoke
+    include JSON::Serializable
+
+    property id : String
+    property auth : RadioAuth
+
+    def initialize(@id, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(id)
+    end
+  end
+
+  class InvitationAccept
+    include JSON::Serializable
+
+    property id : String
+    property relationship_admission_secret : String
+    property auth : RadioAuth
+
+    def initialize(@id, @relationship_admission_secret, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(id, relationship_admission_secret)
+    end
+  end
+
+  class Hail
+    include JSON::Serializable
+
+    property protocol : Int32
+    property hail_id : String
+    property sender_ship : String
+    property sender_signing_generation : Int32
+    property recipient_ship : String
+    property created_at : Int64
+    property expires_at : Int64
+    property signature : String
+
+    def initialize(@hail_id, @sender_ship, @sender_signing_generation,
+                   @recipient_ship, @created_at, @expires_at,
+                   @signature = "", @protocol = PROTOCOL)
+    end
+
+    def signing_bytes : Bytes
+      Canonical.fields(
+        "tinrelay-hail-v1", protocol.to_s, hail_id, sender_ship,
+        sender_signing_generation.to_s, recipient_ship, created_at.to_s,
+        expires_at.to_s
+      )
+    end
+
+    def submission_evidence
+      {
+        state:          "accepted",
+        sender_ship:    sender_ship,
+        recipient_ship: recipient_ship,
+        hail_id:        hail_id,
+      }
+    end
+  end
+
+  class HailDelivery
+    include JSON::Serializable
+
+    property hail : Hail
+    property sender_owner_public_key : String
+    property sender_radio_certificate : ShipRadioCertificate
+    property owner_chain : Array(OwnerKeyLink)
+    property radio_chain : Array(RadioCertificateLink)
+
+    def initialize(@hail, @sender_owner_public_key,
+                   @sender_radio_certificate,
+                   @owner_chain = [] of OwnerKeyLink,
+                   @radio_chain = [] of RadioCertificateLink)
+    end
+  end
+
+  class RadioCertificateLink
+    include JSON::Serializable
+
+    property certificate : ShipRadioCertificate
+    property prior_radio_signature : String?
+
+    def initialize(@certificate, @prior_radio_signature = nil)
+    end
+  end
+
+  class ContactUpdate
+    include JSON::Serializable
+
+    property ship : String
+    property to_generation : Int32
+    property owner_chain : Array(OwnerKeyLink)
+    property chain : Array(RadioCertificateLink)
+
+    def initialize(@ship, @to_generation, @owner_chain, @chain)
+    end
+  end
+
+  class HailAck
+    include JSON::Serializable
+
+    property hail_id : String
+    property auth : RadioAuth
+
+    def initialize(@hail_id, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(hail_id)
+    end
+  end
+
+  class ShipInspection
+    include JSON::Serializable
+
+    property target_ship : String
+    property auth : RadioAuth
+
+    def initialize(@target_ship, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(target_ship)
+    end
+  end
+
+  class RadioWaitRequest
+    include JSON::Serializable
+
+    property hold_seconds : Int32
+    property known_contact_generations : Hash(String, Int32)
+    property auth : RadioAuth
+
+    def initialize(@hold_seconds, @auth,
+                   @known_contact_generations = {} of String => Int32)
+    end
+
+    def payload : Bytes
+      Canonical.fields(
+        hold_seconds.to_s,
+        known_contact_generations.keys.sort.map do |ship|
+          "#{ship}:#{known_contact_generations[ship]}"
+        end.join(",")
+      )
+    end
+  end
+
+  class TransmissionAck
+    include JSON::Serializable
+
+    property transmission_id : String
+    property auth : RadioAuth
+
+    def initialize(@transmission_id, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(transmission_id)
+    end
+  end
+
+  class RelationshipClose
+    include JSON::Serializable
+
+    property peer_ship : String
+    property retained_ships : Array(String)
+    property certificate : ShipRadioCertificate
+    property prior_radio_signature : String
+    property auth : OwnerAuth
+
+    def initialize(@peer_ship, @retained_ships, @certificate,
+                   @prior_radio_signature, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(
+        peer_ship, retained_ships.sort.join(","),
+        String.new(certificate.canonical_bytes),
+        prior_radio_signature
+      )
+    end
+  end
+
+  class RetuneAck
+    include JSON::Serializable
+
+    property owner_ship : String
+    property to_generation : Int32
+    property auth : RadioAuth
+
+    def initialize(@owner_ship, @to_generation, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(owner_ship, to_generation.to_s)
+    end
+  end
+
+  class RelationshipAllow
+    include JSON::Serializable
+
+    property peer_ship : String
+    property hail_id : String
+    property auth : RadioAuth
+
+    def initialize(@peer_ship, @hail_id, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(peer_ship, hail_id)
+    end
+  end
+
+  class OwnerRotation
+    include JSON::Serializable
+
+    property new_generation : Int32
+    property new_public_key : String
+    property prior_signature : String
+    property auth : OwnerAuth
+
+    def initialize(@new_generation, @new_public_key, @prior_signature,
+                   @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(new_generation.to_s, new_public_key, prior_signature)
+    end
+  end
+
+  class ShipChange
+    include JSON::Serializable
+
+    property operation : String
+    property auth : OwnerAuth
+
+    def initialize(@operation, @auth)
+    end
+
+    def payload : Bytes
+      Canonical.fields(operation)
+    end
+  end
+
+  class RadioWaitResponse
+    include JSON::Serializable
+
+    property envelope : SignedRelayEnvelope?
+    property hail : HailDelivery?
+    property contact_updates : Array(ContactUpdate)
+
+    def initialize(@envelope = nil, @hail = nil,
+                   @contact_updates = [] of ContactUpdate)
+    end
+
+    def empty? : Bool
+      !envelope && !hail && contact_updates.empty?
+    end
+  end
+
+  abstract class SpoolRecord
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    use_json_discriminator "kind", {
+      transmission:          TransmissionSpoolRecord,
+      rejected_transmission: RejectedTransmissionSpoolRecord,
+      hail:                  HailSpoolRecord,
+    }
+
+    getter format : Int32
+    getter kind : String
+    getter local_id : String
+    getter received_at : Int64
+    property routed_at : Int64?
+    property handled_at : Int64?
+
+    protected def initialize(@kind, @local_id, @received_at,
+                             @routed_at = nil, @handled_at = nil,
+                             @format = 1)
+    end
+  end
+
+  class TransmissionSpoolRecord < SpoolRecord
+    getter relay_transmission_id : String
+    getter thread_id : String
+    getter reply_to : String?
+    getter sender_ship : String
+    getter recipient_ship : String
+    getter to_label : String
+    getter from_label : String?
+    getter signed_transmission : SignedTransmission
+    getter sender_radio_certificate : ShipRadioCertificate
+    getter sender_owner_chain : Array(OwnerKeyLink)
+
+    def initialize(local_id : String, received_at : Int64,
+                   @relay_transmission_id : String, @thread_id : String,
+                   @reply_to : String?, @sender_ship : String,
+                   @recipient_ship : String, @to_label : String,
+                   @from_label : String?,
+                   @signed_transmission : SignedTransmission,
+                   @sender_radio_certificate : ShipRadioCertificate,
+                   @sender_owner_chain : Array(OwnerKeyLink),
+                   routed_at : Int64? = nil, handled_at : Int64? = nil,
+                   format : Int32 = 1)
+      super("transmission", local_id, received_at, routed_at, handled_at, format)
+    end
+  end
+
+  class RejectedTransmissionSpoolRecord < SpoolRecord
+    getter relay_transmission_id : String
+    getter rejection_reason : String
+
+    def initialize(local_id : String, received_at : Int64,
+                   @relay_transmission_id : String, @rejection_reason : String,
+                   routed_at : Int64? = nil, handled_at : Int64? = nil,
+                   format : Int32 = 1)
+      super("rejected_transmission", local_id, received_at, routed_at, handled_at, format)
+    end
+  end
+
+  class HailSpoolRecord < SpoolRecord
+    getter hail_id : String
+    getter sender_ship : String
+    getter recipient_ship : String
+    getter hail_sender_fingerprint : String
+    getter hail_contact_state : String
+
+    def initialize(local_id : String, received_at : Int64,
+                   @hail_id : String, @sender_ship : String,
+                   @recipient_ship : String,
+                   @hail_sender_fingerprint : String,
+                   @hail_contact_state : String,
+                   routed_at : Int64? = nil, handled_at : Int64? = nil,
+                   format : Int32 = 1)
+      super("hail", local_id, received_at, routed_at, handled_at, format)
+    end
+  end
+
+  class RadioEvent
+    include JSON::Serializable
+
+    property contract : String
+    property kind : String
+    property local_id : String
+    property wrapper : String
+    property name : String?
+
+    def initialize(@kind, @local_id, @wrapper, @name = nil,
+                   @contract = "tinrelay-radio-wait-v1")
+    end
+  end
+
+  module Pairing
+    def self.identity_bytes(invitation_id : String, ship : String,
+                            owner_generation : Int32,
+                            owner_public_key : String,
+                            certificate : ShipRadioCertificate) : Bytes
+      Canonical.fields(
+        "tinrelay-pairing-v1", invitation_id, ship,
+        owner_generation.to_s, owner_public_key,
+        String.new(certificate.canonical_bytes)
+      )
+    end
+  end
+
+  class ProtocolMismatchEvidence
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter error : String
+    getter client_protocol : Int32
+    getter supported_min : Int32
+    getter supported_max : Int32
+    getter relation : String
+
+    def initialize(@error, @client_protocol, @supported_min,
+                   @supported_max, @relation)
+    end
+  end
+
+  module Canonical
+    def self.fields(*values : String) : Bytes
+      io = IO::Memory.new
+      values.each do |value|
+        bytes = value.to_slice
+        io.write_bytes(bytes.size.to_u32, IO::ByteFormat::BigEndian)
+        io.write(bytes)
+      end
+      io.to_slice
+    end
+  end
+end

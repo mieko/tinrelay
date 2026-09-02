@@ -1,0 +1,188 @@
+require "./spec_helper"
+
+class EnvelopeCaptureRemote < Tinrelay::Remote
+  getter captured : Tinrelay::SignedRelayEnvelope?
+
+  def post(path : String, body : String) : String
+    if path == "/v1/transmissions"
+      @captured = Tinrelay::SignedRelayEnvelope.from_json(body)
+      %({"state":"accepted"})
+    else
+      super
+    end
+  end
+end
+
+describe "direct radio handoff" do
+  it "accepts at durable destination spool acknowledgement without waiting for pointer routing" do
+    TinrelaySpec.with_server do |root, token, origin, api|
+      passphrase = "direct handoff test passphrase"
+      alpha = Tinrelay::Client.bootstrap(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, api, "beta", passphrase,
+        alpha.create_invitation("steward", 3600)
+      )
+
+      capture = EnvelopeCaptureRemote.new(origin)
+      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer.send("steward@alpha", "direct payload", "caller")
+      envelope = capture.captured.not_nil!
+
+      wait_request = TinrelaySpec.radio_wait_request(alpha, 5)
+      wait_result = Channel(String).new(1)
+      spawn { wait_result.send(alpha.remote.post("/v1/radio/wait", wait_request.to_json)) }
+      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
+
+      sender_result = Channel({String, Time::Instant}).new(1)
+      spawn do
+        result = beta.remote.post("/v1/transmissions", envelope.to_json)
+        sender_result.send({result, Time.instant})
+      end
+      offered = Tinrelay::RadioWaitResponse.from_json(
+        TinrelaySpec.receive(wait_result)
+      ).envelope.not_nil!
+
+      # A parked wait receives the envelope while SQLite still owns no transmission row.
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", envelope.transmission_id
+      ).as(Int64).should eq(0)
+
+      select
+      when sender_result.receive
+        fail "sender was accepted before destination spool acknowledgement"
+      when timeout(50.milliseconds)
+      end
+
+      spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+      radio = alpha.keyring.data.radio!(offered.recipient_encryption_generation)
+      plaintext = Tinrelay::Crypto.open(
+        Tinrelay::Crypto.unb64(offered.ciphertext),
+        Tinrelay::Crypto.unb64(radio.encryption.public_key),
+        Tinrelay::Crypto.unb64(radio.encryption.secret_key)
+      )
+      local_record = spool.store_transmission(
+        offered, Tinrelay::SignedTransmission.from_json(String.new(plaintext)),
+        beta.keyring.data.radio!(offered.sender_signing_generation).certificate,
+        beta.keyring.data.owner_public_key
+      )
+      spooled_at = Time.instant
+      ack = Tinrelay::TransmissionAck.new(
+        offered.transmission_id,
+        TinrelaySpec.radio_auth(
+          alpha, "transmission.ack", Tinrelay::Canonical.fields(offered.transmission_id)
+        )
+      )
+      alpha.remote.post("/v1/transmissions/ack", ack.to_json)
+
+      accepted, accepted_at = TinrelaySpec.receive(sender_result)
+      JSON.parse(accepted)["state"].as_s.should eq("accepted")
+      (accepted_at - spooled_at).should be < 2.seconds
+      spool.next_unrouted.not_nil!.local_id.should eq(local_record.local_id)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", envelope.transmission_id
+      ).as(Int64).should eq(0)
+
+      # Loss of the first ack response cannot strand the already-durable local pointer.
+      alpha.remote.post("/v1/transmissions/ack", ack.to_json)
+      spool.next_unrouted.not_nil!.local_id.should eq(local_record.local_id)
+    end
+  end
+
+  it "keeps reply threading valid when the direct root has no relay row" do
+    TinrelaySpec.with_server do |root, token, origin, api|
+      passphrase = "direct thread test passphrase"
+      alpha = Tinrelay::Client.bootstrap(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, api, "beta", passphrase,
+        alpha.create_invitation("steward", 3600)
+      )
+      spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+      event = Channel(Tinrelay::RadioEvent).new(1)
+      spawn { event.send(alpha.radio_wait(spool, hold_seconds: 5)) }
+      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
+
+      root_transmission = beta.send("steward@alpha", "direct root", "caller")
+      TinrelaySpec.receive(event).wrapper.should contain("Authenticated sender ship: beta")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", root_transmission.transmission_id
+      ).as(Int64).should eq(0)
+
+      reply = alpha.send(
+        "caller@beta", "reply without relay thread history", "steward",
+        thread_id: root_transmission.thread_id,
+        reply_to: root_transmission.transmission_id
+      )
+      reply.submission_evidence[:state].should eq("accepted")
+      api.database.db.query_one(
+        "SELECT state, thread_id, reply_to FROM transmissions WHERE id = ?",
+        reply.transmission_id, as: {String, String, String?}
+      ).should eq({"pending", root_transmission.thread_id, root_transmission.transmission_id})
+    end
+  end
+
+  it "persists when no wait exists and after an unacknowledged direct offer" do
+    TinrelaySpec.with_server do |root, token, origin, api|
+      passphrase = "fallback test passphrase"
+      alpha = Tinrelay::Client.bootstrap(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, api, "beta", passphrase,
+        alpha.create_invitation("steward", 3600)
+      )
+      capture = EnvelopeCaptureRemote.new(origin)
+      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+
+      composer.send("steward@alpha", "no waiter", "caller")
+      absent = capture.captured.not_nil!
+      JSON.parse(beta.remote.post("/v1/transmissions", absent.to_json))["state"].as_s.should eq("accepted")
+      api.database.db.query_one(
+        "SELECT state, ciphertext IS NOT NULL FROM transmissions WHERE id = ?",
+        absent.transmission_id, as: {String, Int64}
+      ).should eq({"pending", 1_i64})
+      absent_ack = Tinrelay::TransmissionAck.new(
+        absent.transmission_id,
+        TinrelaySpec.radio_auth(
+          alpha, "transmission.ack", Tinrelay::Canonical.fields(absent.transmission_id)
+        )
+      )
+      api.store.acknowledge(absent_ack)
+
+      capture = EnvelopeCaptureRemote.new(origin)
+      composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
+      composer.send("steward@alpha", "waiter vanished", "caller")
+      interrupted = capture.captured.not_nil!
+      wait_request = TinrelaySpec.radio_wait_request(alpha, 5)
+      offered = Channel(String).new(1)
+      spawn { offered.send(alpha.remote.post("/v1/radio/wait", wait_request.to_json)) }
+      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
+      accepted = Channel(String).new(1)
+      spawn { accepted.send(beta.remote.post("/v1/transmissions", interrupted.to_json)) }
+      Tinrelay::RadioWaitResponse.from_json(
+        TinrelaySpec.receive(offered)
+      ).envelope.not_nil!.transmission_id.should eq(interrupted.transmission_id)
+
+      # Simulate a destination that disconnects after receiving but before its spool ack.
+      JSON.parse(TinrelaySpec.receive(accepted))["state"].as_s.should eq("accepted")
+      api.database.db.query_one(
+        "SELECT state, ciphertext IS NOT NULL FROM transmissions WHERE id = ?",
+        interrupted.transmission_id, as: {String, Int64}
+      ).should eq({"pending", 1_i64})
+
+      api.close
+      restarted = Tinrelay::API.new(api.config)
+      begin
+        restarted.database.db.query_one(
+          "SELECT state, ciphertext IS NOT NULL FROM transmissions WHERE id = ?",
+          interrupted.transmission_id, as: {String, Int64}
+        ).should eq({"pending", 1_i64})
+      ensure
+        restarted.close
+      end
+    end
+  end
+end
