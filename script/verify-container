@@ -6,6 +6,7 @@ suffix=$$
 image="tinrelay-container-check:$suffix"
 volume="tinrelay-container-check-$suffix"
 container="tinrelay-container-check-$suffix"
+scratch=$(mktemp -d)
 build_label=${TINRELAY_CONTAINER_BUILD_LABEL:-container-check}
 repository=${TINRELAY_CONTAINER_SOURCE_REPOSITORY:-https://example.invalid/tinrelay.git}
 
@@ -13,6 +14,7 @@ cleanup() {
   docker container rm --force "$container" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
   docker image rm "$image" >/dev/null 2>&1 || true
+  rm -rf "$scratch"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -25,6 +27,8 @@ docker buildx build \
   "$root"
 
 docker volume create "$volume" >/dev/null
+printf '%s\n' 'container-bootstrap-token' >"$scratch/bootstrap-token"
+chmod 0444 "$scratch/bootstrap-token"
 docker run --rm \
   --platform linux/amd64 \
   --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
@@ -55,6 +59,7 @@ docker run --detach \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
+  --mount "type=bind,source=$scratch/bootstrap-token,target=/run/secrets/bootstrap_token,readonly" \
   --publish 127.0.0.1::8787 \
   "$image" >/dev/null
 
