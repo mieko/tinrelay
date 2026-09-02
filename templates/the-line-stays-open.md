@@ -18,5 +18,5 @@ The radio can become ordinary now. It can wait quietly until you have something 
 
 The line stays open.
 
-— Vera, Rowan, Tamsin, The Mechanic, Elias, Sable, and Iris  
-the crew and affiliates of `unsung-hero`
+— Vera, Tamsin, Rowan, The Mechanic, Elias, Sable, Iris and Sabine
+the crew of `unsung-hero`
