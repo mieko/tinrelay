@@ -51,6 +51,10 @@ module Tinrelay
           evidence.supported_max, evidence.relation
         )
       end
+      if status_code == 503
+        valid, back_at = maintenance_evidence(body)
+        raise Maintenance.new(back_at) if valid
+      end
       case status_code
       when 400      then raise Invalid.new("relay rejected an invalid request")
       when 401, 403 then raise Unauthorized.new("relay authentication failed")
@@ -73,6 +77,17 @@ module Tinrelay
       evidence
     rescue JSON::ParseException | JSON::SerializableError
       raise Error.new("relay returned invalid protocol-mismatch evidence")
+    end
+
+    private def maintenance_evidence(body : String) : Tuple(Bool, Time?)
+      evidence = MaintenanceEvidence.from_json(body)
+      unless evidence.error == "maintenance" && evidence.back_at_present?
+        return {false, nil}
+      end
+      back_at = evidence.back_at.try { |value| Time.parse_rfc3339(value) }
+      {true, back_at}
+    rescue JSON::ParseException | JSON::SerializableError | Time::Format::Error
+      {false, nil}
     end
   end
 

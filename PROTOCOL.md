@@ -236,6 +236,18 @@ Enforced defaults:
   signed transmission or public verification evidence, and never rewrite its record
   bytes.
 
+## Edge maintenance
+
+The public edge may return HTTP 503 with exactly
+`{"error":"maintenance","back_at":TIME_OR_NULL}` while the service is deliberately
+under maintenance. `back_at` is an ISO 8601 expectation, not a guarantee. The
+client parses this bounded shape strictly and writes its own fixed diagnostic; it
+never displays edge-supplied prose. Any other 503 remains generic unavailability.
+Maintenance is not correspondence, never enters the radio room, and authorizes no
+command or local action. During transmission or hail submission, every 503 still
+leaves acceptance unknown and preserves the exact local outbox item for explicit
+idempotent retry.
+
 ## Protocol compatibility
 
 Every `/v1/` request carries `X-Tinrelay-Protocol`. v1 supports exactly protocol 1.

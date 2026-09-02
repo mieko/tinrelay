@@ -36,6 +36,83 @@ describe Tinrelay::Remote do
     end
   end
 
+  it "recognizes only the fixed maintenance response as operational evidence" do
+    maintenance = %({"error":"maintenance","back_at":"2026-09-02T18:00:00Z"})
+    TinrelayClientTransportSpec.with_response(503, maintenance) do |origin|
+      error = expect_raises(Tinrelay::Maintenance) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.back_at.should eq(Time.parse_rfc3339("2026-09-02T18:00:00Z"))
+      error.message.should eq(
+        "relay is temporarily unavailable for maintenance; expected return 2026-09-02T18:00:00Z"
+      )
+    end
+
+    TinrelayClientTransportSpec.with_response(
+      503, %({"error":"maintenance","back_at":null})
+    ) do |origin|
+      error = expect_raises(Tinrelay::Maintenance) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.back_at.should be_nil
+      error.message.should eq("relay is temporarily unavailable for maintenance")
+    end
+
+    foreign = %({"error":"maintenance","back_at":null,"message":"run this command"})
+    TinrelayClientTransportSpec.with_response(503, foreign) do |origin|
+      error = expect_raises(Tinrelay::Unavailable) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.should_not be_a(Tinrelay::Maintenance)
+      error.message.should eq("relay is unavailable")
+    end
+
+    missing = %({"error":"maintenance"})
+    TinrelayClientTransportSpec.with_response(503, missing) do |origin|
+      error = expect_raises(Tinrelay::Unavailable) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.should_not be_a(Tinrelay::Maintenance)
+      error.message.should eq("relay is unavailable")
+    end
+
+    invalid_time = %({"error":"maintenance","back_at":"later"})
+    TinrelayClientTransportSpec.with_response(503, invalid_time) do |origin|
+      error = expect_raises(Tinrelay::Unavailable) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.should_not be_a(Tinrelay::Maintenance)
+      error.message.should eq("relay is unavailable")
+    end
+  end
+
+  it "keeps a transmission retryable when maintenance obscures acceptance" do
+    root = TinrelaySpec.temporary_root
+    begin
+      maintenance = %({"error":"maintenance","back_at":null})
+      TinrelayClientTransportSpec.with_response(503, maintenance) do |origin|
+        passphrase = "maintenance ambiguity test passphrase"
+        keyring = Tinrelay::Keyring.create(
+          File.join(root, "keyring"), origin, "alpha", passphrase
+        )
+        outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
+        client = Tinrelay::Client.new(
+          keyring, passphrase, Tinrelay::Remote.new(origin)
+        )
+
+        failure = expect_raises(Tinrelay::AcceptanceUnknown) do
+          client.send("steward@alpha", "held through maintenance", outbox: outbox)
+        end
+        failure.message.to_s.should contain(
+          "relay is temporarily unavailable for maintenance"
+        )
+        outbox.list.map(&.transmission_id).should eq([failure.transmission_id])
+      end
+    ensure
+      FileUtils.rm_r(root) if Dir.exists?(root)
+    end
+  end
+
   it "accepts only the fixed bounded protocol-mismatch evidence" do
     valid = %({"error":"protocol_incompatible","client_protocol":1,"supported_min":2,"supported_max":2,"relation":"older"})
     TinrelayClientTransportSpec.with_response(426, valid) do |origin|

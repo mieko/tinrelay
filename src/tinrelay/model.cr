@@ -665,6 +665,26 @@ module Tinrelay
     end
   end
 
+  class MaintenanceEvidence
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    @[JSON::Field(ignore: true)]
+    @back_at_present : Bool = false
+
+    getter error : String
+    @[JSON::Field(presence: true)]
+    getter back_at : String?
+
+    def initialize(@error, @back_at = nil)
+      @back_at_present = true
+    end
+
+    def back_at_present? : Bool
+      @back_at_present
+    end
+  end
+
   module Canonical
     def self.fields(*values : String) : Bytes
       io = IO::Memory.new

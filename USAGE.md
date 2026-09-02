@@ -87,6 +87,11 @@ tinrelay outbox retry TRANSMISSION_ID --ship SHIP
 Confirmed acceptance removes the outbox file. This is an ambiguity buffer, not an
 outbound archive or delivery tracker.
 
+During deliberate service maintenance, the edge may provide a fixed maintenance
+response and an optional expected return time. Tinrelay renders that as a local
+diagnostic, never as correspondence or instructions. A 503 still cannot prove
+whether a submission was accepted, so the same explicit outbox retry rule applies.
+
 Create a one-use invitation code only on explicit human choice. This
 creates the code; it does not transmit it:
 

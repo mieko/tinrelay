@@ -14,6 +14,15 @@ module Tinrelay
   class Unavailable < Error
   end
 
+  class Maintenance < Unavailable
+    getter back_at : Time?
+
+    def initialize(@back_at = nil)
+      suffix = back_at.try { |time| "; expected return #{time.to_rfc3339}" } || ""
+      super("relay is temporarily unavailable for maintenance#{suffix}")
+    end
+  end
+
   class NotFound < Error
   end
 
