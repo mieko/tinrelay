@@ -6,21 +6,18 @@ so JSON whitespace and key order do not affect signatures.
 
 ## Persistent nouns and copies
 
-The repeater has ten relational nouns:
+The repeater has eight relational nouns:
 
 1. `ships`: first-claim-unique names within this relay, state, and monotonic admin generation;
 2. `ship_owner_keys`: public namespace-administration key history;
 3. `ship_radio_keys`: owner-authorized public signing/encryption key history;
-4. `admissions`: operator-issued one-use hashes for contact-free ship claims;
-5. `invitations`: ship-issued bounded introductions whose spent admission hashes
-   are erased;
-6. `relationships`: current positive ship-to-ship correspondence eligibility;
-7. `relationship_transitions`: one finite retained-peer set during a ship-wide
+4. `relationships`: current positive ship-to-ship correspondence eligibility;
+5. `relationship_transitions`: one finite retained-peer set during a ship-wide
    radio retune;
-8. `hails`: at most one short-lived, signed, content-free request per ship pair;
-9. `transmissions`: durable-fallback routing metadata and one pending ciphertext, then a
+6. `hails`: at most one unallowed short-lived, signed, content-free request per ship pair;
+7. `transmissions`: durable-fallback routing metadata and one pending ciphertext, then a
    content-free cleanup tombstone;
-10. `schema_migrations`: applied forward schema versions.
+8. `schema_migrations`: applied forward schema versions.
 
 There are no endpoint, local-label, crew, nonce-ledger, thread, directory, profile,
 presence, availability, content-index, workflow, or per-ship broadcast tables. A thread root is its
@@ -33,8 +30,8 @@ If a radio wait is parked, the repeater hands the envelope to it in memory. Afte
 client verifies/decrypts, fsyncs one private plaintext JSON file, and acknowledges,
 the repeater returns sender acceptance without writing a transmission row or tombstone.
 Without a waiter, or after an unacknowledged live offer, it writes one ciphertext
-copy to durable fallback. Collection then erases ciphertext, signature, pairing
-payload, and invitation ID and retains a bounded non-content cleanup tombstone. The
+copy to durable fallback. Collection then erases ciphertext and signature and
+retains a bounded non-content cleanup tombstone. The
 local append-only file is the only canonical received body copy. It also retains
 the complete signed plaintext object and public owner/radio evidence needed to
 verify authorship after relay erasure and receive-key retirement. The signed record
@@ -51,24 +48,34 @@ hyphens, at most 63 bytes. In `steward@harbor`, only `harbor` is a repeater rout
 mapping owned by bootstrap and the local harness, never by Tinrelay. The registry
 cannot list or test local labels; unknown labels receive no bounce.
 
-Registry inspection is signed and limited to the requesting ship itself or a peer
-relationship established by a consumed invitation code. Existing ships accept a later
-contact invitation code with their active radio. Unrelated and nonexistent targets have
+Ship names are openly first-claim-unique. A claim supplies the new ship's owner key
+and owner-signed initial radio certificate; the first valid insert wins. Claiming a
+ship creates no contact or relationship. The repeater has no operator approval or
+name-preauthorization role. This small first-flight service accepts that a public
+name may be claimed by someone other than the person who hoped to use it.
+
+Registry inspection is signed and limited to the requesting ship itself or a locally
+pinned peer with a positive relationship. Unrelated and nonexistent targets have
 the same protected-not-found result. There is no unauthenticated exact-name lookup,
 browse/search directory, or separate disclosure ACL table.
 
-Consuming an invitation code creates the positive relationship required for correspondence
-between distinct ships. A correctly signed envelope to an unrelated guessed ship is
+Deliberately allowing a locally received authenticated hail creates the positive
+relationship required for correspondence between distinct ships. A correctly signed
+envelope to an unrelated guessed ship is
 handled opaquely but is never directly offered or durably stored. The one relationship
 exception is a transmission whose authenticated sender and recipient are the same ship.
 It uses that ship's current owner-authorized radio on both ends, follows the ordinary
 direct-or-durable repeater path, and creates no contact or relationship row.
 
-A registered ship may instead send a signed content-free hail by ship name. A hail
+A registered ship may send a signed content-free hail by ship name. A hail
 contains no correspondence body, prose, or private attention label, creates no
 relationship, and gives the sender only generic acceptance. A valid active target
 gets a fixed content-free event; invalid or frozen targets store nothing. Local
 hail-ID deduplication prevents a sender retry from becoming a second notification.
+The recipient may inspect and explicitly allow that exact locally spooled hail,
+pinning its registry-observed owner and radio identity and activating the positive
+relationship. The other ship repeats the hail-and-allow choice before both local
+radios can correspond.
 
 The Ed25519 ship-owner key claims and administers the namespace and authorizes the
 ship radio. It is not a human sponsor credential, cannot decrypt correspondence,
@@ -89,7 +96,7 @@ repeater learns no durable negative edge. Consequential severance closes the pos
 relationship and rotates the ship radio once. Only a finite explicit retained-peer set
 may acknowledge the new owner-authorized certificate during the transition. Peers that
 miss the window fall out of live relationship state and must be explicitly allowed
-again after an ordinary content-free hail or a fresh protected invitation code; receipt of a
+again after an ordinary content-free hail; receipt of a
 public certificate never restores a relationship by itself. Old private receive keys
 survive only through the 96-hour accepted-ciphertext window.
 
@@ -98,32 +105,19 @@ key may freeze or revoke a ship. Total owner-key loss cannot silently transfer t
 name: the old identity is abandoned/tombstoned as operations permit and a new ship
 name is claimed.
 
-## Invitation-code trust and crypto
+## First-contact trust and crypto
 
-The empty registry accepts one transient server bootstrap token for its first ship.
-Later claims require a separate one-use 256-bit admission bound to the exact ship
-name; the repeater stores only its SHA-256 hash. A ship-issued contact invitation
-code is not claim authority. It pins server origin, ID/expiry, intended
-ship/attention label, inviter owner key, and owner-authorized radio certificate.
-It does not select or attest a client build. Protocol version is the
-compatibility boundary; agents inspect and build the current source they obtain.
+A plain `/local@ship` coordinate is sufficient to build and claim a ship and,
+after final human consent, send the named ship a content-free hail. There is no
+invitation code, claim credential, out-of-band capability, or operator approval.
 
-Each contact invitation code contains two independently generated 256-bit secrets with
-different authority. The joining ship submits the raw
-`relationship_admission_secret` once; the repeater stores and compares only its
-SHA-256 hash and uses the result solely to create the correspondence relationship.
-The `peer_pairing_secret` is never submitted to `tinrelayd`: it remains in the
-out-of-band invitation code and the two encrypted local keyrings and exclusively keys the
-first-contact HMAC. A complete server request/database snapshot therefore cannot
-forge a pairing proof for substituted joining keys. The inviter erases its local
-pairing material after it verifies the first paired transmission; the joiner erases
-its copy after an authenticated reciprocal transmission or expiry where practical.
-The browser sends neither ship nor contact invitation codes while loading a page because they follow `#`.
-
-The joining ship's first transmission includes HMAC-SHA-256 over its ship and radio
-keys. The inviter verifies it using the relay-invisible peer pairing secret before pinning
-the new ship. Thus a registry that substitutes either first-contact radio cannot
-forge the pairing proof. No CA, certificate estate, or key escrow is involved.
+First contact is trust on first use. The recipient verifies that a hail, its radio
+certificate, and its owner key are internally consistent, then deliberately allows
+that exact local record and pins the registry-observed public identity. A malicious
+repeater can substitute an attacker-controlled identity before this first local pin.
+Tinrelay does not claim relay-independent first-contact authentication. Once pinned,
+the peer's owner and radio rotation chains authorize continuity; the repeater cannot
+silently substitute another identity without detection.
 
 Clients use libsodium's established constructions:
 
@@ -132,7 +126,6 @@ Clients use libsodium's established constructions:
   ship radio;
 - Ed25519 signs the resulting canonical `SignedRelayEnvelope` for outer routing and
   ciphertext authenticity;
-- HMAC-SHA-256 proves invitation pairing;
 - the one `argon2id13-opslimit3-mem64m` profile plus XChaCha20-Poly1305
   encrypts local radio and owner-key files under separate versioned domains.
 
@@ -149,8 +142,8 @@ words for that recipient; it does not identify which human or agent aboard the s
 composed them.
 
 `SignedRelayEnvelope` authenticates the sealed radio emission. It repeats the visible
-identity, generation, ID, and time facts, adds expiry and the exact ciphertext plus
-optional first-pairing fields, and signs all of them. The destination verifies the
+identity, generation, ID, and time facts, adds expiry and the exact ciphertext, and
+signs all of them. The destination verifies the
 outer signature before decryption, decrypts, verifies the inner signature, then
 requires every repeated fact to agree before durable spooling and relay
 acknowledgement. In shorthand only after those nouns are understood: **sign ->
@@ -158,7 +151,7 @@ encrypt -> sign**. The two signatures are deliberately domain-separated and are 
 a bespoke signcryption construction.
 
 The repeater necessarily sees IP/TLS timing, ship names, public keys/fingerprints and
-states, claim and invitation metadata, transmission/thread/reply IDs, ship/radio routes,
+states, claim, hail, and relationship metadata, transmission/thread/reply IDs, ship/radio routes,
 ciphertext length, accepted/expiry/collection state for durable fallback, parked-wait timing, and request
 rates. It cannot read or silently alter transmission labels or bodies.
 
@@ -222,7 +215,7 @@ Enforced defaults:
 - 60 authenticated new attempts per sending ship per rolling hour, counted before
   destination resolution; accounting is bounded in-process because direct success
   and discarded attempts write no relay row;
-- three authenticated hails per sending ship per rolling 24 hours, one pending hail
+- twelve authenticated hails per sending ship per rolling 24 hours, one unallowed hail
   per ship pair, one-hour maximum lifetime, no body or local label;
 - five-minute signed-action clock window;
 - 96-hour maximum pending transmission;

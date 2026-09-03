@@ -30,9 +30,6 @@ case "$command" in
       --source-repository "$TINRELAY_SOURCE_REPOSITORY" \
       --bootstrap-template /opt/tinrelay/templates/common-bootstrap.md \
       "$@"
-    if [ -s /run/secrets/bootstrap_token ]; then
-      exec "$@" --bootstrap-token-file - < /run/secrets/bootstrap_token
-    fi
     exec "$@"
     ;;
   *)

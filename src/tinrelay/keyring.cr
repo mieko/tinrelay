@@ -32,14 +32,11 @@ module Tinrelay
     property owner_chain : Array(OwnerKeyLink)
     property radio_certificate : ShipRadioCertificate
     property default_label : String
-    property invitation_id : String?
-    property pairing_secret : String?
     property pinned_at : Int64
     property blocked_at : Int64?
 
     def initialize(@ship, @owner_generation, @owner_public_key,
                    @radio_certificate, @default_label,
-                   @invitation_id = nil, @pairing_secret = nil,
                    @pinned_at = Time.utc.to_unix, @blocked_at = nil,
                    owner_chain : Array(OwnerKeyLink)? = nil)
       @owner_chain = owner_chain || [OwnerKeyLink.new(@owner_generation, @owner_public_key)]
@@ -47,17 +44,6 @@ module Tinrelay
 
     def blocked? : Bool
       !blocked_at.nil?
-    end
-  end
-
-  class LocalInvitationSecret
-    include JSON::Serializable
-
-    property invitation_id : String
-    property peer_pairing_secret : String
-    property expires_at : Int64
-
-    def initialize(@invitation_id, @peer_pairing_secret, @expires_at)
     end
   end
 
@@ -73,14 +59,12 @@ module Tinrelay
     property radios : Array(ShipRadioIdentity)
     property pending_radio : ShipRadioIdentity?
     property contacts : Array(ShipContact)
-    property invitation_secrets : Array(LocalInvitationSecret)
 
     def initialize(@server, @ship, @owner_public_key, @radios,
                    @owner_generation = 1,
                    @active_radio_generation = 1,
                    @pending_radio = nil,
                    @contacts = [] of ShipContact,
-                   @invitation_secrets = [] of LocalInvitationSecret,
                    @format = 2)
     end
 
@@ -268,31 +252,18 @@ module Tinrelay
       end
     end
 
-    def pin(invitation : ContactInvitation) : ShipContact
-      raise Invalid.new("unsupported invitation protocol") unless invitation.protocol == PROTOCOL
-      raise Expired.new("invitation expired") if invitation.expires_at <= Time.utc.to_unix
-      ship = Names.ship!(invitation.recipient_ship)
-      Names.label!(invitation.recipient_label)
-      certificate = invitation.radio_certificate
-      raise Invalid.new("invitation ship and radio certificate differ") unless certificate.ship == ship
-      owner_public = Crypto.unb64(
-        invitation.ship_owner_public_key, "ship owner public key"
-      )
-      unless Crypto.verify(
-               certificate.unsigned_bytes,
-               Crypto.unb64(certificate.owner_signature),
-               owner_public
-             )
-        raise Unauthorized.new("invitation radio certificate is not owner-authorized")
-      end
+    def pin_hail(record : HailSpoolRecord) : ShipContact
+      ship = Names.ship!(record.sender_ship)
+      certificate = record.sender_radio_certificate
+      owner = record.sender_owner_chain.last? ||
+              raise Invalid.new("hail has no ship owner identity")
       prior = data.contacts.find { |item| item.ship == ship }
+      return prior if prior
       contact = ShipContact.new(
-        ship, invitation.ship_owner_generation,
-        invitation.ship_owner_public_key, certificate,
-        invitation.recipient_label, invitation.invitation_id,
-        invitation.peer_pairing_secret, blocked_at: prior.try(&.blocked_at)
+        ship, owner.generation, owner.public_key, certificate,
+        "unresolved",
+        owner_chain: record.sender_owner_chain
       )
-      data.contacts.reject! { |item| item.ship == ship }
       data.contacts << contact
       contact
     end
@@ -307,32 +278,6 @@ module Tinrelay
       contact = data.contact!(Names.ship!(ship))
       contact.blocked_at = nil
       contact
-    end
-
-    def remember_invitation_secret(id : String, peer_pairing_secret : String,
-                                   expires_at : Int64) : Nil
-      data.invitation_secrets.reject! { |item| item.invitation_id == id }
-      data.invitation_secrets << LocalInvitationSecret.new(
-        id, peer_pairing_secret, expires_at
-      )
-    end
-
-    def invitation_secret(id : String) : String?
-      data.invitation_secrets.find do |item|
-        item.invitation_id == id && item.expires_at > Time.utc.to_unix
-      end.try(&.peer_pairing_secret)
-    end
-
-    def forget_invitation_secret!(id : String) : Bool
-      before = data.invitation_secrets.size
-      data.invitation_secrets.reject! { |item| item.invitation_id == id }
-      data.invitation_secrets.size != before
-    end
-
-    def prune_invitation_secrets!(now : Int64 = Time.utc.to_unix) : Bool
-      before = data.invitation_secrets.size
-      data.invitation_secrets.reject! { |item| item.expires_at <= now }
-      data.invitation_secrets.size != before
     end
 
     def prune_retired_radios!(now : Int64 = Time.utc.to_unix) : Bool

@@ -2,18 +2,17 @@ require "./spec_helper"
 
 describe "relationship closure and finite radio retune" do
   it "retains only acknowledged peers and restores a missed prior contact explicitly through a hail" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "finite retune test passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
 
       peers = {} of String => Tinrelay::Client
       %w(beta gamma delta).each do |ship|
         peer = TinrelaySpec.admit_contact(
-          root, origin, api, ship, passphrase,
-          alpha.create_invitation("steward", 3600)
+          root, origin, ship, passphrase, alpha
         )
         peer.send("steward@alpha", "establish #{ship}")
         event = alpha.radio_wait(spool, hold_seconds: 0)
@@ -111,18 +110,12 @@ describe "relationship closure and finite radio retune" do
         .as(Tinrelay::HailSpoolRecord).hail_id
       relay_hail_id.should eq(hail.hail_id)
       peers["delta"].allow_contact(
-        "alpha", relay_hail_id,
-        Tinrelay::HailOutbox.new(File.join(root, "delta-hail-outbox"))
+        "alpha", delta_event.local_id, delta_spool
       )
       api.database.db.query_one(
         "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'delta'",
         as: String
       ).should eq("active")
-
-      # Consume Delta's bodyless return hail before proving the blocked path.
-      alpha_return = alpha.radio_wait(spool, hold_seconds: 0)
-      alpha_return.kind.should eq("hail")
-      spool.routed(alpha_return.local_id)
 
       # A deliberately blocked prior ship's identical hail is consumed without
       # plaintext, spool evidence, or radio attention. The next valid item moves.

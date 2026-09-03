@@ -15,9 +15,6 @@ module Tinrelay
     fun crypto_box_seal(ciphertext : UInt8*, message : UInt8*, message_len : UInt64, pk : UInt8*) : Int32
     fun crypto_box_seal_open(message : UInt8*, ciphertext : UInt8*, ciphertext_len : UInt64, pk : UInt8*, sk : UInt8*) : Int32
 
-    fun crypto_auth_hmacsha256(out : UInt8*, message : UInt8*, message_len : UInt64, key : UInt8*) : Int32
-    fun crypto_auth_hmacsha256_verify(mac : UInt8*, message : UInt8*, message_len : UInt64, key : UInt8*) : Int32
-
     fun crypto_pwhash(out : UInt8*, out_len : UInt64, password : UInt8*, password_len : UInt64, salt : UInt8*, opslimit : UInt64, memlimit : LibC::SizeT, algorithm : Int32) : Int32
     fun crypto_pwhash_alg_argon2id13 : Int32
 
@@ -33,8 +30,6 @@ module Tinrelay
     BOX_PUBLIC_BYTES    = 32
     BOX_SECRET_BYTES    = 32
     SEAL_OVERHEAD_BYTES = 48
-    HMAC_KEY_BYTES      = 32
-    HMAC_BYTES          = 32
     PWHASH_SALT_BYTES   = 16
     KEY_BYTES           = 32
     XCHACHA_NONCE_BYTES = 24
@@ -116,21 +111,6 @@ module Tinrelay
       result = LibSodium.crypto_box_seal_open(message, ciphertext, ciphertext.size.to_u64, public_key, secret_key)
       raise Unauthorized.new("ciphertext authentication failed") unless result == 0
       message
-    end
-
-    def self.hmac(message : Bytes, key : Bytes) : Bytes
-      require_size(key, HMAC_KEY_BYTES, "pairing key")
-      output = Bytes.new(HMAC_BYTES)
-      check LibSodium.crypto_auth_hmacsha256(output, message, message.size.to_u64, key), "pairing proof"
-      output
-    end
-
-    def self.hmac_valid?(message : Bytes, mac : Bytes, key : Bytes) : Bool
-      require_size(mac, HMAC_BYTES, "pairing proof")
-      require_size(key, HMAC_KEY_BYTES, "pairing key")
-      LibSodium.crypto_auth_hmacsha256_verify(
-        mac, message, message.size.to_u64, key
-      ) == 0
     end
 
     def self.memzero(bytes : Bytes) : Nil

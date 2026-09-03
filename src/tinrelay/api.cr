@@ -5,7 +5,6 @@ module Tinrelay
     getter bind : String
     getter port : Int32
     getter database_path : String
-    getter bootstrap_token_hash : Bytes?
     getter bootstrap_template : String
     getter source_repository : String
     getter database_connections : Int32
@@ -13,7 +12,6 @@ module Tinrelay
 
     def initialize(@bind = "127.0.0.1", @port = 8787,
                    @database_path = "tinrelay.db",
-                   @bootstrap_token_hash = nil,
                    @bootstrap_template = "templates/common-bootstrap.md",
                    @source_repository = "https://github.com/mieko/tinrelay",
                    @database_connections = System.cpu_count,
@@ -97,23 +95,10 @@ module Tinrelay
       when {"GET", "/readyz"}, {"HEAD", "/readyz"}
         database.db.scalar("SELECT 1")
         json(context, 200, %({"status":"ready"}))
-      when {"POST", "/v1/bootstrap/claim"}
-        claim = parse_body(context, ShipClaim)
-        verify_bootstrap_token!(claim.bootstrap_token)
-        store.claim(claim, allow_bootstrap: true)
-        json(context, 201, %({"state":"claimed"}))
       when {"POST", "/v1/join"}
         claim = parse_body(context, ShipClaim)
         store.claim(claim)
         json(context, 201, %({"state":"claimed"}))
-      when {"POST", "/v1/invitations"}
-        store.create_invitation(parse_body(context, InvitationCreate))
-        json(context, 201, %({"state":"created"}))
-      when {"POST", "/v1/invitations/revoke"}
-        store.revoke_invitation(parse_body(context, InvitationRevoke))
-        json(context, 200, %({"state":"revoked"}))
-      when {"POST", "/v1/invitations/accept"}
-        json(context, 200, store.accept_invitation(parse_body(context, InvitationAccept)))
       when {"POST", "/v1/ships/inspect"}
         json(context, 200, store.inspect_ship(parse_body(context, ShipInspection)))
       when {"POST", "/v1/transmissions"}
@@ -227,18 +212,10 @@ module Tinrelay
       output.to_s
     end
 
-    private def verify_bootstrap_token!(supplied : String?) : Nil
-      expected = config.bootstrap_token_hash || raise Unauthorized.new("bootstrap claim is disabled")
-      token = supplied || raise Unauthorized.new("bootstrap token is required")
-      actual = Digest::SHA256.digest(token)
-      raise Unauthorized.new("bootstrap token is invalid") unless Crypto.constant_time_equal?(expected, actual)
-    end
-
     private def public_route(context : HTTP::Server::Context) : Int32
       request = context.request
       return public_not_found(context) unless request.method.in?({"GET", "HEAD"})
       path = request.path
-      return redirect(context, "/meet") if path == "/meet/"
       return homepage(context, path == "/index.md") if path.in?({"/", "/index.md"})
       return public_text(context, bootstrap_page.agent_map, "text/plain; charset=utf-8") if path == "/llms.txt"
       return public_text(context, bootstrap_page.static("robots.txt"), "text/plain; charset=utf-8") if path == "/robots.txt"
@@ -247,10 +224,10 @@ module Tinrelay
         return public_asset(context, name)
       end
 
-      if meet = meet_route(path)
+      if line = line_route(path)
         return bootstrap(
-          context, meet[:coordinate], meet[:journey], meet[:action],
-          explicit_markdown: meet[:explicit_markdown]
+          context, line[:coordinate], line[:journey], line[:action],
+          explicit_markdown: line[:explicit_markdown]
         )
       end
       public_not_found(context)
@@ -279,10 +256,14 @@ module Tinrelay
     private def bootstrap(context : HTTP::Server::Context, coordinate : String?, journey : String?,
                           action : String?,
                           explicit_markdown : Bool) : Int32
-      markdown = bootstrap_page.markdown(coordinate, action, journey)
+      markdown = if action == BootstrapPage::FLIGHT_PLAN_PAGE
+                   bootstrap_page.flight_plan(coordinate)
+                 else
+                   bootstrap_page.markdown(coordinate, action, journey)
+                 end
       directed = !coordinate.nil?
       private_page = directed || !action.nil?
-      alternate = meet_markdown_path(coordinate, journey, action)
+      alternate = line_markdown_path(coordinate, journey, action)
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
       page = action || "meet"
       body = wants_markdown ? markdown : bootstrap_page.html(
@@ -302,7 +283,7 @@ module Tinrelay
       markdown = bootstrap_page.static("not-found.md")
       wants_markdown = markdown_requested?(context.request)
       body = wants_markdown ? markdown : bootstrap_page.html(
-        markdown, true, "/meet/index.md", "not-found"
+        markdown, true, "/line/index.md", "not-found"
       )
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
@@ -359,85 +340,57 @@ module Tinrelay
       json(context, status, {error: code, message: message}.to_json)
     end
 
-    private def redirect(context, location : String) : Int32
-      context.response.status_code = 308
-      context.response.headers["Location"] = location
-      context.response.headers["Cache-Control"] = "no-store"
-      308
-    end
-
     private def request_id(context) : String
       context.request.headers["X-Request-ID"]? || "local-#{Process.pid}"
     end
 
     private def safe_log_path(path : String) : String
-      directed_meet_path?(path) ? "/meet/:coordinate" : path
+      directed_line_path?(path) ? "/:coordinate" : path
     end
 
-    private def meet_route(path : String) : NamedTuple(coordinate: String?, journey: String?, action: String?, explicit_markdown: Bool)?
-      return {coordinate: nil, journey: nil, action: nil, explicit_markdown: false} if path == "/meet"
-      return {coordinate: nil, journey: nil, action: nil, explicit_markdown: true} if path == "/meet/index.md"
+    private def line_route(path : String) : NamedTuple(coordinate: String?, journey: String?, action: String?, explicit_markdown: Bool)?
+      return nil unless path.starts_with?('/') && path.size > 1 && !path.ends_with?('/')
+      segments = path[1..].split('/')
+      explicit_markdown = segments.last? == "index.md"
+      segments.pop if explicit_markdown
+      return nil if segments.empty? || segments.any?(&.empty?)
 
-      explicit_markdown = path.starts_with?("/meet/index.md/")
-      remainder = if explicit_markdown
-                    path[15..]
-                  elsif path.starts_with?("/meet/")
-                    path[6..]
-                  else
-                    return nil
-                  end
-      return nil if remainder.empty? || remainder.ends_with?('/')
-      segments = remainder.split('/')
+      first = decode_path!(segments.shift)
+      coordinate = if first == "line"
+                     nil
+                   else
+                     Names.coordinate!(first)
+                     first
+                   end
 
-      decoded = segments.map { |segment| decode_path!(segment) }
-      first = decoded[0]
-      if BootstrapPage::JOURNEYS.includes?(first)
-        return nil unless decoded.size.in?(1..2)
-        action = decoded[1]? || first
-        return nil unless meet_action_allowed?(first, action)
-        return {coordinate: nil, journey: first, action: action, explicit_markdown: explicit_markdown}
+      return {coordinate: coordinate, journey: nil, action: nil, explicit_markdown: explicit_markdown} if segments.empty?
+      if segments.size == 1 && segments[0] == BootstrapPage::FLIGHT_PLAN_PAGE
+        return {coordinate: coordinate, journey: nil, action: segments[0], explicit_markdown: explicit_markdown}
       end
 
-      return nil unless decoded.size.in?(1..3)
-      Names.coordinate!(first)
-      coordinate = first
-      return {coordinate: coordinate, journey: nil, action: nil, explicit_markdown: explicit_markdown} if decoded.size == 1
-      journey = decoded[1]
+      return nil unless segments.size.in?(1..2)
+      journey = segments[0]
       return nil unless BootstrapPage::JOURNEYS.includes?(journey)
-      action = decoded[2]? || journey
-      return nil unless meet_action_allowed?(journey, action)
+      action = segments[1]? || journey
+      return nil unless BootstrapPage.action_allowed?(journey, action)
       {coordinate: coordinate, journey: journey, action: action, explicit_markdown: explicit_markdown}
     rescue Invalid
       nil
     end
 
-    private def meet_markdown_path(coordinate : String?, journey : String?, action : String?) : String
-      path = coordinate ? "/meet/index.md/#{URI.encode_path_segment(coordinate)}" : "/meet/index.md"
-      return path unless journey
+    private def line_markdown_path(coordinate : String?, journey : String?, action : String?) : String
+      path = coordinate ? "/#{URI.encode_path_segment(coordinate)}" : "/line"
+      if action == BootstrapPage::FLIGHT_PLAN_PAGE
+        return "#{path}/#{BootstrapPage::FLIGHT_PLAN_PAGE}/index.md"
+      end
+      return "#{path}/index.md" unless journey
       path = "#{path}/#{journey}"
-      action && action != journey ? "#{path}/#{action}" : path
+      path = "#{path}/#{action}" if action && action != journey
+      "#{path}/index.md"
     end
 
-    private def meet_action_allowed?(journey : String, action : String) : Bool
-      BootstrapPage.action_allowed?(journey, action)
-    end
-
-    private def directed_meet_path?(path : String) : Bool
-      remainder = if path.starts_with?("/meet/index.md/")
-                    path[15..]
-                  elsif path.starts_with?("/meet/")
-                    path[6..]
-                  else
-                    return false
-                  end
-      first = remainder.split('/').first?
-      return false unless first
-      decoded = decode_path!(first)
-      return false if BootstrapPage::JOURNEYS.includes?(decoded)
-      Names.coordinate!(decoded)
-      true
-    rescue Invalid
-      false
+    private def directed_line_path?(path : String) : Bool
+      line_route(path).try { |line| !line[:coordinate].nil? } || false
     end
 
     private def markdown_requested?(request : HTTP::Request) : Bool

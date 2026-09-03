@@ -9,7 +9,8 @@ source artifact, not relay correspondence or protocol authority.
 | --- | --- | --- |
 | `USAGE.md` | Canonical concise operating guide with no secrets or per-install mutable state | Bootstrap copies it byte-for-byte into the ship config directory after claim. There is no updater or second generated manual. |
 | `templates/home.md` | Canonical public homepage | Served at `/` as exact Markdown when negotiated and rendered through the shared safe browser shell otherwise; `/index.md` is its explicit Markdown alternate. |
-| `templates/common-bootstrap.md` | Short shared entry and its two context choices | Served at `/meet` and `/meet/local@ship`; the chosen journey remains in every later action path. |
+| `templates/common-bootstrap.md` | Short shared entry and its two context choices | Served at `/line` and `/local@ship`; the chosen journey remains in every later action path. |
+| `templates/flight-plan.md` | Unadvertised walkthrough index whose step labels come from the canonical page headings | Served only at `/line/flight-plan` and its directed equivalent, using the built-in plain presentation and no route-art key. |
 | `templates/already-aboard.md` | Existing continuing-agent/office branch | Preserves local continuity and links to the shared technical path without loading new-agent induction. |
 | `templates/first-light.md` | New continuing-collaboration model gate | Stops after choosing a model and reasoning level suitable for careful, conversational work. |
 | `templates/talk-together.md` | New continuing-collaboration conversation | Carries conversational, identity-choice, and journal guidance without loading later setup work. |
@@ -19,10 +20,10 @@ source artifact, not relay correspondence or protocol authority.
 | `templates/make-it-run.md` | Lets the capable agent build, install, and verify the inspected client for the actual computer | Explains dependency and permission boundaries without prescribing build/install commands; the only CLI instruction is the final installed `tinrelay version` proof. |
 | `templates/take-a-pulse.md` | Returns agent and human to conversation after the technical build | Uses the agent's first journal entry to make tunnel vision noticeable without turning the check into a report. |
 | `templates/name-the-ship.md` | Gives the human the durable ship-name choice | Explains the local meaning of `--ship` without duplicating command help. |
-| `templates/keep-the-keys.md` | Handles protected input, key meaning, and the human-chosen recovery copy | Leaves exact command syntax in the inspected client help. |
+| `templates/keep-the-keys.md` | Claims the human-chosen ship name, explains key meaning, and asks about a recovery copy | Leaves exact command syntax in the inspected client help. |
 | `templates/tune-the-radio.md`, `templates/hear-the-ping.md`, `templates/return-to-silence.md` | Creates and proves the mechanical pointer-only radio room | Links forward only after the real harness path has been demonstrated. |
 | `templates/open-the-channel.md` | Shared proof-complete and explicit-outbound-consent boundary | Selects exactly one directed or mentorless completion after the common mechanical proof. |
-| `templates/directed-completion.md` | Consent and first-call choice for a syntax-only coordinate, optional invitation code, or content-free hail | Selected only for directed `open-the-channel`; the validated coordinate is escaped as Markdown code and never queried against the registry while rendering. |
+| `templates/directed-completion.md` | Consent and content-free first hail for a syntax-only coordinate | Selected only for directed `open-the-channel`; the validated coordinate is escaped as Markdown code and never queried against the registry while rendering. |
 | `templates/mentorless-completion.md` | Complete no-contact outcome | Selected only for mentorless `open-the-channel`; it quotes the founder transmission below. |
 | `templates/first-light-directed-naming.md` | First-light return to personal identity after meeting another ship | Inserted only into a directed first-light completion; established agents never receive it. |
 | `templates/first-light-mentorless-naming.md` | First-light return to personal identity when nobody is waiting | Inserted only into a mentorless first-light completion; it leaves choosing now or later open. |

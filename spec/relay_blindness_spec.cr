@@ -25,14 +25,13 @@ end
 
 describe "the socially blind repeater boundary" do
   it "retains one exact encrypted envelope only while acceptance is unknown" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "outbox response loss passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       outbox = Tinrelay::Outbox.new(File.join(root, "outbox"))
       unreliable_remote = AcceptThenDropRemote.new(origin, api.store, outbox.directory)
@@ -72,26 +71,14 @@ describe "the socially blind repeater boundary" do
   end
 
   it "allows signed self/contact inspection without a public ship-name oracle" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "protected inspection passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
 
-      secret_bytes = Tinrelay::Crypto.random(32)
-      secret = Tinrelay::Crypto.b64(secret_bytes)
-      admission_id = Tinrelay::Ids.uuid
-      expires_at = Time.utc.to_unix + 3600
-      api.store.create_admission(
-        admission_id, "gamma", Digest::SHA256.digest(secret_bytes), expires_at
-      )
-      admission = Tinrelay::ShipAdmission.new(
-        origin, admission_id, "gamma", secret, expires_at
-      )
       gamma = Tinrelay::Client.join(
-        File.join(root, "gamma.keyring"),
-        "#{origin}/meet##{Base64.urlsafe_encode(admission.to_json, padding: false)}",
-        "gamma", passphrase
+        File.join(root, "gamma.keyring"), origin, "gamma", passphrase
       )
 
       unrelated = expect_raises(Tinrelay::NotFound) { gamma.who("alpha") }
@@ -102,8 +89,7 @@ describe "the socially blind repeater boundary" do
       HTTP::Client.get("#{origin}/v1/who/alpha", headers).status_code.should eq(404)
       HTTP::Client.get("#{origin}/v1/status/alpha", headers).status_code.should eq(404)
 
-      invitation = alpha.create_invitation("steward", 3600)
-      gamma.pin_invitation(invitation).ship.should eq("alpha")
+      TinrelaySpec.connect(root, alpha, gamma)
       JSON.parse(gamma.who("alpha"))["ship"].as_s.should eq("alpha")
       JSON.parse(alpha.who("gamma"))["ship"].as_s.should eq("gamma")
     end

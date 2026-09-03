@@ -13,10 +13,9 @@ module TinrelaySpec
   def self.with_server(art_manifest_path : String? = nil, &)
     root = temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
-    token = "bootstrap-token-for-tests"
     config = Tinrelay::ServerConfig.new(
       "127.0.0.1", 0, File.join(root, "service.db"),
-      Digest::SHA256.digest(token), template,
+      template,
       "https://example.test/tinrelay.git", System.cpu_count,
       art_manifest_path
     )
@@ -27,7 +26,7 @@ module TinrelaySpec
     Fiber.yield
     origin = "http://127.0.0.1:#{address.port}"
     begin
-      yield root, token, origin, api
+      yield root, origin, api
     ensure
       server.close
       api.close
@@ -84,29 +83,44 @@ module TinrelaySpec
     request
   end
 
-  def self.admit(root : String, origin : String, api : Tinrelay::API,
-                 ship : String, passphrase : String) : Tinrelay::Client
-    secret_bytes = Tinrelay::Crypto.random(32)
-    secret = Tinrelay::Crypto.b64(secret_bytes)
-    id = Tinrelay::Ids.uuid
-    expires_at = Time.utc.to_unix + 3600
-    api.store.create_admission(
-      id, ship, Digest::SHA256.digest(secret_bytes), expires_at
-    )
-    admission = Tinrelay::ShipAdmission.new(
-      origin, id, ship, secret, expires_at
-    )
-    capability = "#{origin}/meet##{Base64.urlsafe_encode(admission.to_json, padding: false)}"
+  def self.admit(root : String, origin : String, ship : String,
+                 passphrase : String) : Tinrelay::Client
     Tinrelay::Client.join(
-      File.join(root, "#{ship}.keyring"), capability, ship, passphrase
+      File.join(root, "#{ship}.keyring"), origin, ship, passphrase
     )
   end
 
-  def self.admit_contact(root : String, origin : String, api : Tinrelay::API,
-                         ship : String, passphrase : String,
-                         invitation : String) : Tinrelay::Client
-    client = admit(root, origin, api, ship, passphrase)
-    client.pin_invitation(invitation)
+  def self.admit_contact(root : String, origin : String, ship : String,
+                         passphrase : String,
+                         peer : Tinrelay::Client) : Tinrelay::Client
+    client = admit(root, origin, ship, passphrase)
+    connect(root, peer, client)
     client
+  end
+
+  def self.connect(root : String, first : Tinrelay::Client,
+                   second : Tinrelay::Client) : Nil
+    first_spool = Tinrelay::Spool.new(File.join(
+      root, "contact-#{first.keyring.data.ship}-#{second.keyring.data.ship}"
+    ))
+    second_spool = Tinrelay::Spool.new(File.join(
+      root, "contact-#{second.keyring.data.ship}-#{first.keyring.data.ship}"
+    ))
+
+    first.hail(
+      second.keyring.data.ship,
+      Tinrelay::HailOutbox.new(File.join(root, "contact-hail-outbox"))
+    )
+    event = second.radio_wait(second_spool, hold_seconds: 0)
+    second_spool.routed(event.local_id)
+    second.allow_contact(first.keyring.data.ship, event.local_id, second_spool)
+
+    second.hail(
+      first.keyring.data.ship,
+      Tinrelay::HailOutbox.new(File.join(root, "contact-return-hail-outbox"))
+    )
+    return_event = first.radio_wait(first_spool, hold_seconds: 0)
+    first_spool.routed(return_event.local_id)
+    first.allow_contact(second.keyring.data.ship, return_event.local_id, first_spool)
   end
 end

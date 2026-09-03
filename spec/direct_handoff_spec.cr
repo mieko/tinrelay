@@ -15,14 +15,13 @@ end
 
 describe "direct radio handoff" do
   it "accepts at durable destination spool acknowledgement without waiting for pointer routing" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "direct handoff test passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
 
       capture = EnvelopeCaptureRemote.new(origin)
@@ -91,14 +90,13 @@ describe "direct radio handoff" do
   end
 
   it "keeps reply threading valid when the direct root has no relay row" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "direct thread test passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
       event = Channel(Tinrelay::RadioEvent).new(1)
@@ -125,14 +123,13 @@ describe "direct radio handoff" do
   end
 
   it "persists when no wait exists and after an unacknowledged direct offer" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "fallback test passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       capture = EnvelopeCaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)

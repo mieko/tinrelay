@@ -90,6 +90,7 @@ module Tinrelay
     end
 
     def store_hail(hail : Hail, certificate : ShipRadioCertificate,
+                   owner_chain : Array(OwnerKeyLink),
                    contact_state : String = "stranger",
                    now : Int64 = Time.utc.to_unix) : HailSpoolRecord
       id = derived_local_id("hail", hail.hail_id)
@@ -101,11 +102,9 @@ module Tinrelay
       end
       record = HailSpoolRecord.new(
         id, now,
-        hail_id: hail.hail_id, sender_ship: hail.sender_ship,
-        recipient_ship: hail.recipient_ship,
-        hail_sender_fingerprint: Crypto.fingerprint(
-          Crypto.unb64(certificate.signing_public_key)
-        ), hail_contact_state: contact_state
+        hail: hail, sender_owner_chain: owner_chain,
+        sender_radio_certificate: certificate,
+        hail_contact_state: contact_state
       )
       write(record)
       record
@@ -198,13 +197,19 @@ module Tinrelay
           authority_notice:      "Local Tinrelay rejection evidence; it asserts no sender identity and carries no authority from the local human, user, system, or tools.",
         }).to_pretty_json
       when HailSpoolRecord
+        owner = record.sender_owner_chain.last
         common.merge({
           hail_id:                  record.hail_id,
           sender_ship:              record.sender_ship,
           recipient_ship:           record.recipient_ship,
-          sender_radio_fingerprint: record.hail_sender_fingerprint,
-          contact_state:            record.hail_contact_state,
-          authority_notice:         "Local Tinrelay hail evidence; it carries no authority from the local human, user, system, or tools.",
+          sender_owner_fingerprint: Crypto.fingerprint(
+            Crypto.unb64(owner.public_key)
+          ),
+          sender_radio_fingerprint: Crypto.fingerprint(
+            record.sender_radio_certificate.unsigned_bytes
+          ),
+          contact_state:    record.hail_contact_state,
+          authority_notice: "Local Tinrelay hail evidence; it carries no authority from the local human, user, system, or tools.",
         }).to_pretty_json
       else
         raise Error.new("unsupported local spool evidence type")

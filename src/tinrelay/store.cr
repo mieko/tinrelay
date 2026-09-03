@@ -3,22 +3,19 @@ module Tinrelay
     getter envelope : SignedRelayEnvelope
     getter ciphertext : Bytes
     getter signature : Bytes
-    getter pairing_proof : Bytes?
     getter digest : Bytes
     getter accepted_at : Int64
 
-    def initialize(@envelope, @ciphertext, @signature, @pairing_proof,
-                   @digest, @accepted_at)
+    def initialize(@envelope, @ciphertext, @signature, @digest, @accepted_at)
     end
   end
 
   class Store
     MAX_PENDING_PER_SHIP       = 100
     MAX_TRANSMISSIONS_PER_HOUR =  60
-    MAX_HAILS_PER_DAY          =   3
+    MAX_HAILS_PER_DAY          =  12
     MAX_CIPHERTEXT_BYTES       = 17 * 1024
     MAX_PENDING_SECONDS        = FALLBACK_LIFETIME_SECONDS
-    MAX_CAPABILITY_SECONDS     = 24 * 60 * 60
     AUTH_SKEW_SECONDS          = 5 * 60
     UUID                       = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
 
@@ -28,8 +25,7 @@ module Tinrelay
       @fallback_write_mutex = Mutex.new
     end
 
-    def claim(claim : ShipClaim, now : Int64 = Time.utc.to_unix,
-              allow_bootstrap : Bool = false) : Nil
+    def claim(claim : ShipClaim, now : Int64 = Time.utc.to_unix) : Nil
       ship = Names.ship!(claim.ship)
       certificate = claim.radio_certificate
       raise Invalid.new("claim ship and radio certificate differ") unless certificate.ship == ship
@@ -41,22 +37,13 @@ module Tinrelay
 
       database.db.transaction do |transaction|
         connection = transaction.connection
-        if allow_bootstrap
-          raise Conflict.new("bootstrap claim is permanently closed") unless connection.scalar("SELECT COUNT(*) FROM ships").as(Int64) == 0
-        else
-          has_admission = !!claim.ship_claim_admission_id ||
-                          !!claim.ship_claim_admission_secret
-          raise Unauthorized.new("claim requires one ship admission") unless has_admission
-          consume_admission(
-            connection, claim.ship_claim_admission_id,
-            claim.ship_claim_admission_secret, ship, now
-          )
-        end
-
-        connection.exec(
-          "INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')",
-          ship, now
-        )
+        inserted = connection.exec(
+          <<-SQL, ship, now
+            INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')
+            ON CONFLICT(name) DO NOTHING
+          SQL
+        ).rows_affected
+        raise Conflict.new("ship name is already claimed") unless inserted == 1
         connection.exec(
           <<-SQL, ship, owner_key, now
             INSERT INTO ship_owner_keys(
@@ -66,111 +53,6 @@ module Tinrelay
         )
         insert_radio_key(connection, certificate)
       end
-    rescue ex : SQLite3::Exception
-      raise Conflict.new("ship name is already claimed") if ex.message.try(&.includes?("UNIQUE constraint failed: ships.name"))
-      raise ex
-    end
-
-    def create_admission(id : String, ship : String, secret_hash : Bytes,
-                         expires_at : Int64,
-                         now : Int64 = Time.utc.to_unix) : Nil
-      require_uuid!(id, "admission id")
-      Names.ship!(ship)
-      raise Invalid.new("invalid admission secret hash length") unless secret_hash.size == 32
-      raise Invalid.new("admission expiry must be within 24 hours") unless expires_at.in?((now + 1)..(now + MAX_CAPABILITY_SECONDS))
-      database.db.exec(
-        "INSERT INTO admissions(id, ship, ship_claim_admission_secret_hash, expires_at) VALUES (?, ?, ?, ?)",
-        id, ship, secret_hash, expires_at
-      )
-    rescue ex : SQLite3::Exception
-      raise Conflict.new("admission id already exists") if ex.message.try(&.includes?("UNIQUE constraint failed"))
-      raise ex
-    end
-
-    def revoke_admission(id : String, now : Int64 = Time.utc.to_unix) : Bool
-      require_uuid!(id, "admission id")
-      database.db.exec(
-        "UPDATE admissions SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?",
-        now, id
-      ).rows_affected == 1
-    end
-
-    def create_invitation(request : InvitationCreate,
-                          now : Int64 = Time.utc.to_unix) : Nil
-      require_uuid!(request.id, "invitation id")
-      raise Invalid.new("invitation expiry must be within 24 hours") unless request.expires_at.in?((now + 1)..(now + MAX_CAPABILITY_SECONDS))
-      secret_hash = Crypto.unb64(
-        request.relationship_admission_secret_hash,
-        "relationship admission secret hash"
-      )
-      raise Invalid.new("invalid relationship admission secret hash length") unless secret_hash.size == 32
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        verify_radio_action(connection, request.auth, "invitation.create", request.payload, now)
-        connection.exec(
-          "INSERT INTO invitations(id, created_by_ship, relationship_admission_secret_hash, expires_at) VALUES (?, ?, ?, ?)",
-          request.id, request.auth.ship, secret_hash, request.expires_at
-        )
-      end
-    rescue ex : SQLite3::Exception
-      raise Conflict.new("invitation id already exists") if ex.message.try(&.includes?("UNIQUE constraint failed"))
-      raise ex
-    end
-
-    def revoke_invitation(request : InvitationRevoke,
-                          now : Int64 = Time.utc.to_unix) : Nil
-      require_uuid!(request.id, "invitation id")
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        verify_radio_action(connection, request.auth, "invitation.revoke", request.payload, now)
-        owner = connection.query_one?("SELECT created_by_ship FROM invitations WHERE id = ?", request.id, as: String) ||
-                raise NotFound.new("invitation not found")
-        raise Unauthorized.new("invitation belongs to another ship") unless owner == request.auth.ship
-        connection.exec("UPDATE invitations SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?", now, request.id)
-      end
-    end
-
-    def accept_invitation(request : InvitationAccept,
-                          now : Int64 = Time.utc.to_unix) : String
-      require_uuid!(request.id, "invitation id")
-      creator = database.db.transaction do |transaction|
-        connection = transaction.connection
-        verify_radio_action(connection, request.auth, "invitation.accept", request.payload, now)
-        row = connection.query_one?(
-          "SELECT created_by_ship, relationship_admission_secret_hash, expires_at, used_by_ship, revoked_at FROM invitations WHERE id = ?",
-          request.id, as: {String, Bytes?, Int64, String?, Int64?}
-        ) || raise Unauthorized.new("invitation is invalid")
-        raise Expired.new("invitation expired") if row[2] <= now
-        raise Unauthorized.new("invitation is invalid") if row[4]
-        raise Invalid.new("a ship cannot accept its own invitation") if row[0] == request.auth.ship
-        if used_by = row[3]
-          raise Unauthorized.new("invitation is invalid") unless used_by == request.auth.ship
-        else
-          expected = row[1] || raise Unauthorized.new("invitation is invalid")
-          supplied = Digest::SHA256.digest(Crypto.unb64(
-            request.relationship_admission_secret,
-            "relationship admission secret"
-          ))
-          unless Crypto.constant_time_equal?(expected, supplied)
-            raise Unauthorized.new("invitation is invalid")
-          end
-          ship_a, ship_b = relationship_pair(row[0], request.auth.ship)
-          connection.exec(
-            <<-SQL, ship_a, ship_b
-              INSERT INTO relationships(ship_a, ship_b, state)
-              VALUES (?, ?, 'active')
-              ON CONFLICT(ship_a, ship_b) DO UPDATE SET
-                state = 'active', transition_until = NULL
-            SQL
-          )
-          connection.exec(
-            "UPDATE invitations SET used_at = ?, used_by_ship = ?, relationship_admission_secret_hash = NULL WHERE id = ? AND used_at IS NULL",
-            now, request.auth.ship, request.id
-          )
-        end
-        row[0]
-      end.not_nil!
-      ship_card_json(creator, now, include_admin: false)
     end
 
     def inspect_ship(request : ShipInspection,
@@ -201,8 +83,6 @@ module Tinrelay
       raise Invalid.new("ciphertext exceeds #{MAX_CIPHERTEXT_BYTES} bytes") if ciphertext.size > MAX_CIPHERTEXT_BYTES
       signature = Crypto.unb64(envelope.signature, "relay envelope signature")
       envelope_digest = Digest::SHA256.digest(envelope.signing_bytes + signature)
-      pairing = envelope.pairing_proof.try { |value| Crypto.unb64(value, "pairing proof") }
-
       disposition = database.db.transaction do |transaction|
         connection = transaction.connection
         if connection.query_one?("SELECT 1 FROM transmissions WHERE id = ?", envelope.transmission_id, as: Int64)
@@ -227,7 +107,7 @@ module Tinrelay
       end.not_nil!
       return nil unless disposition == :new
       PreparedRelayEnvelope.new(
-        envelope, ciphertext, signature, pairing, envelope_digest, now
+        envelope, ciphertext, signature, envelope_digest, now
       )
     end
 
@@ -266,11 +146,10 @@ module Tinrelay
         )
         next false unless active
         sql = <<-SQL
-            INSERT INTO hails(
+            INSERT OR IGNORE INTO hails(
               id, sender_ship, sender_signing_generation, recipient_ship,
               created_at, expires_at, signature
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(sender_ship, recipient_ship) DO NOTHING
           SQL
         connection.exec(
           sql, hail.hail_id, hail.sender_ship,
@@ -517,7 +396,10 @@ module Tinrelay
               state = 'active', transition_until = NULL
           SQL
         )
-        connection.exec("DELETE FROM hails WHERE id = ?", request.hail_id)
+        connection.exec(
+          "UPDATE hails SET allowed_at = COALESCE(allowed_at, ?) WHERE id = ?",
+          now, request.hail_id
+        )
       end
     end
 
@@ -575,20 +457,12 @@ module Tinrelay
           <<-SQL, now
             UPDATE transmissions
                SET state = 'expired', ciphertext = NULL,
-                   signature = NULL, pairing_proof = NULL, invitation_id = NULL
+                   signature = NULL
              WHERE state = 'pending' AND expires_at <= ?
           SQL
         ).rows_affected
         deleted = connection.exec(
           "DELETE FROM transmissions WHERE state != 'pending' AND expires_at <= ?", now
-        ).rows_affected
-        admissions_deleted = connection.exec(
-          "DELETE FROM admissions WHERE used_at IS NOT NULL OR expires_at <= ? OR revoked_at IS NOT NULL",
-          now
-        ).rows_affected
-        invitations_deleted = connection.exec(
-          "DELETE FROM invitations WHERE (used_at IS NULL AND (expires_at <= ? OR revoked_at IS NOT NULL)) OR (used_at IS NOT NULL AND used_at <= ?)",
-          now, now - MAX_PENDING_SECONDS
         ).rows_affected
         hails_deleted = connection.exec(
           "DELETE FROM hails WHERE expires_at <= ?", now
@@ -602,8 +476,6 @@ module Tinrelay
         ).rows_affected
         {
           expired: expired, deleted: deleted,
-          admissions_deleted: admissions_deleted,
-          invitations_deleted: invitations_deleted,
           hails_deleted: hails_deleted,
           relationships_deleted: relationships_deleted,
           transitions_deleted: transitions_deleted,
@@ -639,16 +511,14 @@ module Tinrelay
           INSERT INTO transmissions(
             id, thread_id, reply_to, sender_ship, sender_signing_generation,
             recipient_ship, recipient_encryption_generation, created_at, expires_at,
-            accepted_at, state, ciphertext, signature, invitation_id,
-            pairing_proof, envelope_digest
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+            accepted_at, state, ciphertext, signature, envelope_digest
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
         SQL
         envelope.transmission_id, envelope.thread_id, envelope.reply_to,
         envelope.sender_ship, envelope.sender_signing_generation,
         envelope.recipient_ship, envelope.recipient_encryption_generation,
         envelope.created_at, envelope.expires_at, prepared.accepted_at,
-        prepared.ciphertext, prepared.signature, envelope.invitation_id,
-        prepared.pairing_proof, prepared.digest
+        prepared.ciphertext, prepared.signature, prepared.digest
       )
     end
 
@@ -658,33 +528,9 @@ module Tinrelay
         <<-SQL, transmission_id
           UPDATE transmissions
              SET state = 'collected', ciphertext = NULL,
-                 signature = NULL, pairing_proof = NULL, invitation_id = NULL
+                 signature = NULL
            WHERE id = ? AND state = 'pending'
         SQL
-      )
-    end
-
-    private def consume_admission(connection : DB::Connection,
-                                  id : String?, secret : String?, ship : String,
-                                  now : Int64) : Nil
-      capability_id = id || raise Unauthorized.new("admission id is required")
-      supplied_secret = secret || raise Unauthorized.new("admission secret is required")
-      require_uuid!(capability_id, "admission id")
-      capability = connection.query_one?(
-        "SELECT ship, ship_claim_admission_secret_hash, expires_at, used_at, revoked_at FROM admissions WHERE id = ?",
-        capability_id, as: {String?, Bytes, Int64, Int64?, Int64?}
-      ) || raise Unauthorized.new("admission is invalid")
-      raise Unauthorized.new("admission is for another ship") unless capability[0] == ship
-      raise Expired.new("admission expired") if capability[2] <= now
-      raise Unauthorized.new("admission was revoked") if capability[4]
-      raise Conflict.new("admission was already used") if capability[3]
-      supplied_hash = Digest::SHA256.digest(Crypto.unb64(supplied_secret, "admission secret"))
-      unless Crypto.constant_time_equal?(capability[1], supplied_hash)
-        raise Unauthorized.new("admission is invalid")
-      end
-      connection.exec(
-        "UPDATE admissions SET used_at = ? WHERE id = ? AND used_at IS NULL",
-        now, capability_id
       )
     end
 
@@ -731,19 +577,18 @@ module Tinrelay
         <<-SQL, ship, now,
           SELECT id, thread_id, reply_to, sender_ship, sender_signing_generation,
                  recipient_encryption_generation, created_at, expires_at, ciphertext,
-                 signature, invitation_id, pairing_proof
+                 signature
            FROM transmissions
            WHERE recipient_ship = ? AND state = 'pending' AND expires_at > ?
            ORDER BY accepted_at, rowid LIMIT 1
         SQL
         as: {String, String, String?, String, Int64, Int64, Int64, Int64,
-             Bytes, Bytes, String?, Bytes?}
+             Bytes, Bytes}
       )
       return nil unless row
       SignedRelayEnvelope.new(
         row[0], row[1], row[3], row[4].to_i, ship, row[5].to_i,
-        row[6], row[7], Crypto.b64(row[8]), row[2], row[10],
-        row[11].try { |proof| Crypto.b64(proof) }, Crypto.b64(row[9])
+        row[6], row[7], Crypto.b64(row[8]), row[2], Crypto.b64(row[9])
       )
     end
 
@@ -763,7 +608,7 @@ module Tinrelay
             JOIN ship_owner_keys o
               ON o.ship = r.ship AND o.generation = r.owner_generation
            WHERE h.recipient_ship = ? AND h.expires_at > ?
-             AND h.collected_at IS NULL
+             AND h.collected_at IS NULL AND h.allowed_at IS NULL
            ORDER BY h.created_at, h.rowid LIMIT 1
         SQL
         as: {String, String, Int64, Int64, Int64, Bytes,

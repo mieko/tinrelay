@@ -2,7 +2,7 @@ require "./spec_helper"
 
 describe "the canonical bootstrap representations" do
   it "serves one canonical public homepage as Markdown and HTML" do
-    TinrelaySpec.with_server do |_root, _token, origin, api|
+    TinrelaySpec.with_server do |_root, origin, api|
       expected = api.bootstrap_page.static("home.md")
       markdown = HTTP::Client.get(
         origin, headers: HTTP::Headers{"Accept" => "text/markdown"}
@@ -29,10 +29,6 @@ describe "the canonical bootstrap representations" do
       browser.headers["Link"].should contain("/index.md")
       browser.headers["X-Robots-Tag"]?.should be_nil
 
-      with_fragment = HTTP::Client.get("#{origin}/#private-fragment")
-      with_fragment.body.should eq(browser.body)
-      with_fragment.body.should_not contain("private-fragment")
-
       head = HTTP::Client.head(
         origin, headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
@@ -51,10 +47,10 @@ describe "the canonical bootstrap representations" do
   end
 
   it "serves exact canonical Markdown and renders only those bytes for browsers" do
-    TinrelaySpec.with_server do |_root, _token, origin, api|
+    TinrelaySpec.with_server do |_root, origin, api|
       expected = api.bootstrap_page.markdown
       markdown = HTTP::Client.get(
-        "#{origin}/meet", headers: HTTP::Headers{"Accept" => "text/markdown"}
+        "#{origin}/line", headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
       markdown.status_code.should eq(200)
       markdown.headers["Content-Type"].should eq("text/markdown; charset=utf-8")
@@ -62,32 +58,32 @@ describe "the canonical bootstrap representations" do
       markdown.headers["Referrer-Policy"].should eq("no-referrer")
       markdown.body.should eq(expected)
 
-      explicit = HTTP::Client.get("#{origin}/meet/index.md")
+      explicit = HTTP::Client.get("#{origin}/line/index.md")
       explicit.body.should eq(expected)
       explicit.headers["Content-Type"].should eq("text/markdown; charset=utf-8")
 
       browser = HTTP::Client.get(
-        "#{origin}/meet", headers: HTTP::Headers{"Accept" => "text/html"}
+        "#{origin}/line", headers: HTTP::Headers{"Accept" => "text/html"}
       )
       browser.body.should eq(
-        api.bootstrap_page.html(expected, false, "/meet/index.md", "meet")
+        api.bootstrap_page.html(expected, false, "/line/index.md", "meet")
       )
       browser.headers["Content-Security-Policy"].should contain("default-src 'none'")
       browser.headers["Content-Security-Policy"].should contain("style-src 'self'")
       browser.headers["Content-Security-Policy"].should_not contain("'unsafe-inline'")
       browser.headers["Content-Security-Policy"].should contain("img-src 'self'")
       browser.headers["Content-Security-Policy"].should contain("font-src 'self'")
-      browser.headers["Link"].should contain("/meet/index.md")
+      browser.headers["Link"].should contain("/line/index.md")
 
       refused_markdown = HTTP::Client.get(
-        "#{origin}/meet",
+        "#{origin}/line",
         headers: HTTP::Headers{"Accept" => "text/markdown;q=0.0, text/html;q=1"}
       )
       refused_markdown.headers["Content-Type"].should eq("text/html; charset=utf-8")
       refused_markdown.body.should eq(browser.body)
 
       head = HTTP::Client.head(
-        "#{origin}/meet", headers: HTTP::Headers{"Accept" => "text/markdown"}
+        "#{origin}/line", headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
       head.status_code.should eq(200)
       head.body.should be_empty
@@ -96,7 +92,7 @@ describe "the canonical bootstrap representations" do
   end
 
   it "serves the plain built-in presentation without external art" do
-    TinrelaySpec.with_server do |_root, _token, origin, _api|
+    TinrelaySpec.with_server do |_root, origin, _api|
       stylesheet = HTTP::Client.get("#{origin}/assets/tinrelay/plain.css")
       stylesheet.status_code.should eq(200)
       stylesheet.headers["Content-Type"].should eq("text/css; charset=utf-8")
@@ -112,12 +108,12 @@ describe "the canonical bootstrap representations" do
     end
   end
 
-  it "keeps directed coordinates out of generic metadata and never receives fragments" do
-    TinrelaySpec.with_server do |_root, _token, origin, api|
+  it "serves a plain directed journey from one public coordinate" do
+    TinrelaySpec.with_server do |_root, origin, api|
       coordinate = "steward@harbor"
       expected = api.bootstrap_page.markdown(coordinate)
       response = HTTP::Client.get(
-        "#{origin}/meet/steward%40harbor#must-not-reach-server",
+        "#{origin}/steward%40harbor",
         headers: HTTP::Headers{"Accept" => "text/html"}
       )
       response.status_code.should eq(200)
@@ -125,38 +121,37 @@ describe "the canonical bootstrap representations" do
       response.headers["X-Robots-Tag"].should contain("noindex")
       response.body.should eq(
         api.bootstrap_page.html(
-          expected, true, "/meet/index.md/steward%40harbor", "meet"
+          expected, true, "/steward%40harbor/index.md", "meet"
         )
       )
       response.body.should contain(coordinate)
-      response.body.should_not contain("must-not-reach-server")
       response.body.split("</head>", 2).first.should_not contain(coordinate)
 
-      markdown = HTTP::Client.get("#{origin}/meet/index.md/steward%40harbor")
+      markdown = HTTP::Client.get("#{origin}/steward%40harbor/index.md")
       markdown.body.should eq(expected)
       markdown.headers["X-Robots-Tag"].should contain("noindex")
     end
   end
 
   it "serves the JS-less mentorless and directed meet adventure from canonical Markdown" do
-    TinrelaySpec.with_server do |_root, _token, origin, api|
+    TinrelaySpec.with_server do |_root, origin, api|
       journeys = {
         "already-aboard" => %w(already-aboard open-the-schematics make-it-run name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
         "first-light"    => %w(first-light talk-together find-a-place open-the-schematics make-it-run take-a-pulse name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
       }
 
       mentorless_entry = HTTP::Client.get(
-        "#{origin}/meet", headers: HTTP::Headers{"Accept" => "text/markdown"}
+        "#{origin}/line", headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
-      mentorless_entry.body.should contain("/meet/already-aboard")
-      mentorless_entry.body.should contain("/meet/first-light")
+      mentorless_entry.body.should contain("/line/already-aboard")
+      mentorless_entry.body.should contain("/line/first-light")
       mentorless_entry.headers["Set-Cookie"]?.should be_nil
 
       journeys.each do |journey, actions|
         actions.each do |action|
           suffix = action == journey ? journey : "#{journey}/#{action}"
           markdown = HTTP::Client.get(
-            "#{origin}/meet/#{suffix}",
+            "#{origin}/line/#{suffix}",
             headers: HTTP::Headers{"Accept" => "text/markdown"}
           )
           markdown.status_code.should eq(200)
@@ -166,7 +161,7 @@ describe "the canonical bootstrap representations" do
       end
 
       [nil, "steward@harbor"].each do |coordinate|
-        base = coordinate ? "/meet/steward%40harbor" : "/meet"
+        base = coordinate ? "/steward%40harbor" : "/line"
         journeys.each_key do |journey|
           [
             {"tune-the-radio", "hear-the-ping"},
@@ -182,30 +177,28 @@ describe "the canonical bootstrap representations" do
       coordinate = "steward@harbor"
       encoded = "steward%40harbor"
       directed_entry = HTTP::Client.get(
-        "#{origin}/meet/#{encoded}",
+        "#{origin}/#{encoded}",
         headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
       coordinate_at = directed_entry.body.index("`#{coordinate}`").not_nil!
-      action_at = directed_entry.body.index("/meet/#{encoded}/already-aboard").not_nil!
+      action_at = directed_entry.body.index("/#{encoded}/already-aboard").not_nil!
       coordinate_at.should be < action_at
       directed_entry.headers["Set-Cookie"]?.should be_nil
       directed_entry.body.scan(/\]\(([^)]+)\)/).each do |match|
         target = match[1]
-        target.should_not contain('#')
         target.should_not contain('?')
       end
 
       journeys.each do |journey, actions|
         actions.each do |action|
           suffix = action == journey ? journey : "#{journey}/#{action}"
-          path = "/meet/#{encoded}/#{suffix}"
+          path = "/#{encoded}/#{suffix}"
           markdown = HTTP::Client.get(
-            "#{origin}#{path}#private-fragment",
+            "#{origin}#{path}",
             headers: HTTP::Headers{"Accept" => "text/markdown"}
           )
           markdown.status_code.should eq(200)
           markdown.body.should_not match(/\{\{[A-Z_]+\}\}/)
-          markdown.body.should_not contain("private-fragment")
           markdown.headers["X-Robots-Tag"].should contain("noindex")
         end
       end
@@ -215,14 +208,14 @@ describe "the canonical bootstrap representations" do
         "first-light"    => "open-the-channel",
       }.each do |journey, action|
         suffix = "#{journey}/#{action}"
-        path = "/meet/#{encoded}/#{suffix}"
+        path = "/#{encoded}/#{suffix}"
         markdown = HTTP::Client.get(
           "#{origin}#{path}",
           headers: HTTP::Headers{"Accept" => "text/markdown"}
         )
         expected = api.bootstrap_page.markdown(coordinate, action, journey)
         markdown.body.should eq(expected)
-        explicit_path = "/meet/index.md/#{encoded}/#{suffix}"
+        explicit_path = "#{path}/index.md"
         HTTP::Client.get("#{origin}#{explicit_path}").body.should eq(expected)
         browser = HTTP::Client.get(
           "#{origin}#{path}", headers: HTTP::Headers{"Accept" => "text/html"}
@@ -232,11 +225,78 @@ describe "the canonical bootstrap representations" do
         )
       end
 
-      head = HTTP::Client.head("#{origin}/meet/#{encoded}/first-light/open-the-schematics")
+      head = HTTP::Client.head("#{origin}/#{encoded}/first-light/open-the-schematics")
       head.status_code.should eq(200)
       head.body.should be_empty
-      HTTP::Client.get("#{origin}/meet/#{encoded}/first-light/unknown").status_code.should eq(404)
-      HTTP::Client.get("#{origin}/meet/open-the-schematics").status_code.should eq(404)
+      HTTP::Client.get("#{origin}/#{encoded}/first-light/unknown").status_code.should eq(404)
+      HTTP::Client.get("#{origin}/line/open-the-schematics").status_code.should eq(404)
+    end
+  end
+
+  it "serves an unadvertised plain flight plan for either meet context" do
+    TinrelaySpec.with_server do |_root, origin, api|
+      route_entries = ->(base : String, coordinate : String?) do
+        [{
+          title: api.bootstrap_page.markdown(coordinate).lines.find(&.starts_with?("# ")).not_nil![2..].strip,
+          path:  base,
+        }] + Tinrelay::BootstrapPage::JOURNEY_ACTIONS.flat_map do |journey, actions|
+          actions.map do |action|
+            suffix = action == journey ? journey : "#{journey}/#{action}"
+            markdown = api.bootstrap_page.markdown(coordinate, action, journey)
+            {
+              title: markdown.lines.find(&.starts_with?("# ")).not_nil![2..].strip,
+              path:  "#{base}/#{suffix}",
+            }
+          end
+        end
+      end
+      links = ->(markdown : String) do
+        markdown.scan(/\[([^\]]+)\]\(([^)]+)\)/).map do |match|
+          {title: match[1], path: match[2]}
+        end
+      end
+
+      mentorless = HTTP::Client.get(
+        "#{origin}/line/flight-plan",
+        headers: HTTP::Headers{"Accept" => "text/markdown"}
+      )
+      mentorless.status_code.should eq(200)
+      mentorless.headers["Content-Type"].should eq("text/markdown; charset=utf-8")
+      mentorless.headers["X-Robots-Tag"].should eq("noindex, nofollow, noarchive")
+      links.call(mentorless.body).should eq(route_entries.call("/line", nil))
+      HTTP::Client.get("#{origin}/line/flight-plan/index.md").body.should eq(mentorless.body)
+
+      coordinate = "steward@harbor"
+      directed_base = "/steward%40harbor"
+      directed = HTTP::Client.get(
+        "#{origin}#{directed_base}/flight-plan",
+        headers: HTTP::Headers{"Accept" => "text/markdown"}
+      )
+      directed.status_code.should eq(200)
+      links.call(directed.body).should eq(route_entries.call(directed_base, coordinate))
+      explicit_path = "/steward%40harbor/flight-plan/index.md"
+      HTTP::Client.get("#{origin}#{explicit_path}").body.should eq(directed.body)
+
+      browser = HTTP::Client.get(
+        "#{origin}#{directed_base}/flight-plan",
+        headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      browser.body.should eq(
+        api.bootstrap_page.html(directed.body, true, explicit_path, "flight-plan")
+      )
+      browser.body.should contain(%(data-page="flight-plan"))
+      browser.body.should contain(%(href="/assets/tinrelay/plain.css"))
+      browser.body.should_not contain("/tinrelay-art/")
+      browser.body.split("</head>", 2).first.should_not contain(coordinate)
+
+      llms = HTTP::Client.get("#{origin}/llms.txt").body
+      homepage = HTTP::Client.get(origin).body
+      line = HTTP::Client.get("#{origin}/line").body
+      robots = HTTP::Client.get("#{origin}/robots.txt").body
+      sitemap = HTTP::Client.get("#{origin}/sitemap.xml").body
+      [homepage, line, llms, robots, sitemap].each do |advertised_surface|
+        advertised_surface.should_not contain("/line/flight-plan")
+      end
     end
   end
 
@@ -252,7 +312,7 @@ describe "the canonical bootstrap representations" do
         File.join(root, "common-bootstrap.md"),
         "https://example.test/tinrelay.git"
       )
-      rendered = page.html(page.markdown, false, "/meet/index.md", "meet")
+      rendered = page.html(page.markdown, false, "/line/index.md", "meet")
       rendered.should_not contain("<script>")
       rendered.should contain("<!-- raw HTML omitted -->")
     ensure
@@ -276,13 +336,13 @@ describe "the canonical bootstrap representations" do
       rendered = page.html(
         "# A *small* &amp; safe title\n\nBody.\n",
         false,
-        "/meet/index.md",
+        "/line/index.md",
         "meet"
       )
       rendered.should contain("<title>A small &amp; safe title - Tinrelay</title>")
       rendered.should contain("<h1>A <em>small</em> &amp; safe title</h1>")
 
-      untitled = page.html("Body only.\n", false, "/meet/index.md", "meet")
+      untitled = page.html("Body only.\n", false, "/line/index.md", "meet")
       untitled.should contain("<title>Tinrelay</title>")
     ensure
       FileUtils.rm_r(root) if Dir.exists?(root)
@@ -301,7 +361,7 @@ describe "the canonical bootstrap representations" do
           "open-the-channel" => "/tinrelay-art/open-the-channel.918e.css",
         }.to_json
       )
-      TinrelaySpec.with_server(manifest) do |_server_root, _token, origin, api|
+      TinrelaySpec.with_server(manifest) do |_server_root, origin, api|
         home = HTTP::Client.get(
           origin, headers: HTTP::Headers{"Accept" => "text/html"}
         )
@@ -309,27 +369,35 @@ describe "the canonical bootstrap representations" do
         home.body.should contain(%(href="/tinrelay-art/home.71ae.css"))
 
         entry = HTTP::Client.get(
-          "#{origin}/meet", headers: HTTP::Headers{"Accept" => "text/html"}
+          "#{origin}/line", headers: HTTP::Headers{"Accept" => "text/html"}
         )
         entry.body.should contain(%(href="/assets/tinrelay/plain.css"))
         entry.body.should contain(%(href="/tinrelay-art/meet.a81c.css"))
 
         action = HTTP::Client.get(
-          "#{origin}/meet/steward%40harbor/first-light/open-the-channel",
+          "#{origin}/steward%40harbor/first-light/open-the-channel",
           headers: HTTP::Headers{"Accept" => "text/html"}
         )
         action.body.should contain(%(href="/tinrelay-art/open-the-channel.918e.css"))
         action.body.should_not contain("steward@harbor.css")
 
         unstyled = HTTP::Client.get(
-          "#{origin}/meet/first-light",
+          "#{origin}/line/first-light",
           headers: HTTP::Headers{"Accept" => "text/html"}
         )
         unstyled.body.should contain(%(href="/assets/tinrelay/plain.css"))
         unstyled.body.should_not contain("/tinrelay-art/")
 
+        flight_plan = HTTP::Client.get(
+          "#{origin}/line/flight-plan",
+          headers: HTTP::Headers{"Accept" => "text/html"}
+        )
+        flight_plan.body.should contain(%(data-page="flight-plan"))
+        flight_plan.body.should contain(%(href="/assets/tinrelay/plain.css"))
+        flight_plan.body.should_not contain("/tinrelay-art/")
+
         markdown = HTTP::Client.get(
-          "#{origin}/meet",
+          "#{origin}/line",
           headers: HTTP::Headers{"Accept" => "text/markdown"}
         )
         markdown.body.should eq(api.bootstrap_page.markdown)
@@ -385,23 +453,25 @@ describe "the canonical bootstrap representations" do
   end
 
   it "keeps public discovery bounded and negotiates unknown routes" do
-    TinrelaySpec.with_server do |_root, _token, origin, _api|
-      trailing = HTTP::Client.get("#{origin}/meet/")
-      trailing.status_code.should eq(308)
-      trailing.headers["Location"].should eq("/meet")
+    TinrelaySpec.with_server do |_root, origin, _api|
+      HTTP::Client.get("#{origin}/line").status_code.should eq(200)
+      HTTP::Client.get("#{origin}/line/").status_code.should eq(404)
       HTTP::Client.get("#{origin}/join").status_code.should eq(404)
       HTTP::Client.get(origin).status_code.should eq(200)
 
       llms = HTTP::Client.get("#{origin}/llms.txt")
       llms.status_code.should eq(200)
       llms.body.should contain("/index.md")
-      llms.body.should contain("/meet/index.md")
+      llms.body.should contain("/line/index.md")
       robots = HTTP::Client.get("#{origin}/robots.txt")
       robots.body.should contain("Allow: /$")
+      robots.body.should contain("Allow: /line$")
+      robots.body.should contain("Disallow: /*@*")
+      robots.body.should contain("Disallow: /*%40*")
       robots.body.should contain("Disallow: /v1/")
       sitemap = HTTP::Client.get("#{origin}/sitemap.xml")
       sitemap.body.should contain("<loc>https://tinrelay.space/</loc>")
-      sitemap.body.should contain("https://tinrelay.space/meet")
+      sitemap.body.should contain("https://tinrelay.space/line")
       sitemap.body.should_not contain("steward@harbor")
 
       public_missing = HTTP::Client.get(

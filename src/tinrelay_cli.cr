@@ -24,35 +24,14 @@ module Tinrelay
       passphrase_file = extract(argv, "--passphrase-file")
 
       case command
-      when "bootstrap"
-        server = required(argv, "--server")
-        token = PrivateInput.read(required(argv, "--token-file"), "bootstrap token")
-        no_extra!(argv)
-        joined = Client.bootstrap(
-          keyring_path, server, ship, passphrase(paths, passphrase_file), token, owner_path
-        )
-        puts({state: "claimed", ship: ship, radio_keyring: keyring_path,
-              owner_key: joined.keyring.owner_path}.to_json)
       when "join"
-        capability_url = PrivateInput.read(
-          required(argv, "--invitation-file"), "ship invitation code"
-        )
+        server = required(argv, "--server")
         no_extra!(argv)
         joined = Client.join(
-          keyring_path, capability_url, ship, passphrase(paths, passphrase_file), owner_path
+          keyring_path, server, ship, passphrase(paths, passphrase_file), owner_path
         )
         puts({state: "claimed", ship: ship, radio_keyring: keyring_path,
               owner_key: joined.keyring.owner_path}.to_json)
-      when "invite"
-        label = required(argv, "--label")
-        ttl = (extract(argv, "--ttl-seconds") || "86400").to_i64
-        no_extra!(argv)
-        puts client(keyring_path, owner_path, ship, passphrase_file).create_invitation(label, ttl)
-      when "invite-revoke"
-        id = argv.shift? || raise Invalid.new("invite-revoke requires an invitation id")
-        no_extra!(argv)
-        client(keyring_path, owner_path, ship, passphrase_file).revoke_invitation(id)
-        puts({state: "revoked", invitation_id: id}.to_json)
       when "who"
         target_ship = argv.shift? || raise Invalid.new("who requires a ship name or local@ship coordinate")
         no_extra!(argv)
@@ -112,13 +91,6 @@ module Tinrelay
         no_extra!(argv)
         client(keyring_path, owner_path, ship, passphrase_file).ship_change(operation)
         puts({state: operation}.to_json)
-      when "contact-pin"
-        invitation_url = PrivateInput.read(
-          required(argv, "--invitation-file"), "contact invitation code"
-        )
-        no_extra!(argv)
-        contact = client(keyring_path, owner_path, ship, passphrase_file).pin_invitation(invitation_url)
-        puts({state: "pinned", ship: contact.ship, default_label: contact.default_label}.to_json)
       when "contact-close"
         peer = argv.shift? || raise Invalid.new("contact-close requires a peer ship")
         no_extra!(argv)
@@ -132,13 +104,13 @@ module Tinrelay
         puts({state: "unblocked", ship: ship, peer_ship: contact.ship}.to_json)
       when "contact-allow"
         peer = argv.shift? || raise Invalid.new("contact-allow requires a peer ship")
-        hail_id = required(argv, "--hail-id")
-        box = HailOutbox.new(extract(argv, "--outbox") || paths.outbox)
+        local_hail_id = required(argv, "--hail-id")
+        spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
-        hail = client(keyring_path, owner_path, ship, passphrase_file)
-          .allow_contact(peer, hail_id, box)
+        client(keyring_path, owner_path, ship, passphrase_file)
+          .allow_contact(peer, local_hail_id, spool)
         puts({state: "relationship_active", ship: ship, peer_ship: peer,
-              return_hail_id: hail.hail_id}.to_json)
+              local_hail_id: local_hail_id}.to_json)
       else
         raise Invalid.new("unknown command: #{command}")
       end

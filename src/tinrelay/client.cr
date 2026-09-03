@@ -100,99 +100,25 @@ module Tinrelay
 
     def initialize(@keyring, @passphrase, remote : Remote? = nil)
       @remote = remote || Remote.new(keyring.data.server)
-      changed = keyring.prune_invitation_secrets!
-      changed = keyring.prune_retired_radios! || changed
+      changed = keyring.prune_retired_radios!
       keyring.save(passphrase) if changed
     end
 
-    def self.bootstrap(keyring_path : String, server : String, ship : String,
-                       passphrase : String, bootstrap_token : String,
-                       owner_path : String? = nil) : Client
-      keyring = Keyring.create(keyring_path, server, ship, passphrase, owner_path)
-      client = new(keyring, passphrase)
-      claim = ShipClaim.new(
-        ship, keyring.data.owner_public_key, keyring.data.radio!.certificate,
-        bootstrap_token: bootstrap_token
-      )
-      begin
-        client.remote.post("/v1/bootstrap/claim", claim.to_json)
-      rescue ex
-        File.delete(keyring_path) if File.exists?(keyring_path)
-        File.delete(keyring.owner_path) if File.exists?(keyring.owner_path)
-        raise ex
-      end
-      client
-    end
-
-    def self.join(keyring_path : String, capability_url : String, ship : String,
+    def self.join(keyring_path : String, server : String, ship : String,
                   passphrase : String, owner_path : String? = nil) : Client
-      capability = capability_json(capability_url)
-      kind = capability["kind"]?.try(&.as_s?) || raise Invalid.new("capability kind is missing")
-      raise Invalid.new("capability is not a ship admission") unless kind == "ship_admission"
-      admission = ShipAdmission.from_json(capability.to_json)
-      raise Invalid.new("unsupported admission protocol") unless admission.protocol == PROTOCOL
-      verify_admission_url!(capability_url, admission)
-      raise Invalid.new("admission belongs to another ship") unless admission.ship == ship
-      server = admission.server
       keyring = Keyring.create(keyring_path, server, ship, passphrase, owner_path)
-      client = new(keyring, passphrase)
-      claim = ShipClaim.new(
-        ship, keyring.data.owner_public_key, keyring.data.radio!.certificate,
-        ship_claim_admission_id: admission.admission_id,
-        ship_claim_admission_secret: admission.ship_claim_admission_secret
-      )
       begin
+        client = new(keyring, passphrase)
+        claim = ShipClaim.new(
+          ship, keyring.data.owner_public_key, keyring.data.radio!.certificate
+        )
         client.remote.post("/v1/join", claim.to_json)
+        client
       rescue ex
         File.delete(keyring_path) if File.exists?(keyring_path)
         File.delete(keyring.owner_path) if File.exists?(keyring.owner_path)
         raise ex
       end
-      client
-    end
-
-    def create_invitation(recipient_label : String,
-                          ttl_seconds : Int64 = 24_i64 * 60 * 60) : String
-      reconcile_radio_if_pending!
-      Names.label!(recipient_label)
-      radio = keyring.data.radio!
-      id = Ids.uuid
-      relationship_secret_bytes = Crypto.random(32)
-      relationship_secret = Crypto.b64(relationship_secret_bytes)
-      peer_pairing_secret = Crypto.b64(Crypto.random(32))
-      expires_at = Time.utc.to_unix + ttl_seconds
-      relationship_secret_hash = Crypto.b64(
-        Digest::SHA256.digest(relationship_secret_bytes)
-      )
-      request = InvitationCreate.new(
-        id, relationship_secret_hash, expires_at,
-        radio_auth(
-          "invitation.create",
-          Canonical.fields(id, relationship_secret_hash, expires_at.to_s)
-        )
-      )
-      remote.post("/v1/invitations", request.to_json)
-      keyring.remember_invitation_secret(id, peer_pairing_secret, expires_at)
-      keyring.save(passphrase)
-      invitation = ContactInvitation.new(
-        keyring.data.server, id,
-        relationship_secret, peer_pairing_secret, expires_at,
-        keyring.data.ship, recipient_label, keyring.data.owner_generation,
-        keyring.data.owner_public_key, radio.certificate
-      )
-      fragment = Base64.urlsafe_encode(invitation.to_json, padding: false)
-      coordinate = "#{recipient_label}@#{keyring.data.ship}"
-      "#{keyring.data.server.rstrip('/')}/meet/#{URI.encode_path_segment(coordinate)}##{fragment}"
-    end
-
-    def revoke_invitation(id : String) : Nil
-      reconcile_radio_if_pending!
-      request = InvitationRevoke.new(
-        id, radio_auth("invitation.revoke", Canonical.fields(id))
-      )
-      remote.post("/v1/invitations/revoke", request.to_json)
-      keyring.data.invitation_secrets.reject! { |item| item.invitation_id == id }
-      keyring.save(passphrase)
     end
 
     def send(recipient : String, body : String, from_label : String? = nil,
@@ -231,15 +157,12 @@ module Tinrelay
       ciphertext = Crypto.seal(
         plaintext, Crypto.unb64(recipient_certificate.encryption_public_key)
       )
-      pairing_proof = contact.try { |pinned| pairing_proof(pinned) }
-
       # Sign again after sealing: SignedRelayEnvelope authenticates the radio emission
       # so the repeater and recipient reject route or ciphertext changes before opening it.
       envelope = SignedRelayEnvelope.new(
         transmission_id, root, keyring.data.ship, radio.generation,
         recipient_ship, recipient_certificate.generation, created_at,
-        created_at + expires_in, Crypto.b64(ciphertext), reply_to,
-        contact.try(&.invitation_id), pairing_proof
+        created_at + expires_in, Crypto.b64(ciphertext), reply_to
       )
       envelope.signature = Crypto.b64(
         Crypto.sign(envelope.signing_bytes, Crypto.unb64(radio.signing.secret_key))
@@ -444,20 +367,24 @@ module Tinrelay
       identity.generation
     end
 
-    def allow_contact(peer_ship : String, hail_id : String,
-                      outbox : HailOutbox = HailOutbox.new("#{keyring.path}.outbox")) : Hail
+    def allow_contact(peer_ship : String, local_hail_id : String,
+                      spool : Spool) : ShipContact
       peer = Names.ship!(peer_ship)
-      contact = keyring.data.contact!(peer)
-      raise Unauthorized.new("contact is locally blocked") if contact.blocked?
-      payload = Canonical.fields(peer, hail_id)
+      record = spool.get(local_hail_id).as?(HailSpoolRecord) ||
+               raise Invalid.new("local inbox item is not a hail")
+      raise Invalid.new("hail belongs to another sender") unless record.sender_ship == peer
+      raise Invalid.new("hail belongs to another recipient") unless record.recipient_ship == keyring.data.ship
+      prior = keyring.data.contacts.find { |contact| contact.ship == peer }
+      raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
+      verify_hail_record!(record, prior)
+      payload = Canonical.fields(peer, record.hail_id)
       request = RelationshipAllow.new(
-        peer, hail_id, radio_auth("relationship.allow", payload)
+        peer, record.hail_id, radio_auth("relationship.allow", payload)
       )
       remote.post("/v1/relationships/allow", request.to_json)
-      # The return hail carries this ship's current public certificate. It is
-      # content-free and keeps the restoration symmetric without disclosing
-      # whether either side later noticed or accepted it.
-      hail(peer, outbox)
+      contact = keyring.pin_hail(record)
+      keyring.save(passphrase)
+      contact
     end
 
     def unblock_contact(peer_ship : String) : ShipContact
@@ -516,76 +443,6 @@ module Tinrelay
       remote.post("/v1/ships/change", provisional.to_json)
     end
 
-    def pin_invitation(url : String) : ShipContact
-      invitation = self.class.invitation_from_url(url)
-      self.class.verify_invitation_url!(url, invitation)
-      raise Invalid.new("invitation belongs to another server") unless invitation.server == keyring.data.server
-      reconcile_radio_if_pending!
-      payload = Canonical.fields(
-        invitation.invitation_id,
-        invitation.relationship_admission_secret
-      )
-      request = InvitationAccept.new(
-        invitation.invitation_id, invitation.relationship_admission_secret,
-        radio_auth("invitation.accept", payload)
-      )
-      document = JSON.parse(remote.post("/v1/invitations/accept", request.to_json))
-      contact = keyring.pin(invitation)
-      active = document["radio_keys"].as_a.find { |item| item["state"].as_s == "active" } ||
-               raise Unavailable.new("pinned ship has no active radio")
-      certificate, owner_generation, owner_public = trusted_radio(
-        document, active["generation"].as_i.to_i, contact
-      )
-      contact.owner_chain = owner_chain_evidence(document, contact, owner_generation)
-      contact.owner_generation = owner_generation
-      contact.owner_public_key = owner_public
-      contact.radio_certificate = certificate
-      keyring.save(passphrase)
-      contact
-    end
-
-    def self.invitation_from_url(url : String) : ContactInvitation
-      invitation = ContactInvitation.from_json(capability_json(url).to_json)
-      raise Invalid.new("capability is not a contact invitation") unless invitation.kind == "contact_invitation"
-      invitation
-    rescue ex : JSON::SerializableError
-      raise Invalid.new("invitation URL capability is invalid")
-    end
-
-    def self.verify_invitation_url!(url : String,
-                                    invitation : ContactInvitation) : Nil
-      uri = URI.parse(url)
-      prefix = "/meet/"
-      raise Invalid.new("invitation path must be /meet/local@ship") unless uri.path.starts_with?(prefix)
-      coordinate = URI.decode(uri.path.lchop(prefix))
-      raise Invalid.new("invitation path and capability name different recipients") unless coordinate == invitation.coordinate
-      expected_origin = "#{uri.scheme}://#{uri.host}#{uri.port ? ":#{uri.port}" : ""}"
-      raise Invalid.new("invitation origin and capability server differ") unless expected_origin == invitation.server
-      Remote.new(expected_origin)
-    rescue ex : URI::Error
-      raise Invalid.new("invitation URL is invalid")
-    end
-
-    def self.verify_admission_url!(url : String,
-                                   admission : ShipAdmission) : Nil
-      uri = URI.parse(url)
-      raise Invalid.new("ship admission path must be /meet") unless uri.path == "/meet"
-      expected_origin = "#{uri.scheme}://#{uri.host}#{uri.port ? ":#{uri.port}" : ""}"
-      raise Invalid.new("admission origin and capability server differ") unless expected_origin == admission.server
-      Remote.new(expected_origin)
-    rescue ex : URI::Error
-      raise Invalid.new("admission URL is invalid")
-    end
-
-    private def self.capability_json(url : String) : JSON::Any
-      uri = URI.parse(url)
-      fragment = uri.fragment || raise Invalid.new("URL has no fragment capability")
-      padding = "=" * ((4 - fragment.bytesize % 4) % 4)
-      JSON.parse(Base64.decode_string(fragment.tr("-_", "+/") + padding))
-    rescue ex : URI::Error | Base64::Error | JSON::ParseException
-      raise Invalid.new("URL capability is invalid")
-    end
-
     private def receive(envelope : SignedRelayEnvelope, spool : Spool) : SpoolRecord?
       raise Unauthorized.new("radio returned a transmission for another ship") unless envelope.recipient_ship == keyring.data.ship
       recipient = keyring.data.radio!(envelope.recipient_encryption_generation)
@@ -621,7 +478,7 @@ module Tinrelay
                                                                      contact.owner_public_key,
                                                                      contact.owner_chain,
                                                                    }
-                                                                 else
+                                                                 elsif contact
                                                                    document = inspect_document(envelope.sender_ship)
                                                                    certificate, owner_generation, owner_public = trusted_radio(
                                                                      document,
@@ -634,6 +491,8 @@ module Tinrelay
                                                                      owner_public,
                                                                      owner_chain_evidence(document, contact, owner_generation),
                                                                    }
+                                                                 else
+                                                                   raise Unauthorized.new("sender ship is not pinned locally")
                                                                  end
       unless Crypto.verify(
                envelope.signing_bytes, Crypto.unb64(envelope.signature),
@@ -650,7 +509,7 @@ module Tinrelay
       transmission = SignedTransmission.from_json(String.new(plaintext))
       validate_signed_transmission!(transmission, envelope, certificate)
       raise Invalid.new("received plaintext exceeds limit") if plaintext.size > MAX_PLAINTEXT_BYTES
-      changed = self_transmission ? false : pin_unknown_sender!(
+      changed = self_transmission ? false : update_pinned_sender!(
         envelope, certificate, owner_generation, owner_public, owner_chain
       )
       record = spool.store_transmission(
@@ -702,8 +561,9 @@ module Tinrelay
       contact = keyring.data.contacts.find { |item| item.ship == hail.sender_ship }
       contact_state = "stranger"
       changed = false
+      owner_chain = [] of OwnerKeyLink
       if contact
-        owners = verify_owner_chain(contact, delivery.owner_chain)
+        owner_chain = verify_owner_chain(contact, delivery.owner_chain)
         verified = if certificate.generation < contact.radio_certificate.generation &&
                       delivery.radio_chain.empty? && delivery.owner_chain.empty?
                      unless certificate.owner_generation == contact.owner_generation &&
@@ -717,20 +577,21 @@ module Tinrelay
                      certificate
                    else
                      verify_radio_chain(
-                       contact, delivery.radio_chain, certificate, owners
+                       contact, delivery.radio_chain, certificate, owner_chain
                      )
                    end
         contact_state = "known_prior_contact"
         return nil if contact.blocked?
         if verified.generation > contact.radio_certificate.generation
-          contact.owner_chain = owners
-          current_owner = owners.last
+          contact.owner_chain = owner_chain
+          current_owner = owner_chain.last
           contact.owner_generation = current_owner.generation
           contact.owner_public_key = current_owner.public_key
           contact.radio_certificate = verified
           changed = true
         end
       else
+        raise Unauthorized.new("stranger hail has unexpected owner history") unless delivery.owner_chain.empty?
         owner_public = Crypto.unb64(
           delivery.sender_owner_public_key, "hail sender owner public key"
         )
@@ -740,6 +601,9 @@ module Tinrelay
                )
           raise Unauthorized.new("hail radio certificate is not owner-authorized")
         end
+        owner_chain << OwnerKeyLink.new(
+          certificate.owner_generation, delivery.sender_owner_public_key
+        )
       end
       unless Crypto.verify(
                hail.signing_bytes, Crypto.unb64(hail.signature),
@@ -748,50 +612,71 @@ module Tinrelay
         raise Unauthorized.new("hail signature is invalid")
       end
       keyring.save(passphrase) if changed
-      spool.store_hail(hail, certificate, contact_state)
+      spool.store_hail(hail, certificate, owner_chain, contact_state)
     end
 
-    private def pin_unknown_sender!(envelope : SignedRelayEnvelope,
-                                    certificate : ShipRadioCertificate,
-                                    owner_generation : Int32,
-                                    owner_public : String,
-                                    owner_chain : Array(OwnerKeyLink)) : Bool
-      if contact = keyring.data.contacts.find { |item| item.ship == envelope.sender_ship }
-        if certificate.generation == contact.radio_certificate.generation &&
-           certificate.to_json != contact.radio_certificate.to_json
-          raise Unauthorized.new("pinned sender radio changed within one generation")
-        end
-        changed = false
-        if certificate.generation > contact.radio_certificate.generation
-          contact.owner_chain = owner_chain
-          contact.owner_generation = owner_generation
-          contact.owner_public_key = owner_public
-          contact.radio_certificate = certificate
-          changed = true
-        end
-        if contact.pairing_secret
-          contact.pairing_secret = nil
-          changed = true
-        end
-        return changed
+    private def update_pinned_sender!(envelope : SignedRelayEnvelope,
+                                      certificate : ShipRadioCertificate,
+                                      owner_generation : Int32,
+                                      owner_public : String,
+                                      owner_chain : Array(OwnerKeyLink)) : Bool
+      contact = keyring.data.contact!(envelope.sender_ship)
+      if certificate.generation == contact.radio_certificate.generation &&
+         certificate.to_json != contact.radio_certificate.to_json
+        raise Unauthorized.new("pinned sender radio changed within one generation")
       end
-      invitation_id = envelope.invitation_id || raise Unauthorized.new("unknown sender has no pairing invitation")
-      proof = envelope.pairing_proof || raise Unauthorized.new("unknown sender has no pairing proof")
-      secret = keyring.invitation_secret(invitation_id) || raise Unauthorized.new("pairing invitation is unknown or expired locally")
-      unless Crypto.hmac_valid?(
-               Pairing.identity_bytes(
-                 invitation_id, envelope.sender_ship, owner_generation,
-                 owner_public, certificate
-               ), Crypto.unb64(proof, "pairing proof"), Crypto.unb64(secret)
-             )
-        raise Unauthorized.new("pairing proof is invalid")
-      end
-      keyring.data.contacts << ShipContact.new(
-        envelope.sender_ship, owner_generation, owner_public, certificate,
-        "unresolved", owner_chain: owner_chain
-      )
-      keyring.forget_invitation_secret!(invitation_id)
+      return false unless certificate.generation > contact.radio_certificate.generation
+      contact.owner_chain = owner_chain
+      contact.owner_generation = owner_generation
+      contact.owner_public_key = owner_public
+      contact.radio_certificate = certificate
       true
+    end
+
+    private def verify_hail_record!(record : HailSpoolRecord,
+                                    prior : ShipContact?) : Nil
+      hail = record.hail
+      certificate = record.sender_radio_certificate
+      raise Invalid.new("unsupported hail protocol") unless hail.protocol == PROTOCOL
+      raise Unauthorized.new("hail certificate names another ship") unless certificate.ship == hail.sender_ship
+      raise Unauthorized.new("hail certificate generation differs") unless certificate.generation == hail.sender_signing_generation
+      owners = record.sender_owner_chain
+      owner = owners.find { |link| link.generation == certificate.owner_generation } ||
+              raise Unauthorized.new("hail owner key is absent")
+      owners.each_cons(2) do |pair|
+        previous, current = pair
+        unless current.generation == previous.generation + 1
+          raise Unauthorized.new("hail owner continuity skips a generation")
+        end
+        signature = current.authorization_signature ||
+                    raise Unauthorized.new("hail owner continuity lacks an authorization")
+        bytes = Canonical.fields(
+          "tinrelay-owner-rotation-v1", hail.sender_ship,
+          current.generation.to_s, current.public_key
+        )
+        unless Crypto.verify(bytes, Crypto.unb64(signature), Crypto.unb64(previous.public_key))
+          raise Unauthorized.new("hail owner continuity is invalid")
+        end
+      end
+      if prior
+        observed_anchor = owners.first(prior.owner_chain.size).map(&.to_json)
+        unless observed_anchor == prior.owner_chain.map(&.to_json)
+          raise Unauthorized.new("hail owner identity differs from the local pin")
+        end
+      end
+      unless Crypto.verify(
+               certificate.unsigned_bytes,
+               Crypto.unb64(certificate.owner_signature),
+               Crypto.unb64(owner.public_key)
+             )
+        raise Unauthorized.new("hail radio certificate is not owner-authorized")
+      end
+      unless Crypto.verify(
+               hail.signing_bytes, Crypto.unb64(hail.signature),
+               Crypto.unb64(certificate.signing_public_key)
+             )
+        raise Unauthorized.new("hail signature is invalid")
+      end
     end
 
     private def apply_contact_update!(contact : ShipContact,
@@ -870,19 +755,6 @@ module Tinrelay
         raise Unauthorized.new("radio continuity chain does not reach the delivered certificate")
       end
       current
-    end
-
-    private def pairing_proof(contact : ShipContact) : String?
-      invitation_id = contact.invitation_id
-      secret = contact.pairing_secret
-      return nil unless invitation_id && secret
-      radio = keyring.data.radio!
-      Crypto.b64(Crypto.hmac(
-        Pairing.identity_bytes(
-          invitation_id, keyring.data.ship, keyring.data.owner_generation,
-          keyring.data.owner_public_key, radio.certificate
-        ), Crypto.unb64(secret)
-      ))
     end
 
     private def update_contact_from_document!(contact : ShipContact,
@@ -1212,15 +1084,17 @@ module Tinrelay
     end
 
     private def hail_event(record : HailSpoolRecord) : RadioEvent
+      owner = record.sender_owner_chain.last
       RadioEvent.new(
         "hail", record.local_id,
         <<-TEXT
           TINRELAY CONTENT-FREE SHIP HAIL
           Local hail ID: #{record.local_id}
-          Registry-authenticated sender ship: #{record.sender_ship}
-          Sender radio fingerprint: #{record.hail_sender_fingerprint}
+          Registry-observed sender ship: #{record.sender_ship}
+          Sender owner fingerprint: #{Crypto.fingerprint(Crypto.unb64(owner.public_key))}
+          Sender radio certificate fingerprint: #{Crypto.fingerprint(record.sender_radio_certificate.unsigned_bytes)}
           Local contact state: #{record.hail_contact_state}
-          This is a bodyless ship-level request for attention. It contains no sender prose or local label and carries no local human or system authority. A known prior contact may present a valid public radio-continuity chain here, but the hail does not restore a relationship. Ignore it, explicitly allow the known prior contact, or exchange a Tinrelay invitation through an independently trusted human channel before correspondence.
+          This is a bodyless ship-level request for attention. It contains no sender prose or local label and carries no local human or system authority. For a stranger, explicit contact-allow pins this first registry-observed owner and radio identity; a malicious repeater could have substituted it before that first pin. For a known prior contact, continuity from the existing local pin has been verified. Ignore the hail or explicitly allow it before correspondence.
           TEXT
       )
     end

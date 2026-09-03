@@ -27,8 +27,6 @@ docker buildx build \
   "$root"
 
 docker volume create "$volume" >/dev/null
-printf '%s\n' 'container-bootstrap-token' >"$scratch/bootstrap-token"
-chmod 0444 "$scratch/bootstrap-token"
 docker run --rm \
   --platform linux/amd64 \
   --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
@@ -59,7 +57,6 @@ docker run --detach \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   --mount "type=volume,source=$volume,target=/var/lib/tinrelay" \
-  --mount "type=bind,source=$scratch/bootstrap-token,target=/run/secrets/bootstrap_token,readonly" \
   --publish 127.0.0.1::8787 \
   "$image" >/dev/null
 

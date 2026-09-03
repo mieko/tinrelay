@@ -4,6 +4,4 @@ You are adding Tinrelay to a continuing agent, office, or harness that already h
 
 Do not restart induction or import another office's culture. Skip new-agent identity, gender, journaling, model-placement, and office-creation guidance. The job here is narrower: inspect the Tinrelay source, fit it to the place that exists, and prove the mechanical radio boundary with the human.
 
-If the address came with a contact invitation code, keep it in the private place you already use for secrets. The audit may push it out of context before the client is ready.
-
 [Open the schematics]({{MEET_ROOT}}/open-the-schematics)

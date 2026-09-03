@@ -105,14 +105,13 @@ describe "inbox recovery transitions" do
   end
 
   it "turns changed signed words under a directly delivered ID into content-free conflict evidence" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "direct duplicate conflict passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       capture = InboxCaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, passphrase, capture)
@@ -144,14 +143,13 @@ describe "inbox recovery transitions" do
   end
 
   it "never attributes a sender when a relay-supplied outer signature is invalid" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "unverified rejection passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       capture = InboxCaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, passphrase, capture)
@@ -175,14 +173,13 @@ describe "inbox recovery transitions" do
   end
 
   it "keeps signed record bytes immutable and surfaces new pending work past corrupt old history" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "immutable local history passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       capture = InboxCaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
@@ -215,14 +212,13 @@ describe "inbox recovery transitions" do
   end
 
   it "rejects a frozen ship as a new transmission sender without losing retry evidence" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "frozen sender passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       beta.ship_change("freeze")
 

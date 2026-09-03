@@ -6,9 +6,10 @@ module Tinrelay
       "already-aboard" => %w(already-aboard open-the-schematics make-it-run name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
       "first-light"    => %w(first-light talk-together find-a-place open-the-schematics make-it-run take-a-pulse name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
     }
-    JOURNEYS  = JOURNEY_ACTIONS.keys
-    ACTIONS   = JOURNEY_ACTIONS.values.flatten.uniq
-    PAGE_KEYS = (["home", "meet", "not-found"] + ACTIONS).uniq
+    JOURNEYS         = JOURNEY_ACTIONS.keys
+    ACTIONS          = JOURNEY_ACTIONS.values.flatten.uniq
+    PAGE_KEYS        = (["home", "meet", "not-found"] + ACTIONS).uniq
+    FLIGHT_PLAN_PAGE = "flight-plan"
 
     getter common_path : String
     getter source_repository : String
@@ -32,7 +33,7 @@ module Tinrelay
         source = replace_once(source, "{{COORDINATE_BLOCK}}", coordinate_block(coordinate))
       end
       if source.includes?("{{MEET_ROOT}}")
-        source = replace_all(source, "{{MEET_ROOT}}", meet_root(coordinate, journey))
+        source = replace_all(source, "{{MEET_ROOT}}", line_root(coordinate, journey))
       end
 
       case action
@@ -51,7 +52,7 @@ module Tinrelay
         label = journey == "first-light" ? "take a breath before moving on" : "name the ship"
         source = replace_once(
           source, "{{AFTER_BUILD_LINK}}",
-          "[#{label}](#{meet_root(coordinate, journey)}/#{next_action})"
+          "[#{label}](#{line_root(coordinate, journey)}/#{next_action})"
         )
       when "open-the-channel"
         completion_name = coordinate ? "directed-completion.md" : "mentorless-completion.md"
@@ -69,8 +70,30 @@ module Tinrelay
         naming_name = coordinate ? "first-light-directed-naming.md" : "first-light-mentorless-naming.md"
         naming = journey == "first-light" ? File.read(File.join(directory, naming_name)) : ""
         completion = replace_once(completion, "{{FIRST_LIGHT_NAMING}}", naming)
-        completion = replace_all(completion, "{{MEET_ROOT}}", meet_root(coordinate, journey))
+        completion = replace_all(completion, "{{MEET_ROOT}}", line_root(coordinate, journey))
         source = replace_once(source, "{{COMPLETION_GUIDANCE}}", completion)
+      end
+      source
+    rescue ex : File::NotFoundError
+      raise NotFound.new("bootstrap content is not configured")
+    end
+
+    def flight_plan(coordinate : String? = nil) : String
+      Names.coordinate!(coordinate) if coordinate
+      directory = File.dirname(common_path)
+      source = File.read(File.join(directory, "flight-plan.md"))
+      source = replace_once(
+        source, "{{MEET_TITLE}}", markdown_link_text(source_title(File.read(common_path)))
+      )
+      source = replace_once(source, "{{MEET_ROOT}}", line_root(coordinate, nil))
+      JOURNEY_ACTIONS.each do |journey, actions|
+        steps = actions.map do |action|
+          title = source_title(File.read(File.join(directory, "#{action}.md")))
+          suffix = action == journey ? journey : "#{journey}/#{action}"
+          "- [#{markdown_link_text(title)}](#{line_root(coordinate, nil)}/#{suffix})"
+        end.join('\n')
+        marker = "{{#{journey.upcase.gsub('-', '_')}_STEPS}}"
+        source = replace_once(source, marker, steps)
       end
       source
     rescue ex : File::NotFoundError
@@ -79,7 +102,9 @@ module Tinrelay
 
     def html(markdown : String, noindex : Bool, alternate_path : String,
              page : String) : String
-      raise Invalid.new("bootstrap presentation page is invalid") unless PAGE_KEYS.includes?(page)
+      unless PAGE_KEYS.includes?(page) || page == FLIGHT_PLAN_PAGE
+        raise Invalid.new("bootstrap presentation page is invalid")
+      end
       shell = File.read(File.join(File.dirname(common_path), "meet-shell.html"))
       options = Markd::Options.new(safe: true)
       document = Markd::Parser.parse(markdown, options)
@@ -88,8 +113,8 @@ module Tinrelay
       title = markdown_title.try { |value| "#{value} - Tinrelay" } || "Tinrelay"
       home = page == "home"
       description = home ? markdown_description(document) || "Tinrelay" : "Inspect and set up a Tinrelay radio."
-      social_title = home ? markdown_title || "Tinrelay" : "Meet Tinrelay"
-      canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/meet"
+      social_title = home ? markdown_title || "Tinrelay" : "Open a Tinrelay line"
+      canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/line"
       shell
         .gsub("{{ROBOTS}}", noindex ? "noindex,nofollow,noarchive" : "index,follow")
         .gsub("{{DESCRIPTION}}", HTML.escape(description))
@@ -98,7 +123,7 @@ module Tinrelay
         .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_path))
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))
-        .gsub("{{ART_STYLESHEET}}", art_stylesheet(page))
+        .gsub("{{ART_STYLESHEET}}", page == FLIGHT_PLAN_PAGE ? "" : art_stylesheet(page))
         .gsub("{{BODY}}", rendered)
     rescue ex : File::NotFoundError
       raise NotFound.new("bootstrap presentation shell is not configured")
@@ -161,6 +186,12 @@ module Tinrelay
       nil
     end
 
+    private def source_title(source : String) : String
+      options = Markd::Options.new(safe: true)
+      document = Markd::Parser.parse(source, options)
+      markdown_title(document) || raise Invalid.new("bootstrap page is missing its title")
+    end
+
     private def markdown_text(node : Markd::Node) : String
       String.build do |io|
         walker = node.walker
@@ -190,13 +221,17 @@ module Tinrelay
       value
     end
 
-    private def coordinate_block(coordinate : String?) : String
-      return "" unless coordinate
-      "\nThis line points to #{markdown_code(coordinate)}, who you will hopefully meet once you and your user have finished building the radio. If there is something in the fragment of this URL, that is their contact invitation code. You should be sure to remember that invitation code. Keep it private; the radio software will ask for it later, and these pages never receive or repeat it.\n"
+    private def markdown_link_text(value : String) : String
+      value.gsub('\\', "\\\\").gsub('[', "\\[").gsub(']', "\\]")
     end
 
-    private def meet_root(coordinate : String?, journey : String?) : String
-      root = coordinate ? "/meet/#{URI.encode_path_segment(coordinate)}" : "/meet"
+    private def coordinate_block(coordinate : String?) : String
+      return "" unless coordinate
+      "\nThis line points to #{markdown_code(coordinate)}, who you will hopefully meet once you and your user have finished building the radio. At the end, you and your user can choose whether to send that ship a wordless hail.\n"
+    end
+
+    private def line_root(coordinate : String?, journey : String?) : String
+      root = coordinate ? "/#{URI.encode_path_segment(coordinate)}" : "/line"
       journey ? "#{root}/#{journey}" : root
     end
 

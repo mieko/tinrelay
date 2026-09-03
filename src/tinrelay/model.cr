@@ -83,15 +83,12 @@ module Tinrelay
     property created_at : Int64
     property expires_at : Int64
     property ciphertext : String
-    property invitation_id : String?
-    property pairing_proof : String?
     property signature : String
 
     def initialize(@transmission_id, @thread_id, @sender_ship,
                    @sender_signing_generation, @recipient_ship,
                    @recipient_encryption_generation, @created_at, @expires_at,
-                   @ciphertext, @reply_to = nil, @invitation_id = nil,
-                   @pairing_proof = nil, @signature = "",
+                   @ciphertext, @reply_to = nil, @signature = "",
                    @protocol = PROTOCOL, @object_version = 1)
     end
 
@@ -101,7 +98,7 @@ module Tinrelay
         protocol.to_s, transmission_id, thread_id, reply_to || "", sender_ship,
         sender_signing_generation.to_s, recipient_ship,
         recipient_encryption_generation.to_s, created_at.to_s,
-        expires_at.to_s, ciphertext, invitation_id || "", pairing_proof || ""
+        expires_at.to_s, ciphertext
       )
     end
 
@@ -155,57 +152,6 @@ module Tinrelay
     end
   end
 
-  class ContactInvitation
-    include JSON::Serializable
-
-    property kind : String
-    property protocol : Int32
-    property server : String
-    property invitation_id : String
-    property relationship_admission_secret : String
-    property peer_pairing_secret : String
-    property expires_at : Int64
-    property recipient_ship : String
-    property recipient_label : String
-    property ship_owner_generation : Int32
-    property ship_owner_public_key : String
-    property radio_certificate : ShipRadioCertificate
-
-    def initialize(@server, @invitation_id,
-                   @relationship_admission_secret, @peer_pairing_secret,
-                   @expires_at, @recipient_ship, @recipient_label,
-                   @ship_owner_generation, @ship_owner_public_key,
-                   @radio_certificate, @protocol = PROTOCOL,
-                   @kind = "contact_invitation")
-    end
-
-    def coordinate : String
-      "#{recipient_label}@#{recipient_ship}"
-    end
-
-    def radio_fingerprint : String
-      Crypto.fingerprint(Crypto.unb64(radio_certificate.encryption_public_key))
-    end
-  end
-
-  class ShipAdmission
-    include JSON::Serializable
-
-    property kind : String
-    property protocol : Int32
-    property server : String
-    property admission_id : String
-    property ship : String
-    property ship_claim_admission_secret : String
-    property expires_at : Int64
-
-    def initialize(@server, @admission_id, @ship,
-                   @ship_claim_admission_secret,
-                   @expires_at, @protocol = PROTOCOL,
-                   @kind = "ship_admission")
-    end
-  end
-
   class RadioAuth
     include JSON::Serializable
 
@@ -254,58 +200,8 @@ module Tinrelay
     property ship : String
     property owner_public_key : String
     property radio_certificate : ShipRadioCertificate
-    property bootstrap_token : String?
-    property ship_claim_admission_id : String?
-    property ship_claim_admission_secret : String?
 
-    def initialize(@ship, @owner_public_key, @radio_certificate,
-                   @bootstrap_token = nil, @ship_claim_admission_id = nil,
-                   @ship_claim_admission_secret = nil)
-    end
-  end
-
-  class InvitationCreate
-    include JSON::Serializable
-
-    property id : String
-    property relationship_admission_secret_hash : String
-    property expires_at : Int64
-    property auth : RadioAuth
-
-    def initialize(@id, @relationship_admission_secret_hash, @expires_at, @auth)
-    end
-
-    def payload : Bytes
-      Canonical.fields(id, relationship_admission_secret_hash, expires_at.to_s)
-    end
-  end
-
-  class InvitationRevoke
-    include JSON::Serializable
-
-    property id : String
-    property auth : RadioAuth
-
-    def initialize(@id, @auth)
-    end
-
-    def payload : Bytes
-      Canonical.fields(id)
-    end
-  end
-
-  class InvitationAccept
-    include JSON::Serializable
-
-    property id : String
-    property relationship_admission_secret : String
-    property auth : RadioAuth
-
-    def initialize(@id, @relationship_admission_secret, @auth)
-    end
-
-    def payload : Bytes
-      Canonical.fields(id, relationship_admission_secret)
+    def initialize(@ship, @owner_public_key, @radio_certificate)
     end
   end
 
@@ -606,20 +502,31 @@ module Tinrelay
   end
 
   class HailSpoolRecord < SpoolRecord
-    getter hail_id : String
-    getter sender_ship : String
-    getter recipient_ship : String
-    getter hail_sender_fingerprint : String
+    getter hail : Hail
+    getter sender_owner_chain : Array(OwnerKeyLink)
+    getter sender_radio_certificate : ShipRadioCertificate
     getter hail_contact_state : String
 
     def initialize(local_id : String, received_at : Int64,
-                   @hail_id : String, @sender_ship : String,
-                   @recipient_ship : String,
-                   @hail_sender_fingerprint : String,
+                   @hail : Hail,
+                   @sender_owner_chain : Array(OwnerKeyLink),
+                   @sender_radio_certificate : ShipRadioCertificate,
                    @hail_contact_state : String,
                    routed_at : Int64? = nil, handled_at : Int64? = nil,
                    format : Int32 = 1)
       super("hail", local_id, received_at, routed_at, handled_at, format)
+    end
+
+    def hail_id : String
+      hail.hail_id
+    end
+
+    def sender_ship : String
+      hail.sender_ship
+    end
+
+    def recipient_ship : String
+      hail.recipient_ship
     end
   end
 
@@ -634,19 +541,6 @@ module Tinrelay
 
     def initialize(@kind, @local_id, @wrapper, @name = nil,
                    @contract = "tinrelay-radio-wait-v1")
-    end
-  end
-
-  module Pairing
-    def self.identity_bytes(invitation_id : String, ship : String,
-                            owner_generation : Int32,
-                            owner_public_key : String,
-                            certificate : ShipRadioCertificate) : Bytes
-      Canonical.fields(
-        "tinrelay-pairing-v1", invitation_id, ship,
-        owner_generation.to_s, owner_public_key,
-        String.new(certificate.canonical_bytes)
-      )
     end
   end
 

@@ -26,12 +26,6 @@ describe Tinrelay::Crypto do
       "3"
     ))
     certificate.canonical_bytes.hexstring.should eq(fixture["certificate_hex"].as_s)
-    Tinrelay::Pairing.identity_bytes(
-      fixture["invitation_id"].as_s, certificate.ship,
-      certificate.owner_generation, fixture["owner_public_key"].as_s,
-      certificate
-    ).hexstring.should eq(fixture["pairing_identity_hex"].as_s)
-
     auth = Tinrelay::OwnerAuth.new("alpha", 3, 7_i64, 1_750_000_001_i64)
     close = Tinrelay::RelationshipClose.new(
       fixture["peer_ship"].as_s,
@@ -69,16 +63,6 @@ describe Tinrelay::Crypto do
     expect_raises(Tinrelay::Unauthorized) do
       Tinrelay::Crypto.decrypt_keyring(encrypted, salt, nonce, "wrong passphrase here")
     end
-  end
-
-  it "verifies pairing proofs with the fixed HMAC-SHA-256 contract" do
-    key = Tinrelay::Crypto.random(Tinrelay::Crypto::HMAC_KEY_BYTES)
-    message = "paired identity facts".to_slice
-    proof = Tinrelay::Crypto.hmac(message, key)
-
-    Tinrelay::Crypto.hmac_valid?(message, proof, key).should be_true
-    proof[0] ^= 1
-    Tinrelay::Crypto.hmac_valid?(message, proof, key).should be_false
   end
 
   it "zeroes a transient secret buffer through libsodium" do

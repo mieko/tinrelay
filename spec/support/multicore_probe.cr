@@ -77,22 +77,26 @@ def burst(count : Int32, concurrency : Int32, &request : -> Nil)
   }
 end
 
-def admit_ship(root : String, origin : String, api : Tinrelay::API,
-               ship : String, passphrase : String) : Tinrelay::Client
-  secret_bytes = Tinrelay::Crypto.random(32)
-  secret = Tinrelay::Crypto.b64(secret_bytes)
-  id = Tinrelay::Ids.uuid
-  expires_at = Time.utc.to_unix + 3600
-  api.store.create_admission(
-    id, ship, Digest::SHA256.digest(secret_bytes), expires_at
-  )
-  admission = Tinrelay::ShipAdmission.new(
-    origin, id, ship, secret, expires_at
-  )
-  url = "#{origin}/meet##{Base64.urlsafe_encode(admission.to_json, padding: false)}"
+def admit_ship(root : String, origin : String, ship : String,
+               passphrase : String) : Tinrelay::Client
   Tinrelay::Client.join(
-    File.join(root, "#{ship}.keyring"), url, ship, passphrase
+    File.join(root, "#{ship}.keyring"), origin, ship, passphrase
   )
+end
+
+def connect_ships(root : String, first : Tinrelay::Client,
+                  second : Tinrelay::Client) : Nil
+  first_spool = Tinrelay::Spool.new(File.join(root, "#{first.keyring.data.ship}-contact"))
+  second_spool = Tinrelay::Spool.new(File.join(root, "#{second.keyring.data.ship}-contact"))
+  outbox = Tinrelay::HailOutbox.new(File.join(root, "hail-outbox"))
+  first.hail(second.keyring.data.ship, outbox)
+  event = second.radio_wait(second_spool, hold_seconds: 0)
+  second_spool.routed(event.local_id)
+  second.allow_contact(first.keyring.data.ship, event.local_id, second_spool)
+  second.hail(first.keyring.data.ship, outbox)
+  return_event = first.radio_wait(first_spool, hold_seconds: 0)
+  first_spool.routed(return_event.local_id)
+  first.allow_contact(second.keyring.data.ship, return_event.local_id, first_spool)
 end
 
 threads = 4
@@ -118,10 +122,9 @@ FileUtils.rm_r(root) if Dir.exists?(root)
 Dir.mkdir_p(root)
 begin
   template = File.expand_path("../../templates/common-bootstrap.md", __DIR__)
-  token = "multicore-probe-token"
   config = Tinrelay::ServerConfig.new(
     "127.0.0.1", 0, File.join(root, "service.db"),
-    Digest::SHA256.digest(token), template,
+    template,
     "https://example.test/tinrelay.git", threads
   )
   api = Tinrelay::API.new(config)
@@ -142,13 +145,13 @@ begin
   origin = "http://127.0.0.1:#{address.port}"
 
   passphrase = "multicore probe passphrase"
-  alpha = Tinrelay::Client.bootstrap(
-    File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+  alpha = Tinrelay::Client.join(
+    File.join(root, "alpha.keyring"), origin, "alpha", passphrase
   )
-  beta = admit_ship(root, origin, api, "beta", passphrase)
-  beta.pin_invitation(alpha.create_invitation("steward", 3600))
-  gamma = admit_ship(root, origin, api, "gamma", passphrase)
-  gamma.pin_invitation(alpha.create_invitation("steward", 3600))
+  beta = admit_ship(root, origin, "beta", passphrase)
+  connect_ships(root, alpha, beta)
+  gamma = admit_ship(root, origin, "gamma", passphrase)
+  connect_ships(root, alpha, gamma)
   capture = ProbeCaptureRemote.new(origin)
   composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
   writes.times { |index| composer.send("steward@alpha", "probe #{index}", "caller") }
@@ -180,7 +183,7 @@ begin
   metrics.reset
   read_started = Time.instant
   read_result = burst(reads, concurrency) do
-    response = HTTP::Client.get("#{origin}/meet")
+    response = HTTP::Client.get("#{origin}/line")
     raise "read status #{response.status_code}" unless response.status_code == 200
   end
   read_wall = (Time.instant - read_started).total_milliseconds

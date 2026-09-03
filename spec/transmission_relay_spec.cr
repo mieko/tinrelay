@@ -14,9 +14,9 @@ class RelayCaptureRemote < Tinrelay::Remote
 end
 
 module TinrelayRelaySpec
-  def self.admit(root : String, origin : String, api : Tinrelay::API,
-                 ship : String, passphrase : String) : Tinrelay::Client
-    TinrelaySpec.admit(root, origin, api, ship, passphrase)
+  def self.admit(root : String, origin : String, ship : String,
+                 passphrase : String) : Tinrelay::Client
+    TinrelaySpec.admit(root, origin, ship, passphrase)
   end
 
   def self.trust_locally(sender : Tinrelay::Client,
@@ -58,17 +58,16 @@ module TinrelayRelaySpec
 end
 
 describe "transmission relay transitions" do
-  it "accepts opaquely but stores nothing without a consumed-invitation relationship" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+  it "accepts opaquely but stores nothing without a positive relationship" do
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "relationship admission passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
-      gamma = TinrelayRelaySpec.admit(root, origin, api, "gamma", passphrase)
+      gamma = TinrelayRelaySpec.admit(root, origin, "gamma", passphrase)
       TinrelayRelaySpec.trust_locally(beta, gamma)
 
       attempt = beta.send("steward@gamma", "guessed but unrelated")
@@ -80,14 +79,13 @@ describe "transmission relay transitions" do
   end
 
   it "spools content-free rejection evidence, erases unusable payload, and reaches later traffic" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "unusable transmission passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
@@ -144,14 +142,13 @@ describe "transmission relay transitions" do
   end
 
   it "counts an authenticated discarded attempt before destination resolution" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "all attempt rate passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       (Tinrelay::Store::MAX_TRANSMISSIONS_PER_HOUR - 1).times do
         api.submission_window.allow?("beta").should be_true
@@ -173,16 +170,15 @@ describe "transmission relay transitions" do
   end
 
   it "returns direct, fallback, and discarded acceptance on the same bounded schedule" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "acceptance schedule passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
-      gamma = TinrelayRelaySpec.admit(root, origin, api, "gamma", passphrase)
+      gamma = TinrelayRelaySpec.admit(root, origin, "gamma", passphrase)
       TinrelayRelaySpec.trust_locally(beta, gamma)
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
@@ -213,14 +209,13 @@ describe "transmission relay transitions" do
   end
 
   it "rechecks recipient state and pending capacity in the final fallback transaction" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "fallback transaction passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       envelope = TinrelayRelaySpec.capture(beta, origin, "steward@alpha", "prepared before freeze")
       prepared = api.store.prepare(envelope).not_nil!
@@ -255,14 +250,13 @@ describe "transmission relay transitions" do
   end
 
   it "does not rewrite the encrypted keyring for a routine known-contact send" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "stable keyring passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       before = File.read(beta.keyring.path)
       TinrelayRelaySpec.capture(beta, origin, "steward@alpha", "no key changes")
@@ -271,14 +265,13 @@ describe "transmission relay transitions" do
   end
 
   it "uses and enforces the 96-hour durable fallback window" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "fallback lifetime passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
 
       envelope = TinrelayRelaySpec.capture(
@@ -298,15 +291,14 @@ describe "transmission relay transitions" do
     end
   end
 
-  it "retains relay tombstones only through envelope expiry and prunes dead admissions" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+  it "retains relay tombstones only through envelope expiry" do
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "cleanup transition passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       sent = beta.send("steward@alpha", "short retry window", expires_in: 30)
       ack = Tinrelay::TransmissionAck.new(
@@ -315,17 +307,9 @@ describe "transmission relay transitions" do
       )
       api.store.acknowledge(ack)
 
-      dead = Tinrelay::Ids.uuid
-      api.database.db.exec(
-        "INSERT INTO admissions(id, ship, ship_claim_admission_secret_hash, expires_at) VALUES (?, ?, ?, ?)",
-        dead, "dead-ship", Tinrelay::Crypto.random(32), sent.created_at + 1
-      )
       api.store.cleanup(sent.expires_at + 1)
       api.database.db.query_one?(
         "SELECT id FROM transmissions WHERE id = ?", sent.transmission_id, as: String
-      ).should be_nil
-      api.database.db.query_one?(
-        "SELECT id FROM admissions WHERE id = ?", dead, as: String
       ).should be_nil
     end
   end

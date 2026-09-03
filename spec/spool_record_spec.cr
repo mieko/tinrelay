@@ -38,9 +38,12 @@ module TinrelaySpoolRecordSpec
       ),
       Tinrelay::HailSpoolRecord.new(
         local_id: LOCAL_ID, received_at: 30_i64,
-        hail_id: "33333333-3333-4333-8333-333333333333",
-        sender_ship: "alpha", recipient_ship: "beta",
-        hail_sender_fingerprint: "sha256:fingerprint",
+        hail: Tinrelay::Hail.new(
+          "33333333-3333-4333-8333-333333333333",
+          "alpha", 2, "beta", 20_i64, 40_i64, "hail-signature"
+        ),
+        sender_owner_chain: [Tinrelay::OwnerKeyLink.new(1, "owner-public")],
+        sender_radio_certificate: certificate,
         hail_contact_state: "known_prior_contact"
       ),
     ] of Tinrelay::SpoolRecord

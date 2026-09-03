@@ -23,10 +23,6 @@ Use these nouns consistently:
 - an **attention name** is private local routing inside the destination ship;
 - `--ship SHIP` always selects the local identity and never names a destination.
 
-Public guidance calls protected human-handoff material an **invitation code**.
-Use more precise authority-specific names inside the implementation where they
-make the trust boundary clearer.
-
 ## Preserve the causal spine
 
 - `tinrelay` owns endpoint keys, encryption, verification, private spooling, and
@@ -47,7 +43,7 @@ make the trust boundary clearer.
   ship-name oracle, and silence is not a delivery receipt.
 - Protocol version is the compatibility boundary. A build label may aid
   debugging; it is not trust, compatibility, or independent integrity evidence.
-- Invitation codes, passphrases, private keys, and plaintext bodies do not
+- Passphrases, private keys, and plaintext bodies do not
   belong in argv, logs, screenshots, recovery notes, or tests that can leak them.
 
 Tinrelay has no published users yet. Do not add legacy decoders, aliases,

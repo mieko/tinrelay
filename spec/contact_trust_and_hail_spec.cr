@@ -1,105 +1,96 @@
 require "./spec_helper"
 
-class ContactVisibilityRemote < Tinrelay::Remote
-  getter requests = [] of Tuple(String, String)
-
-  def post(path : String, body : String) : String
-    requests << {path, body}
-    super
-  end
-end
-
 describe "contact trust and content-free hails" do
-  it "keeps peer pairing material out of complete server-visible contact admission" do
-    TinrelaySpec.with_server do |root, token, origin, api|
-      passphrase = "independent invitation secrets"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+  it "establishes first contact from an explicitly allowed hail and pins each ship by TOFU" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "explicit hail trust passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
-      beta = TinrelaySpec.admit(root, origin, api, "beta", passphrase)
-      invitation_url = alpha.create_invitation("steward", 3600)
-      invitation = Tinrelay::Client.invitation_from_url(invitation_url)
-      JSON.parse(invitation.to_json).as_h.keys.sort.should eq(%w(
-        expires_at invitation_id kind peer_pairing_secret protocol
-        radio_certificate recipient_label recipient_ship
-        relationship_admission_secret server ship_owner_generation
-        ship_owner_public_key
-      ).sort)
-      invitation.relationship_admission_secret.should_not eq(invitation.peer_pairing_secret)
+      beta = Tinrelay::Client.join(
+        File.join(root, "beta.keyring"), origin, "beta", passphrase
+      )
+      beta_spool = Tinrelay::Spool.new(File.join(root, "beta-inbox"))
+      alpha_spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
 
-      remote = ContactVisibilityRemote.new(origin)
-      Tinrelay::Client.new(beta.keyring, passphrase, remote)
-        .pin_invitation(invitation_url)
-      accept_request = remote.requests.find(&.[0].==("/v1/invitations/accept")).not_nil!
-      accept_json = JSON.parse(accept_request[1])
-      accept_json["relationship_admission_secret"].as_s.should eq(
-        invitation.relationship_admission_secret
+      alpha.hail("beta", Tinrelay::HailOutbox.new(File.join(root, "hail-outbox")))
+      event = beta.radio_wait(beta_spool, hold_seconds: 0)
+      event.kind.should eq("hail")
+      inspection = JSON.parse(beta_spool.inspection(event.local_id))
+      inspection["sender_owner_fingerprint"].as_s.should eq(
+        Tinrelay::Crypto.fingerprint(
+          Tinrelay::Crypto.unb64(alpha.keyring.data.owner_public_key)
+        )
       )
-      accept_request[1].should_not contain(invitation.peer_pairing_secret)
-      server_visible = remote.requests.map(&.[1]).join("\n") +
-                       api.database.db.query_one(
-                         "SELECT hex(relationship_admission_secret_hash) FROM invitations WHERE id = ?",
-                         invitation.invitation_id, as: String
-                       )
-      server_visible.should_not contain(invitation.peer_pairing_secret)
+      inspection["sender_radio_fingerprint"].as_s.should eq(
+        Tinrelay::Crypto.fingerprint(
+          alpha.keyring.data.radio!.certificate.unsigned_bytes
+        )
+      )
+      beta_spool.routed(event.local_id)
+      beta.keyring.data.contacts.should be_empty
+      alpha.keyring.data.contacts.should be_empty
 
-      substituted_owner = Tinrelay::Crypto.signing_keypair
-      substituted_radio = Tinrelay::Crypto.signing_keypair
-      substituted_box = Tinrelay::Crypto.box_keypair
-      certificate = Tinrelay::ShipRadioCertificate.new(
-        "beta", 1, Tinrelay::Crypto.b64(substituted_radio.public_key),
-        Tinrelay::Crypto.b64(substituted_box.public_key), Time.utc.to_unix, 1
+      beta.allow_contact("alpha", event.local_id, beta_spool)
+      beta.keyring.data.contact!("alpha").radio_certificate.to_json.should eq(
+        alpha.keyring.data.radio!.certificate.to_json
       )
-      certificate.owner_signature = Tinrelay::Crypto.b64(
-        Tinrelay::Crypto.sign(certificate.unsigned_bytes, substituted_owner.secret_key)
+      alpha.keyring.data.contacts.should be_empty
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'beta'",
+        as: String
+      ).should eq("active")
+
+      beta.hail(
+        "alpha", Tinrelay::HailOutbox.new(File.join(root, "return-hail-outbox"))
       )
-      identity = Tinrelay::Pairing.identity_bytes(
-        invitation.invitation_id, "beta", 1,
-        Tinrelay::Crypto.b64(substituted_owner.public_key), certificate
+      return_event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
+      return_event.kind.should eq("hail")
+      alpha_spool.routed(return_event.local_id)
+      alpha.allow_contact("beta", return_event.local_id, alpha_spool)
+      alpha.keyring.data.contact!("beta").radio_certificate.to_json.should eq(
+        beta.keyring.data.radio!.certificate.to_json
       )
-      forged = Tinrelay::Crypto.hmac(
-        identity, Tinrelay::Crypto.unb64(invitation.relationship_admission_secret)
-      )
-      genuine = Tinrelay::Crypto.hmac(
-        identity, Tinrelay::Crypto.unb64(invitation.peer_pairing_secret)
-      )
-      Tinrelay::Crypto.constant_time_equal?(forged, genuine).should be_false
+
+      first = alpha.send("steward@beta", "Hello from alpha")
+      received = beta.radio_wait(beta_spool, hold_seconds: 0)
+      received.kind.should eq("transmission")
+      beta_spool.get(received.local_id).as(Tinrelay::TransmissionSpoolRecord)
+        .relay_transmission_id.should eq(first.transmission_id)
     end
   end
 
   it "delivers a ship-name hail only to fallback without creating contact" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "content free hail passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
-      beta = TinrelaySpec.admit(root, origin, api, "beta", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       hail = beta.hail("alpha", Tinrelay::HailOutbox.new(File.join(root, "outbox")))
       event = alpha.radio_wait(spool, hold_seconds: 0)
       event.kind.should eq("hail")
       event.name.should be_nil
-      event.wrapper.should contain("Registry-authenticated sender ship: beta")
+      event.wrapper.should contain("Registry-observed sender ship: beta")
       event.wrapper.should_not contain("steward")
       spool.get(event.local_id).should be_a(Tinrelay::HailSpoolRecord)
       api.database.db.query_one(
         "SELECT collected_at IS NOT NULL FROM hails WHERE id = ?", hail.hail_id,
         as: Int64
       ).should eq(1_i64)
-      api.database.db.scalar(
-        "SELECT COUNT(*) FROM invitations WHERE used_by_ship IN ('alpha', 'beta')"
-      ).as(Int64).should eq(0)
+      api.database.db.scalar("SELECT COUNT(*) FROM relationships").as(Int64).should eq(0)
     end
   end
 
   it "counts authenticated invalid-target hails before resolution and keeps their result opaque" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "opaque hail admission passphrase"
-      Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
-      beta = TinrelaySpec.admit(root, origin, api, "beta", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
       box = Tinrelay::HailOutbox.new(File.join(root, "outbox"))
 
       Tinrelay::Store::MAX_HAILS_PER_DAY.times do |index|

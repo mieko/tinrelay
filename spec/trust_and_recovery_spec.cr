@@ -132,18 +132,17 @@ module TrustRecoverySpec
 end
 
 describe "trust and recovery transitions" do
-  it "binds first-contact pairing to the owner anchor and exact certificate" do
-    TinrelaySpec.with_server do |root, token, origin, api|
-      passphrase = "pairing ownership anchor passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+  it "uses the pinned owner anchor and certificate after first contact" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "pinned ownership anchor passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
-      beta = TinrelaySpec.admit(root, origin, api, "beta", passphrase)
-      invitation = alpha.create_invitation("steward", 3600)
-      beta.pin_invitation(invitation)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      TinrelaySpec.connect(root, alpha, beta)
       capture = TrustCaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, passphrase, capture)
-        .send("steward@alpha", "owner substitution must fail")
+        .send("steward@alpha", "pinned identity survives registry substitution")
       envelope = capture.envelopes.first
 
       genuine = JSON.parse(beta.who("beta"))
@@ -203,20 +202,20 @@ describe "trust and recovery transitions" do
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
       event = receiver.radio_wait(spool, hold_seconds: 0)
-      event.kind.should eq("rejected_transmission")
-      spool.list.none? { |record| record.kind == "transmission" }.should be_true
+      event.kind.should eq("transmission")
+      record = spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+      record.signed_transmission.body.should eq("pinned identity survives registry substitution")
     end
   end
 
   it "retains exact transmission and hail attempts across every unavailable response" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "unavailable ambiguity passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
 
       [nil, api.store].each_with_index do |accepted_store, index|
@@ -244,10 +243,10 @@ describe "trust and recovery transitions" do
   end
 
   it "returns one unauthenticated response for guessed radio and owner state" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "generic authentication boundary passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       radio_payload = Tinrelay::Canonical.fields("0", "", "", "")
       radio_cases = [
@@ -274,16 +273,15 @@ describe "trust and recovery transitions" do
   end
 
   it "reuses one pending radio identity across failure, restart, and lost success" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "single pending radio identity passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
       %w(beta gamma delta).each do |ship|
         peer = TinrelaySpec.admit_contact(
-          root, origin, api, ship, passphrase,
-          alpha.create_invitation("steward", 3600)
+          root, origin, ship, passphrase, alpha
         )
         peer.send("steward@alpha", "establish #{ship}")
         event = alpha.radio_wait(spool, hold_seconds: 0)
@@ -323,14 +321,13 @@ describe "trust and recovery transitions" do
   end
 
   it "suppresses routed exact retries but still advances to later traffic" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "routed retry suppression passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit_contact(
-        root, origin, api, "beta", passphrase,
-        alpha.create_invitation("steward", 3600)
+        root, origin, "beta", passphrase, alpha
       )
       capture = TrustCaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)

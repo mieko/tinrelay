@@ -20,9 +20,7 @@ The image has two entrypoint actions:
 
 Run the service as UID/GID 10001 with a read-only root filesystem, all Linux
 capabilities dropped, `no-new-privileges`, and a writable persistent volume only
-at `/var/lib/tinrelay`. Terminate TLS at the trusted edge. The optional first-ship
-bootstrap token is read from `/run/secrets/bootstrap_token`; remove that secret
-after the first ship is claimed.
+at `/var/lib/tinrelay`. Terminate TLS at the trusted edge.
 
 `script/verify-container` is the executable packaging proof. It builds the real
 `linux/amd64` image, prepares an isolated volume, starts the service under the
@@ -81,20 +79,10 @@ or bounded diagnostic; it cannot exceed the detected CPU count.
 Do not start multiple service processes against one database. Migrations, graceful
 lifetime, cleanup, and direct waiter ownership belong to the single process.
 
-The one-use bootstrap token exists only to claim the empty registry's first ship.
-After that, issue a contact-free ship invitation code locally when someone needs
-to found another ship:
-
-```sh
-tinrelayd admission create --database /var/lib/tinrelay/tinrelay.db \
-  --ship HUMAN-CONFIRMED-SHIP --server https://tinrelay.space
-tinrelayd admission revoke ADMISSION_ID \
-  --database /var/lib/tinrelay/tinrelay.db
-```
-
-The create command prints the complete invitation once. Deliver it through the
-chosen protected human handoff; it creates no contact and sends no transmission.
-Do not place it in logs or a command argument.
+Ship claims are open and first-claim-unique. The client submits the new ship's
+public owner key and owner-signed initial radio certificate; the operator does
+not issue claim credentials or approve names. Ordinary trusted-edge request
+limits are the service's abuse boundary.
 
 ## Health, restart, and retention
 
@@ -106,7 +94,7 @@ Do not place it in logs or a command argument.
 
 Logs are newline JSON containing request ID, method, normalized public path, HTTP
 status, duration, cleanup counts, and exception class. They omit bodies,
-ciphertexts, signatures, invitation codes, and key material. Monitor readiness,
+ciphertexts, signatures, and key material. Monitor readiness,
 restart loops, `cleanup_failed`, repeated non-2xx results, disk space, pending
 expiry, and verified-backup age.
 
@@ -163,7 +151,7 @@ a different ship name.
 
 The repeater sees network metadata, relay origin, ship names and public key
 generations, signed outer IDs/routes/times, ciphertext sizes, positive relationship
-and invitation state, parked-wait timing, and request rates. Encrypted backups may
+and hail state, parked-wait timing, and request rates. Encrypted backups may
 preserve older forensic state according to operator policy.
 
 Auditing this repository can establish what these source bytes do. It cannot prove

@@ -39,10 +39,10 @@ end
 
 describe "ordinary self-transmission" do
   it "uses the direct repeater path, ordinary pointer routing, and no relationship" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "self direct transmission passphrase"
-      ship = Tinrelay::Client.bootstrap(
-        File.join(root, "harbor.keyring"), origin, "harbor", passphrase, token
+      ship = Tinrelay::Client.join(
+        File.join(root, "harbor.keyring"), origin, "harbor", passphrase
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
@@ -84,10 +84,10 @@ describe "ordinary self-transmission" do
   end
 
   it "uses durable fallback without a waiter and after an interrupted handoff" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "self fallback transmission passphrase"
-      ship = Tinrelay::Client.bootstrap(
-        File.join(root, "harbor.keyring"), origin, "harbor", passphrase, token
+      ship = Tinrelay::Client.join(
+        File.join(root, "harbor.keyring"), origin, "harbor", passphrase
       )
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
@@ -136,12 +136,12 @@ describe "ordinary self-transmission" do
   end
 
   it "keeps the exception exact, relationship-gated, and authentication-blind" do
-    TinrelaySpec.with_server do |root, token, origin, api|
+    TinrelaySpec.with_server do |root, origin, api|
       passphrase = "self boundary transmission passphrase"
-      alpha = Tinrelay::Client.bootstrap(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase, token
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
-      beta = TinrelaySpec.admit(root, origin, api, "beta", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
       capture = SelfTransmissionCaptureRemote.new(origin)
       Tinrelay::Client.new(beta.keyring, passphrase, capture)
         .send("steward@beta", "sealed for beta")

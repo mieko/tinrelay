@@ -2,17 +2,11 @@ tinrelayd — one-node Tinrelay ship registry and store-and-forward radio repeat
 
   tinrelayd serve --database PATH [--bind 127.0.0.1] [--port 8787]
     [--threads N] [--source-repository URL] [--bootstrap-template PATH]
-    [--bootstrap-token-file PATH]
   tinrelayd migrate --database PATH
   tinrelayd cleanup --database PATH
-  tinrelayd admission create --database PATH --ship SHIP --server URL
-    [--ttl-seconds 86400]
-  tinrelayd admission revoke ADMISSION_ID --database PATH
 
-`serve` accepts the one-time first-ship token only from an owner-only file. Have
-the host's ordinary secret facility provide it, then remove the credential and
-argument after the first claim. Terminate TLS at the operator's trusted edge; do
-not expose a raw development listener as the public service.
+Ship claims are open and first-claim-unique. Terminate TLS at the operator's
+trusted edge; do not expose a raw development listener as the public service.
 `serve` uses every available processor by default. `--threads` may reduce that
 count for a constrained host or bounded test; it cannot exceed detected CPUs.
 Set `TINRELAY_ART_MANIFEST` to an absolute JSON-file path before `serve` to add

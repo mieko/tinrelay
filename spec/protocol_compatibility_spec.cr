@@ -2,7 +2,7 @@ require "./spec_helper"
 
 describe "the API protocol boundary" do
   it "rejects older and newer clients and accepts the exact protocol" do
-    TinrelaySpec.with_server do |_root, _token, origin, _api|
+    TinrelaySpec.with_server do |_root, origin, _api|
       older = HTTP::Client.post(
         "#{origin}/v1/ships/inspect",
         HTTP::Headers{"X-Tinrelay-Protocol" => (Tinrelay::PROTOCOL - 1).to_s}

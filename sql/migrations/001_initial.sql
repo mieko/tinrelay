@@ -37,25 +37,6 @@ CREATE TABLE ship_radio_keys (
 CREATE UNIQUE INDEX one_active_radio_key_per_ship
   ON ship_radio_keys(ship) WHERE state = 'active';
 
-CREATE TABLE admissions (
-  id TEXT PRIMARY KEY,
-  ship TEXT NOT NULL,
-  ship_claim_admission_secret_hash BLOB NOT NULL,
-  expires_at INTEGER NOT NULL,
-  used_at INTEGER,
-  revoked_at INTEGER
-) STRICT;
-
-CREATE TABLE invitations (
-  id TEXT PRIMARY KEY,
-  created_by_ship TEXT NOT NULL REFERENCES ships(name),
-  relationship_admission_secret_hash BLOB,
-  expires_at INTEGER NOT NULL,
-  used_at INTEGER,
-  used_by_ship TEXT,
-  revoked_at INTEGER
-) STRICT;
-
 CREATE TABLE relationships (
   ship_a TEXT NOT NULL REFERENCES ships(name),
   ship_b TEXT NOT NULL REFERENCES ships(name),
@@ -88,7 +69,7 @@ CREATE TABLE hails (
   expires_at INTEGER NOT NULL,
   signature BLOB NOT NULL,
   collected_at INTEGER,
-  UNIQUE(sender_ship, recipient_ship),
+  allowed_at INTEGER,
   FOREIGN KEY (sender_ship, sender_signing_generation)
     REFERENCES ship_radio_keys(ship, generation),
   FOREIGN KEY (recipient_ship) REFERENCES ships(name)
@@ -96,6 +77,8 @@ CREATE TABLE hails (
 
 CREATE INDEX hails_delivery ON hails(recipient_ship, created_at);
 CREATE INDEX hails_expiry ON hails(expires_at);
+CREATE UNIQUE INDEX one_pending_hail_per_pair
+  ON hails(sender_ship, recipient_ship) WHERE allowed_at IS NULL;
 
 CREATE TABLE transmissions (
   id TEXT PRIMARY KEY,
@@ -111,8 +94,6 @@ CREATE TABLE transmissions (
   state TEXT NOT NULL CHECK (state IN ('pending', 'collected', 'expired')),
   ciphertext BLOB,
   signature BLOB,
-  invitation_id TEXT,
-  pairing_proof BLOB,
   envelope_digest BLOB NOT NULL,
   FOREIGN KEY (sender_ship, sender_signing_generation) REFERENCES ship_radio_keys(ship, generation),
   FOREIGN KEY (recipient_ship, recipient_encryption_generation) REFERENCES ship_radio_keys(ship, generation)

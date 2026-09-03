@@ -1,5 +1,4 @@
 require "./tinrelay/server"
-require "./tinrelay/private_input"
 
 module Tinrelay
   module ServerCLI
@@ -21,8 +20,6 @@ module Tinrelay
         database.close
         no_extra!(argv)
         puts result.to_json
-      when "admission"
-        admission(argv)
       when "serve"
         serve(argv)
       else
@@ -33,58 +30,18 @@ module Tinrelay
       exit 2
     end
 
-    private def self.admission(argv) : Nil
-      operation = argv.shift? || raise Invalid.new("admission requires create or revoke")
-      database = Database.new(required(argv, "--database"))
-      store = Store.new(database)
-      case operation
-      when "create"
-        ship = Names.ship!(required(argv, "--ship"))
-        server = required(argv, "--server").rstrip('/')
-        Origin.validate!(server)
-        ttl = (extract(argv, "--ttl-seconds") || "86400").to_i64
-        no_extra!(argv)
-        id = Ids.uuid
-        secret_bytes = Crypto.random(32)
-        secret = Crypto.b64(secret_bytes)
-        expires_at = Time.utc.to_unix + ttl
-        store.create_admission(
-          id, ship, Digest::SHA256.digest(secret_bytes), expires_at
-        )
-        capability = ShipAdmission.new(
-          server, id, ship, secret, expires_at
-        )
-        fragment = Base64.urlsafe_encode(capability.to_json, padding: false)
-        puts({state: "created", admission_id: id, expires_at: expires_at,
-              ship: ship, url: "#{server}/meet##{fragment}"}.to_json)
-      when "revoke"
-        id = argv.shift? || raise Invalid.new("admission revoke requires an admission id")
-        no_extra!(argv)
-        raise NotFound.new("admission not found") unless store.revoke_admission(id)
-        puts({state: "revoked", admission_id: id}.to_json)
-      else
-        raise Invalid.new("admission requires create or revoke")
-      end
-    ensure
-      database.try(&.close)
-    end
-
     private def self.serve(argv) : Nil
       database_path = required(argv, "--database")
       bind = extract(argv, "--bind") || "127.0.0.1"
       port = (extract(argv, "--port") || "8787").to_i
       template = extract(argv, "--bootstrap-template") || "templates/common-bootstrap.md"
       source_repository = extract(argv, "--source-repository") || "https://github.com/mieko/tinrelay"
-      bootstrap_token_file = extract(argv, "--bootstrap-token-file")
       art_manifest_path = ENV["TINRELAY_ART_MANIFEST"]?
       threads = ServerRuntime.thread_count(extract(argv, "--threads"))
       no_extra!(argv)
       ServerRuntime.enable_multicore(threads)
-      bootstrap_hash = bootstrap_token_file.try do |path|
-        Digest::SHA256.digest(PrivateInput.read(path, "bootstrap token"))
-      end
       config = ServerConfig.new(
-        bind, port, database_path, bootstrap_hash, template,
+        bind, port, database_path, template,
         source_repository, threads, art_manifest_path
       )
       api = API.new(config)

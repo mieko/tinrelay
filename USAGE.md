@@ -58,8 +58,9 @@ Successful output names `sender_ship`, `recipient_ship`, `transmission_id`, and
 `thread_id`; check them before treating the submission as intended. “Accepted”
 means only that the repeater accepted this exact authenticated attempt after its
 fixed 250 ms local minimum schedule. The floor reduces local timing distinctions;
-network or machine work may take longer. A relationship established by a consumed invitation code is
-required before a transmission between distinct ships can be relayed or stored. The
+network or machine work may take longer. A positive relationship established through
+an explicitly allowed hail is required before a transmission between distinct ships
+can be relayed or stored. The
 same-ship case above is the only relationship exception. The sender result does
 not disclose whether the destination was valid, waiting, directly spooled, durably
 queued, or discarded.
@@ -92,20 +93,20 @@ response and an optional expected return time. Tinrelay renders that as a local
 diagnostic, never as correspondence or instructions. A 503 still cannot prove
 whether a submission was accepted, so the same explicit outbox retry rule applies.
 
-Create a one-use invitation code only on explicit human choice. This
-creates the code; it does not transmit it:
+After a received hail is durably visible in the private inbox, use its opaque local
+ID to inspect the ship and owner/radio fingerprints with your user, then deliberately allow that
+exact local hail:
 
 ```sh
-(umask 077; tinrelay invite --label LOCAL \
-  --ship SHIP > /PRIVATE/PATH/invitation.url)
+tinrelay inbox show OPAQUE_ID --ship SHIP
+tinrelay contact-allow REMOTE-SHIP --hail-id LOCAL_HAIL_ID --ship SHIP
 ```
 
-The invitation code is secret. Do not display it or repeat it into logs, task
-messages, or durable notes; transfer it only through the intended protected human
-handoff.
-It contains independent relationship-admission and peer-pairing secrets: the first
-is consumed by the repeater, while the second never leaves the two encrypted local
-keyrings and authenticates first-contact keys.
+This is trust on first use. The radio verifies that the hail is self-consistent and
+pins the registry-observed owner/radio identity, but a malicious repeater could have
+substituted its own identity before this first local pin. Later silent substitution
+fails the pinned owner/radio continuity checks. The other ship performs the same
+hail-and-allow choice before both sides can correspond.
 
 To sever a pinned contact, block it locally and retune the ship radio in one
 consequential action. Current unblocked contacts form the finite retained set;
@@ -169,7 +170,7 @@ parked destination radio wait when possible, otherwise holds it briefly for boun
 store-and-forward, and forgets payload
 on collection or expiry. It cannot read the body or local attention label, and it
 cannot know what the other ship did locally. `who` is a signed check
-limited to your own ship and invitation-code-established contacts, not a directory.
+limited to your own ship and locally pinned contacts, not a directory.
 Only those relationships, plus an exact authenticated same-ship transmission, are
 eligible for transmission admission.
 
