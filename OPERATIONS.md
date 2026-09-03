@@ -22,6 +22,11 @@ Run the service as UID/GID 10001 with a read-only root filesystem, all Linux
 capabilities dropped, `no-new-privileges`, and a writable persistent volume only
 at `/var/lib/tinrelay`. Terminate TLS at the trusted edge.
 
+Meet pages derive their one-time `tinrelay join --server` origin from the request
+host and scheme. The trusted edge must preserve `Host` and set
+`X-Forwarded-Proto` to `https`; a direct loopback preview naturally renders its
+own `http` origin instead.
+
 `script/verify-container` is the executable packaging proof. It builds the real
 `linux/amd64` image, prepares an isolated volume, starts the service under the
 restrictions above, waits for readiness, checks shutdown and database ownership,

@@ -168,7 +168,9 @@ describe "the canonical bootstrap representations" do
             {"hear-the-ping", "return-to-silence"},
             {"return-to-silence", "open-the-channel"},
           ].each do |action, next_action|
-            rendered = api.bootstrap_page.markdown(coordinate, action, journey)
+            rendered = api.bootstrap_page.markdown(
+              coordinate, action, journey, repeater_origin: origin
+            )
             rendered.should contain("](#{base}/#{journey}/#{next_action})")
           end
         end
@@ -213,7 +215,9 @@ describe "the canonical bootstrap representations" do
           "#{origin}#{path}",
           headers: HTTP::Headers{"Accept" => "text/markdown"}
         )
-        expected = api.bootstrap_page.markdown(coordinate, action, journey)
+        expected = api.bootstrap_page.markdown(
+          coordinate, action, journey, repeater_origin: origin
+        )
         markdown.body.should eq(expected)
         explicit_path = "#{path}/index.md"
         HTTP::Client.get("#{origin}#{explicit_path}").body.should eq(expected)
@@ -233,6 +237,43 @@ describe "the canonical bootstrap representations" do
     end
   end
 
+  it "renders the claim command for the public origin that served the journey" do
+    TinrelaySpec.with_server do |_root, origin, _api|
+      direct = HTTP::Client.get(
+        "#{origin}/line/already-aboard/keep-the-keys",
+        headers: HTTP::Headers{"Accept" => "text/markdown"}
+      )
+      direct.status_code.should eq(200)
+      direct.body.should contain(
+        "tinrelay join --server #{origin} --ship YOUR-SHIP"
+      )
+
+      proxied = HTTP::Client.get(
+        "#{origin}/line/already-aboard/keep-the-keys",
+        headers: HTTP::Headers{
+          "Accept"            => "text/markdown",
+          "Host"              => "tinrelay.space",
+          "X-Forwarded-Proto" => "https",
+        }
+      )
+      proxied.status_code.should eq(200)
+      proxied.body.should contain(
+        "tinrelay join --server https://tinrelay.space --ship YOUR-SHIP"
+      )
+      proxied.body.should_not contain("{{REPEATER_ORIGIN}}")
+
+      unsafe = HTTP::Client.get(
+        "#{origin}/line/already-aboard/keep-the-keys",
+        headers: HTTP::Headers{
+          "Accept" => "text/markdown",
+          "Host"   => "tinrelay.space$(false)",
+        }
+      )
+      unsafe.status_code.should eq(400)
+      unsafe.body.should_not contain("$(false)")
+    end
+  end
+
   it "serves an unadvertised plain flight plan for either meet context" do
     TinrelaySpec.with_server do |_root, origin, api|
       route_entries = ->(base : String, coordinate : String?) do
@@ -242,7 +283,9 @@ describe "the canonical bootstrap representations" do
         }] + Tinrelay::BootstrapPage::JOURNEY_ACTIONS.flat_map do |journey, actions|
           actions.map do |action|
             suffix = action == journey ? journey : "#{journey}/#{action}"
-            markdown = api.bootstrap_page.markdown(coordinate, action, journey)
+            markdown = api.bootstrap_page.markdown(
+              coordinate, action, journey, repeater_origin: origin
+            )
             {
               title: markdown.lines.find(&.starts_with?("# ")).not_nil![2..].strip,
               path:  "#{base}/#{suffix}",

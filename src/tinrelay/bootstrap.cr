@@ -24,7 +24,8 @@ module Tinrelay
     end
 
     def markdown(coordinate : String? = nil, action : String? = nil,
-                 journey : String? = nil) : String
+                 journey : String? = nil,
+                 repeater_origin : String? = nil) : String
       Names.coordinate!(coordinate) if coordinate
       validate_journey!(journey, action)
       directory = File.dirname(common_path)
@@ -53,6 +54,12 @@ module Tinrelay
         source = replace_once(
           source, "{{AFTER_BUILD_LINK}}",
           "[#{label}](#{line_root(coordinate, journey)}/#{next_action})"
+        )
+      when "keep-the-keys"
+        origin = repeater_origin ||
+                 raise Invalid.new("bootstrap repeater origin is missing")
+        source = replace_once(
+          source, "{{REPEATER_ORIGIN}}", markdown_shell_token(origin)
         )
       when "open-the-channel"
         completion_name = coordinate ? "directed-completion.md" : "mentorless-completion.md"
@@ -223,6 +230,13 @@ module Tinrelay
 
     private def markdown_link_text(value : String) : String
       value.gsub('\\', "\\\\").gsub('[', "\\[").gsub(']', "\\]")
+    end
+
+    private def markdown_shell_token(value : String) : String
+      unless value.matches?(/\Ahttps?:\/\/[A-Za-z0-9.\-:\[\]]+\z/)
+        raise Invalid.new("bootstrap substitution contains an unsafe shell token")
+      end
+      value
     end
 
     private def coordinate_block(coordinate : String?) : String

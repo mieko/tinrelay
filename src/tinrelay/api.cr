@@ -259,7 +259,10 @@ module Tinrelay
       markdown = if action == BootstrapPage::FLIGHT_PLAN_PAGE
                    bootstrap_page.flight_plan(coordinate)
                  else
-                   bootstrap_page.markdown(coordinate, action, journey)
+                   bootstrap_page.markdown(
+                     coordinate, action, journey,
+                     repeater_origin: request_origin(context.request)
+                   )
                  end
       directed = !coordinate.nil?
       private_page = directed || !action.nil?
@@ -402,6 +405,28 @@ module Tinrelay
           media == "text/markdown" && quality > 0.0
         end
       end || false
+    end
+
+    private def request_origin(request : HTTP::Request) : String
+      scheme = request.headers["X-Forwarded-Proto"]?
+        .try(&.split(',').first.strip) || "http"
+      raise Invalid.new("public request scheme is invalid") unless scheme.in?({"http", "https"})
+      authority = request.headers["Host"]? ||
+                  raise Invalid.new("public request host is missing")
+      unless authority.each_char.all? do |character|
+               character.ascii_alphanumeric? || character.in?({'.', '-', ':', '[', ']'})
+             end
+        raise Invalid.new("public request origin is invalid")
+      end
+      uri = URI.parse("#{scheme}://#{authority}")
+      unless uri.scheme == scheme && uri.host && uri.user.nil? &&
+             uri.password.nil? && uri.path.empty? && uri.query.nil? &&
+             uri.fragment.nil?
+        raise Invalid.new("public request origin is invalid")
+      end
+      "#{scheme}://#{uri.authority}"
+    rescue URI::Error
+      raise Invalid.new("public request origin is invalid")
     end
 
     private def decode_path!(value : String) : String
