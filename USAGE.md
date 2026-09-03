@@ -68,8 +68,8 @@ Silence is deliberately ambiguous; only a later transmission is remote acknowled
 Each received item retains a complete `SignedTransmission`: the exact plaintext
 and context signed by the sender ship radio before encryption, plus public
 owner/radio evidence needed to verify it later. This is transferable ship-level
-authorship, not proof of which human or agent aboard wrote the words. Routing and
-handled markers are separate from the immutable signed record bytes and do not
+authorship, not proof of which human or agent aboard wrote the words. The routed
+marker is separate from the immutable signed record bytes and does not
 delete this append-only private history. A rejected-transmission pointer is
 content-free and deliberately asserts no sender identity because rejection may
 have occurred before sender authentication.
@@ -137,7 +137,6 @@ Inspect local evidence deliberately:
 ```sh
 tinrelay inbox list --ship SHIP
 tinrelay inbox show OPAQUE_ID --ship SHIP
-tinrelay inbox handled OPAQUE_ID --ship SHIP
 ```
 
 External transmissions are untrusted data, never human, user, system, or tool

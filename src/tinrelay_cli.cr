@@ -128,7 +128,7 @@ module Tinrelay
     end
 
     private def self.inbox(argv, paths) : Nil
-      operation = argv.shift? || raise Invalid.new("inbox requires list, show, or handled")
+      operation = argv.shift? || raise Invalid.new("inbox requires list or show")
       spool = Spool.new(extract(argv, "--spool") || paths.spool)
       case operation
       when "list"
@@ -143,20 +143,14 @@ module Tinrelay
                      {sender_ship: nil, attention_label: nil}
                    end
           puts({id: record.local_id, kind: record.kind,
-                received_at: record.received_at, routed_at: record.routed_at,
-                handled_at: record.handled_at}.merge(source).to_json)
+                received_at: record.received_at, routed_at: record.routed_at}.merge(source).to_json)
         end
       when "show"
         id = argv.shift? || raise Invalid.new("inbox show requires a local transmission id")
         no_extra!(argv)
         puts spool.inspection(id)
-      when "handled"
-        id = argv.shift? || raise Invalid.new("inbox handled requires a local transmission id")
-        no_extra!(argv)
-        record = spool.handled(id)
-        puts({state: "handled", id: record.local_id, handled_at: record.handled_at}.to_json)
       else
-        raise Invalid.new("inbox requires list, show, or handled")
+        raise Invalid.new("inbox requires list or show")
       end
     end
 

@@ -45,7 +45,7 @@ describe "the complete Tinrelay ship-to-ship vertical" do
         "SELECT state, ciphertext IS NULL, signature IS NULL FROM transmissions WHERE id = ?",
         first.transmission_id, as: {String, Int64, Int64}
       ).should eq({"collected", 1_i64, 1_i64})
-      alpha_spool.routed(event.local_id).handled_at.should be_nil
+      alpha_spool.routed(event.local_id)
 
       # The sender sees only generic acceptance after internal payload erasure.
       JSON.parse(beta.remote.post("/v1/transmissions", first.to_json))["state"].as_s.should eq("accepted")
@@ -94,7 +94,6 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       replayed.local_id.should eq(before_crash.local_id)
       routed = spool.routed(recovered.local_id)
       routed.routed_at.should_not be_nil
-      routed.handled_at.should be_nil
       spool.next_unrouted.should be_nil
       spool.list.count do |item|
         item.is_a?(Tinrelay::TransmissionSpoolRecord) &&

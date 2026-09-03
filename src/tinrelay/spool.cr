@@ -32,7 +32,7 @@ module Tinrelay
     def initialize(@root)
       @pending = File.join(root, "pending")
       @history = File.join(root, "history")
-      [root, pending, history, routed_markers, handled_markers].each do |directory|
+      [root, pending, history, routed_markers].each do |directory|
         unless Dir.exists?(directory)
           Dir.mkdir_p(directory, mode: 0o700)
         end
@@ -145,12 +145,6 @@ module Tinrelay
       find_record(id) || raise NotFound.new("inbox record not found")
     end
 
-    def handled(id : String, now : Int64 = Time.utc.to_unix) : SpoolRecord
-      record = get(id)
-      record.handled_at = mark_once(handled_markers, id, now)
-      record
-    end
-
     def routed(id : String, now : Int64 = Time.utc.to_unix) : SpoolRecord
       record = get(id)
       record.routed_at = mark_once(routed_markers, id, now)
@@ -173,7 +167,6 @@ module Tinrelay
         local_id:    record.local_id,
         received_at: record.received_at,
         routed_at:   record.routed_at,
-        handled_at:  record.handled_at,
       }
       case record
       when TransmissionSpoolRecord
@@ -261,7 +254,6 @@ module Tinrelay
 
     private def hydrate_state!(record : SpoolRecord) : Nil
       record.routed_at = marker_time(routed_markers, record.local_id)
-      record.handled_at = marker_time(handled_markers, record.local_id)
     end
 
     private def mark_once(directory : String, id : String, now : Int64) : Int64
@@ -280,10 +272,6 @@ module Tinrelay
 
     private def routed_markers : String
       File.join(root, "routed")
-    end
-
-    private def handled_markers : String
-      File.join(root, "handled")
     end
 
     private def reconcile_routed_pending!(record : SpoolRecord) : Nil

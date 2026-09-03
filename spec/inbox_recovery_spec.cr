@@ -197,9 +197,7 @@ describe "inbox recovery transitions" do
       spool.routed(old_event.local_id)
       routed_path = TinrelayInboxSpec.record_path(spool.root, old_event.local_id)
       File.read(routed_path).should eq(original_bytes)
-      spool.handled(old_event.local_id)
-      File.read(routed_path).should eq(original_bytes)
-      File.write(routed_path, "corrupt old handled history")
+      File.write(routed_path, "corrupt old history")
 
       new_event = receiver.radio_wait(spool, hold_seconds: 0)
       new_event.kind.should eq("transmission")

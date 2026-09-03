@@ -35,7 +35,7 @@ local append-only file is the only canonical received body copy. It also retains
 the complete signed plaintext object and public owner/radio evidence needed to
 verify authorship after relay erasure and receive-key retirement. The signed record
 bytes are immutable: routing moves the same file from the small pending directory
-to history, while routed and handled times are separate one-write marker files.
+to history, while routing records one separate one-write marker file.
 Normal radio waiting reads only pending records, so a
 damaged old history record cannot stop new pointers.
 
@@ -205,8 +205,9 @@ uses its bootstrap-owned exact-name/`*` mapping and marks that ID routed only af
 native pointer delivery reports success. A crash
 before relay ack reuses the spool record
 and retries ack; a crash after native delivery but before the local routed mark may
-repeat the same pointer. Routed and handled/read are separate. Process death
-naturally removes parked-wait availability.
+repeat the same pointer. The routed mark is the local completion boundary; any later
+handling or reading belongs above Tinrelay. Process death naturally removes parked-wait
+availability.
 
 Enforced defaults:
 
@@ -224,7 +225,7 @@ Enforced defaults:
 - content-free fallback tombstones only through the signed envelope's expiry;
 - local encrypted outbox retention only while acceptance is unknown, never beyond
   the envelope's 96-hour expiry;
-- append-only private plaintext history; routed and handled markers never delete its
+- append-only private plaintext history; routed markers never delete its
   signed transmission or public verification evidence, and never rewrite its record
   bytes.
 
