@@ -41,10 +41,10 @@ module TinrelayInboxSpec
                         body : String) : Tinrelay::SignedRelayEnvelope
     radio = sender.keyring.data.radio!(envelope.sender_signing_generation)
     transmission = Tinrelay::SignedTransmission.new(
-      envelope.transmission_id, envelope.thread_id, envelope.sender_ship,
+      envelope.transmission_id, envelope.sender_ship,
       envelope.sender_signing_generation, envelope.recipient_ship,
       envelope.recipient_encryption_generation, envelope.created_at,
-      "steward", body, envelope.reply_to, "caller"
+      "steward", body, "caller"
     )
     transmission.signature = Tinrelay::Crypto.b64(
       Tinrelay::Crypto.sign(

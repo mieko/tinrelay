@@ -75,11 +75,11 @@ describe "protocol-1 ship authorship" do
   it "domain-separates inner provenance from the sealed relay emission" do
     signing = Tinrelay::Crypto.signing_keypair
     transmission = Tinrelay::SignedTransmission.new(
-      Tinrelay::Ids.uuid, Tinrelay::Ids.uuid, "alpha", 1,
+      Tinrelay::Ids.uuid, "alpha", 1,
       "beta", 1, Time.utc.to_unix, "steward", "same facts"
     )
     envelope = Tinrelay::SignedRelayEnvelope.new(
-      transmission.transmission_id, transmission.thread_id, "alpha", 1,
+      transmission.transmission_id, "alpha", 1,
       "beta", 1, transmission.created_at, transmission.created_at + 3600,
       Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
     )

@@ -156,7 +156,6 @@ describe "ordinary self-transmission" do
 
       unrelated = Tinrelay::SignedRelayEnvelope.from_json(self_envelope.to_json)
       unrelated.transmission_id = Tinrelay::Ids.uuid
-      unrelated.thread_id = unrelated.transmission_id
       unrelated.recipient_ship = "alpha"
       TinrelaySelfTransmissionSpec.resign(beta, unrelated)
       TinrelaySelfTransmissionSpec.submit(origin, unrelated)
@@ -167,14 +166,12 @@ describe "ordinary self-transmission" do
 
       forged_self = Tinrelay::SignedRelayEnvelope.from_json(self_envelope.to_json)
       forged_self.transmission_id = Tinrelay::Ids.uuid
-      forged_self.thread_id = forged_self.transmission_id
       forged_self.sender_ship = "alpha"
       forged_self.recipient_ship = "alpha"
       TinrelaySelfTransmissionSpec.resign(beta, forged_self)
 
       forged_other = Tinrelay::SignedRelayEnvelope.from_json(forged_self.to_json)
       forged_other.transmission_id = Tinrelay::Ids.uuid
-      forged_other.thread_id = forged_other.transmission_id
       forged_other.recipient_ship = "beta"
       TinrelaySelfTransmissionSpec.resign(beta, forged_other)
 

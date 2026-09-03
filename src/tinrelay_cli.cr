@@ -53,20 +53,6 @@ module Tinrelay
           recipient, body, from_label, expires_in: expires, outbox: outbox
         )
         puts envelope.submission_evidence.to_json
-      when "reply"
-        thread_id = argv.shift? || raise Invalid.new("reply requires a thread id")
-        recipient = required(argv, "--to")
-        reply_to = required(argv, "--reply-to")
-        from_label = extract(argv, "--as")
-        outbox = Outbox.new(extract(argv, "--outbox") || paths.outbox)
-        body = read_body(argv)
-        expires = (extract(argv, "--expires-in") || FALLBACK_LIFETIME_SECONDS.to_s).to_i64
-        no_extra!(argv)
-        envelope = client(keyring_path, owner_path, ship, passphrase_file).send(
-          recipient, body, from_label, thread_id: thread_id,
-          reply_to: reply_to, expires_in: expires, outbox: outbox
-        )
-        puts envelope.submission_evidence.to_json
       when "outbox"
         outbox(argv, paths, keyring_path, owner_path, ship, passphrase_file)
       when "radio"
@@ -184,7 +170,7 @@ module Tinrelay
         box.list.each do |envelope|
           puts({transmission_id: envelope.transmission_id, sender_ship: envelope.sender_ship,
                 recipient_ship: envelope.recipient_ship,
-                thread_id: envelope.thread_id, created_at: envelope.created_at,
+                created_at: envelope.created_at,
                 expires_at: envelope.expires_at,
                 state: "acceptance_unknown"}.to_json)
         end

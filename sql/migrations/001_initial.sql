@@ -82,8 +82,6 @@ CREATE UNIQUE INDEX one_pending_hail_per_pair
 
 CREATE TABLE transmissions (
   id TEXT PRIMARY KEY,
-  thread_id TEXT NOT NULL,
-  reply_to TEXT,
   sender_ship TEXT NOT NULL,
   sender_signing_generation INTEGER NOT NULL,
   recipient_ship TEXT NOT NULL,

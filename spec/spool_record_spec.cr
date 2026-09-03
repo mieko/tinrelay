@@ -13,7 +13,6 @@ module TinrelaySpoolRecordSpec
   def self.transmission : Tinrelay::SignedTransmission
     Tinrelay::SignedTransmission.new(
       "11111111-1111-4111-8111-111111111111",
-      "22222222-2222-4222-8222-222222222222",
       "alpha", 2, "beta", 3, 20_i64, "steward", "exact words",
       from_label: "caller", signature: "transmission-signature"
     )
@@ -24,7 +23,6 @@ module TinrelaySpoolRecordSpec
       Tinrelay::TransmissionSpoolRecord.new(
         local_id: LOCAL_ID, received_at: 30_i64,
         relay_transmission_id: transmission.transmission_id,
-        thread_id: transmission.thread_id, reply_to: nil,
         sender_ship: "alpha", recipient_ship: "beta",
         to_label: "steward", from_label: "caller",
         signed_transmission: transmission,

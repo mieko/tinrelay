@@ -231,12 +231,12 @@ describe "transmission relay transitions" do
         id = Tinrelay::Ids.uuid
         now = Time.utc.to_unix
         api.database.db.exec(
-          <<-SQL, id, id, now, now + 3600, now, Tinrelay::Crypto.random(32)
+          <<-SQL, id, now, now + 3600, now, Tinrelay::Crypto.random(32)
             INSERT INTO transmissions(
-              id, thread_id, sender_ship, sender_signing_generation,
+              id, sender_ship, sender_signing_generation,
               recipient_ship, recipient_encryption_generation, created_at, expires_at,
               accepted_at, state, ciphertext, signature, envelope_digest
-            ) VALUES (?, ?, 'beta', 1, 'alpha', 1, ?, ?, ?, 'pending', X'01', X'01', ?)
+            ) VALUES (?, 'beta', 1, 'alpha', 1, ?, ?, ?, 'pending', X'01', X'01', ?)
           SQL
         )
       end

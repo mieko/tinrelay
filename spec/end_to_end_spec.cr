@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 describe "the complete Tinrelay ship-to-ship vertical" do
-  it "claims, connects, spools before ack, routes pointers, replies, and erases relay payloads" do
+  it "claims, connects, spools before ack, routes pointers, and erases relay payloads" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "test passphrase is long"
       alpha = Tinrelay::Client.join(
@@ -20,7 +20,6 @@ describe "the complete Tinrelay ship-to-ship vertical" do
         sender_ship:     "beta",
         recipient_ship:  "alpha",
         transmission_id: first.transmission_id,
-        thread_id:       first.thread_id,
       })
       event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
       event.kind.should eq("transmission")
@@ -50,24 +49,6 @@ describe "the complete Tinrelay ship-to-ship vertical" do
 
       # The sender sees only generic acceptance after internal payload erasure.
       JSON.parse(beta.remote.post("/v1/transmissions", first.to_json))["state"].as_s.should eq("accepted")
-
-      reply = alpha.send(
-        "caller@beta", "Acknowledged.", "steward",
-        thread_id: first.thread_id, reply_to: first.transmission_id
-      )
-      reply.submission_evidence.should eq({
-        state:           "accepted",
-        sender_ship:     "alpha",
-        recipient_ship:  "beta",
-        transmission_id: reply.transmission_id,
-        thread_id:       first.thread_id,
-      })
-      reply_event = beta.radio_wait(beta_spool, hold_seconds: 0)
-      reply_event.wrapper.should contain("Authenticated sender ship: alpha")
-      reply_record = beta_spool.get(reply_event.local_id)
-        .as(Tinrelay::TransmissionSpoolRecord)
-      reply_record.thread_id.should eq(first.thread_id)
-      reply_record.reply_to.should eq(first.transmission_id)
 
       unresolved = beta.send("alerts@alpha", "Disk pressure")
       unresolved_event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
@@ -138,7 +119,6 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       valid = beta.send("steward@alpha", "signed")
       tampered = Tinrelay::SignedRelayEnvelope.from_json(valid.to_json)
       tampered.transmission_id = Tinrelay::Ids.uuid
-      tampered.thread_id = tampered.transmission_id
       tampered.ciphertext = Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
       expect_raises(Tinrelay::Unauthorized, /authentication failed/) do
         api.store.accept(tampered)

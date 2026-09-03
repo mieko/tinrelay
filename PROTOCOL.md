@@ -1,6 +1,6 @@
 # Tinrelay protocol v1
 
-Protocol v1 carries bounded, threaded UTF-8 correspondence between two ships.
+Protocol v1 carries bounded UTF-8 transmissions between two ships.
 JSON is the wire format. Signed objects use deterministic length-prefixed fields,
 so JSON whitespace and key order do not affect signatures.
 
@@ -19,12 +19,11 @@ The repeater has eight relational nouns:
    content-free cleanup tombstone;
 8. `schema_migrations`: applied forward schema versions.
 
-There are no endpoint, local-label, crew, nonce-ledger, thread, directory, profile,
-presence, availability, content-index, workflow, or per-ship broadcast tables. A thread root is its
-first transmission ID; replies name an existing transmission. Natural unique IDs and key
-and admin generations own replay prevention. The repeater checks root-transmission shape
-but does not need retained thread history: signed thread/reply IDs are correspondence
-metadata interpreted by the two ships.
+There are no endpoint, local-label, crew, nonce-ledger, directory, profile,
+presence, availability, content-index, workflow, or per-ship broadcast tables.
+Natural unique IDs and key and admin generations own replay prevention. The
+repeater checks transmission shape and does not retain conversation history;
+higher layers may interpret transmissions as a conversation.
 
 If a radio wait is parked, the repeater hands the envelope to it in memory. After the
 client verifies/decrypts, fsyncs one private plaintext JSON file, and acknowledges,
@@ -136,7 +135,7 @@ still exists, that ciphertext can be opened. Tinrelay bounds that exposure by
 erasing relay ciphertext after collection or expiry and retiring old receive keys.
 
 `SignedTransmission` preserves provenance of the words. It binds object/protocol
-version, transmission/thread/reply IDs, sender ship and signing generation, recipient
+version, transmission ID, sender ship and signing generation, recipient
 ship and encryption generation, creation time, private destination/author labels, and
 the exact UTF-8 body. Its signature proves that the named ship radio signed those exact
 words for that recipient; it does not identify which human or agent aboard the ship
@@ -152,7 +151,7 @@ encrypt -> sign**. The two signatures are deliberately domain-separated and are 
 a bespoke signcryption construction.
 
 The repeater necessarily sees IP/TLS timing, ship names, public keys/fingerprints and
-states, claim, hail, and relationship metadata, transmission/thread/reply IDs, ship/radio routes,
+states, claim, hail, and relationship metadata, transmission IDs, ship/radio routes,
 ciphertext length, accepted/expiry/collection state for durable fallback, parked-wait timing, and request
 rates. It cannot read or silently alter transmission labels or bodies.
 
@@ -174,7 +173,7 @@ generic and changed bytes under the same transmission ID conflict. The destinati
 exists only to erase repeater payload and is never sender-visible. There is no
 sender status or receipt for collection, polling, local label resolution, local
 routing, inspection, handling, expiry, or terminal state. Silence is intentionally
-ambiguous. Only an actual reply is remote acknowledgement.
+ambiguous. Only a later transmission is remote acknowledgement.
 
 Every authenticated new attempt consumes the sender's rolling-hour allowance before
 destination resolution, including discarded attempts. Direct, fallback, and

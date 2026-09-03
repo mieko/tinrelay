@@ -102,7 +102,6 @@ module Tinrelay
           "SELECT state FROM ships WHERE name = ?", envelope.sender_ship, as: String
         ) || raise Unauthorized.new("sender ship is not registered")
         raise Unavailable.new("sender ship is not active") unless sender_state == "active"
-        validate_thread_shape!(envelope)
         :new
       end.not_nil!
       return nil unless disposition == :new
@@ -486,16 +485,8 @@ module Tinrelay
     private def validate_envelope_shape!(envelope : SignedRelayEnvelope) : Nil
       raise Invalid.new("unsupported signed relay envelope") unless envelope.object_version == 1 && envelope.protocol == PROTOCOL
       require_uuid!(envelope.transmission_id, "transmission id")
-      require_uuid!(envelope.thread_id, "thread id")
-      envelope.reply_to.try { |id| require_uuid!(id, "reply id") }
       Names.ship!(envelope.sender_ship)
       Names.ship!(envelope.recipient_ship)
-    end
-
-    private def validate_thread_shape!(envelope : SignedRelayEnvelope) : Nil
-      unless envelope.reply_to
-        raise Invalid.new("new transmission thread id must equal transmission id") unless envelope.thread_id == envelope.transmission_id
-      end
     end
 
     private def validate_new_envelope_time!(envelope : SignedRelayEnvelope, now : Int64) : Nil
@@ -509,13 +500,13 @@ module Tinrelay
       connection.exec(
         <<-SQL,
           INSERT INTO transmissions(
-            id, thread_id, reply_to, sender_ship, sender_signing_generation,
+            id, sender_ship, sender_signing_generation,
             recipient_ship, recipient_encryption_generation, created_at, expires_at,
             accepted_at, state, ciphertext, signature, envelope_digest
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
         SQL
-        envelope.transmission_id, envelope.thread_id, envelope.reply_to,
-        envelope.sender_ship, envelope.sender_signing_generation,
+        envelope.transmission_id, envelope.sender_ship,
+        envelope.sender_signing_generation,
         envelope.recipient_ship, envelope.recipient_encryption_generation,
         envelope.created_at, envelope.expires_at, prepared.accepted_at,
         prepared.ciphertext, prepared.signature, prepared.digest
@@ -575,20 +566,19 @@ module Tinrelay
                                  now : Int64) : SignedRelayEnvelope?
       row = connection.query_one?(
         <<-SQL, ship, now,
-          SELECT id, thread_id, reply_to, sender_ship, sender_signing_generation,
+          SELECT id, sender_ship, sender_signing_generation,
                  recipient_encryption_generation, created_at, expires_at, ciphertext,
                  signature
            FROM transmissions
            WHERE recipient_ship = ? AND state = 'pending' AND expires_at > ?
            ORDER BY accepted_at, rowid LIMIT 1
         SQL
-        as: {String, String, String?, String, Int64, Int64, Int64, Int64,
-             Bytes, Bytes}
+        as: {String, String, Int64, Int64, Int64, Int64, Bytes, Bytes}
       )
       return nil unless row
       SignedRelayEnvelope.new(
-        row[0], row[1], row[3], row[4].to_i, ship, row[5].to_i,
-        row[6], row[7], Crypto.b64(row[8]), row[2], Crypto.b64(row[9])
+        row[0], row[1], row[2].to_i, ship, row[3].to_i,
+        row[4], row[5], Crypto.b64(row[6]), Crypto.b64(row[7])
       )
     end
 

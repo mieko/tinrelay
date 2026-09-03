@@ -89,39 +89,6 @@ describe "direct radio handoff" do
     end
   end
 
-  it "keeps reply threading valid when the direct root has no relay row" do
-    TinrelaySpec.with_server do |root, origin, api|
-      passphrase = "direct thread test passphrase"
-      alpha = Tinrelay::Client.join(
-        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
-      )
-      beta = TinrelaySpec.admit_contact(
-        root, origin, "beta", passphrase, alpha
-      )
-      spool = Tinrelay::Spool.new(File.join(root, "inbox"))
-      event = Channel(Tinrelay::RadioEvent).new(1)
-      spawn { event.send(alpha.radio_wait(spool, hold_seconds: 5)) }
-      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
-
-      root_transmission = beta.send("steward@alpha", "direct root", "caller")
-      TinrelaySpec.receive(event).wrapper.should contain("Authenticated sender ship: beta")
-      api.database.db.scalar(
-        "SELECT COUNT(*) FROM transmissions WHERE id = ?", root_transmission.transmission_id
-      ).as(Int64).should eq(0)
-
-      reply = alpha.send(
-        "caller@beta", "reply without relay thread history", "steward",
-        thread_id: root_transmission.thread_id,
-        reply_to: root_transmission.transmission_id
-      )
-      reply.submission_evidence[:state].should eq("accepted")
-      api.database.db.query_one(
-        "SELECT state, thread_id, reply_to FROM transmissions WHERE id = ?",
-        reply.transmission_id, as: {String, String, String?}
-      ).should eq({"pending", root_transmission.thread_id, root_transmission.transmission_id})
-    end
-  end
-
   it "persists when no wait exists and after an unacknowledged direct offer" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "fallback test passphrase"

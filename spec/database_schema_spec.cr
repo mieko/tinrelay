@@ -37,7 +37,7 @@ describe "the relay database schema" do
       ship_a ship_b state transition_until
     ))
     TinrelayDatabaseSchemaSpec.columns(database, "transmissions").should eq(%w(
-      id thread_id reply_to sender_ship sender_signing_generation recipient_ship
+      id sender_ship sender_signing_generation recipient_ship
       recipient_encryption_generation created_at expires_at accepted_at state
       ciphertext signature envelope_digest
     ))

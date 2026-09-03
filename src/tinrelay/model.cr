@@ -74,8 +74,6 @@ module Tinrelay
     property object_version : Int32
     property protocol : Int32
     property transmission_id : String
-    property thread_id : String
-    property reply_to : String?
     property sender_ship : String
     property sender_signing_generation : Int32
     property recipient_ship : String
@@ -85,17 +83,17 @@ module Tinrelay
     property ciphertext : String
     property signature : String
 
-    def initialize(@transmission_id, @thread_id, @sender_ship,
+    def initialize(@transmission_id, @sender_ship,
                    @sender_signing_generation, @recipient_ship,
                    @recipient_encryption_generation, @created_at, @expires_at,
-                   @ciphertext, @reply_to = nil, @signature = "",
+                   @ciphertext, @signature = "",
                    @protocol = PROTOCOL, @object_version = 1)
     end
 
     def signing_bytes : Bytes
       Canonical.fields(
         "tinrelay-signed-relay-envelope-v1", object_version.to_s,
-        protocol.to_s, transmission_id, thread_id, reply_to || "", sender_ship,
+        protocol.to_s, transmission_id, sender_ship,
         sender_signing_generation.to_s, recipient_ship,
         recipient_encryption_generation.to_s, created_at.to_s,
         expires_at.to_s, ciphertext
@@ -108,7 +106,6 @@ module Tinrelay
         sender_ship:     sender_ship,
         recipient_ship:  recipient_ship,
         transmission_id: transmission_id,
-        thread_id:       thread_id,
       }
     end
   end
@@ -121,8 +118,6 @@ module Tinrelay
     property object_version : Int32
     property protocol : Int32
     property transmission_id : String
-    property thread_id : String
-    property reply_to : String?
     property sender_ship : String
     property sender_signing_generation : Int32
     property recipient_ship : String
@@ -133,10 +128,10 @@ module Tinrelay
     property body : String
     property signature : String
 
-    def initialize(@transmission_id, @thread_id, @sender_ship,
+    def initialize(@transmission_id, @sender_ship,
                    @sender_signing_generation, @recipient_ship,
                    @recipient_encryption_generation, @created_at, @to_label,
-                   @body, @reply_to = nil, @from_label = nil,
+                   @body, @from_label = nil,
                    @signature = "", @protocol = PROTOCOL,
                    @object_version = 1)
     end
@@ -144,7 +139,7 @@ module Tinrelay
     def signing_bytes : Bytes
       Canonical.fields(
         "tinrelay-signed-transmission-v1", object_version.to_s,
-        protocol.to_s, transmission_id, thread_id, reply_to || "", sender_ship,
+        protocol.to_s, transmission_id, sender_ship,
         sender_signing_generation.to_s, recipient_ship,
         recipient_encryption_generation.to_s, created_at.to_s, to_label,
         from_label || "", body
@@ -465,8 +460,6 @@ module Tinrelay
 
   class TransmissionSpoolRecord < SpoolRecord
     getter relay_transmission_id : String
-    getter thread_id : String
-    getter reply_to : String?
     getter sender_ship : String
     getter recipient_ship : String
     getter to_label : String
@@ -476,8 +469,7 @@ module Tinrelay
     getter sender_owner_chain : Array(OwnerKeyLink)
 
     def initialize(local_id : String, received_at : Int64,
-                   @relay_transmission_id : String, @thread_id : String,
-                   @reply_to : String?, @sender_ship : String,
+                   @relay_transmission_id : String, @sender_ship : String,
                    @recipient_ship : String, @to_label : String,
                    @from_label : String?,
                    @signed_transmission : SignedTransmission,

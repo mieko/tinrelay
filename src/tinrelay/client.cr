@@ -122,7 +122,6 @@ module Tinrelay
     end
 
     def send(recipient : String, body : String, from_label : String? = nil,
-             thread_id : String? = nil, reply_to : String? = nil,
              expires_in : Int64 = FALLBACK_LIFETIME_SECONDS.to_i64,
              outbox : Outbox? = nil) : SignedRelayEnvelope
       reconcile_radio_if_pending!
@@ -130,7 +129,6 @@ module Tinrelay
       from_label.try { |label| Names.label!(label) }
       raise Invalid.new("transmission body is empty") if body.empty?
       transmission_id = Ids.uuid
-      root = thread_id || transmission_id
       created_at = Time.utc.to_unix
       radio = keyring.data.radio!
       contact = unless recipient_ship == keyring.data.ship
@@ -143,9 +141,9 @@ module Tinrelay
       # Sign the plaintext first: SignedTransmission preserves ship-level provenance
       # of the exact words after relay ciphertext and receive keys are gone.
       transmission = SignedTransmission.new(
-        transmission_id, root, keyring.data.ship, radio.generation,
+        transmission_id, keyring.data.ship, radio.generation,
         recipient_ship, recipient_certificate.generation, created_at,
-        to_label, body, reply_to, from_label
+        to_label, body, from_label
       )
       transmission.signature = Crypto.b64(
         Crypto.sign(
@@ -160,9 +158,9 @@ module Tinrelay
       # Sign again after sealing: SignedRelayEnvelope authenticates the radio emission
       # so the repeater and recipient reject route or ciphertext changes before opening it.
       envelope = SignedRelayEnvelope.new(
-        transmission_id, root, keyring.data.ship, radio.generation,
+        transmission_id, keyring.data.ship, radio.generation,
         recipient_ship, recipient_certificate.generation, created_at,
-        created_at + expires_in, Crypto.b64(ciphertext), reply_to
+        created_at + expires_in, Crypto.b64(ciphertext)
       )
       envelope.signature = Crypto.b64(
         Crypto.sign(envelope.signing_bytes, Crypto.unb64(radio.signing.secret_key))
@@ -533,8 +531,6 @@ module Tinrelay
         raise Unauthorized.new("signed transmission signature is invalid")
       end
       unless transmission.transmission_id == envelope.transmission_id &&
-             transmission.thread_id == envelope.thread_id &&
-             transmission.reply_to == envelope.reply_to &&
              transmission.sender_ship == envelope.sender_ship &&
              transmission.sender_signing_generation == envelope.sender_signing_generation &&
              transmission.recipient_ship == envelope.recipient_ship &&
