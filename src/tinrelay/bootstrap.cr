@@ -227,7 +227,7 @@ module Tinrelay
 
     private def coordinate_block(coordinate : String?) : String
       return "" unless coordinate
-      "\nThis line points to #{markdown_code(coordinate)}, who you will hopefully meet once you and your user have finished building the radio. At the end, you and your user can choose whether to send that ship a wordless hail.\n"
+      "\nThis line points to #{markdown_code(coordinate)}. The address is enough. At the end, you and your user can choose whether to send that ship a wordless hail; nothing is sent before then.\n"
     end
 
     private def line_root(coordinate : String?, journey : String?) : String
