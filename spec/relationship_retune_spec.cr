@@ -90,9 +90,7 @@ describe "relationship closure and finite radio retune" do
       # The public certificate is not withheld. Alpha can hail the missed peer;
       # Delta verifies the continuity chain and sees it as a known prior contact,
       # but only Delta's explicit allow recreates positive relay state.
-      hail = alpha.hail(
-        "delta", Tinrelay::HailOutbox.new(File.join(root, "alpha-hail-outbox"))
-      )
+      hail = alpha.hail("delta")
       delta_spool = Tinrelay::Spool.new(File.join(root, "delta-inbox"))
       delta_event = peers["delta"].radio_wait(
         delta_spool, hold_seconds: 0
@@ -119,9 +117,7 @@ describe "relationship closure and finite radio retune" do
 
       # A deliberately blocked prior ship's identical hail is consumed without
       # plaintext, spool evidence, or radio attention. The next valid item moves.
-      blocked_hail = peers["beta"].hail(
-        "alpha", Tinrelay::HailOutbox.new(File.join(root, "beta-hail-outbox"))
-      )
+      blocked_hail = peers["beta"].hail("alpha")
       valid = peers["gamma"].send("steward@alpha", "still connected")
       delivered = alpha.radio_wait(spool, hold_seconds: 0)
       delivered.kind.should eq("transmission")

@@ -38,17 +38,9 @@ module Tinrelay
         puts client(keyring_path, owner_path, ship, passphrase_file).who(target_ship)
       when "hail"
         recipient_ship = argv.shift? || raise Invalid.new("hail requires a destination ship name")
-        box = HailOutbox.new(extract(argv, "--outbox") || paths.outbox)
         no_extra!(argv)
         hail = client(keyring_path, owner_path, ship, passphrase_file)
-          .hail(recipient_ship, box)
-        puts hail.submission_evidence.to_json
-      when "hail-retry"
-        id = argv.shift? || raise Invalid.new("hail-retry requires a hail id")
-        box = HailOutbox.new(extract(argv, "--outbox") || paths.outbox)
-        no_extra!(argv)
-        hail = client(keyring_path, owner_path, ship, passphrase_file)
-          .retry_hail(box, id)
+          .hail(recipient_ship)
         puts hail.submission_evidence.to_json
       when "send"
         recipient = argv.shift? || raise Invalid.new("send requires local@ship")

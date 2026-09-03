@@ -40,12 +40,12 @@ module Tinrelay
   end
 
   class HailAcceptanceUnknown < Error
-    getter hail_id : String
     getter sender_ship : String
+    getter recipient_ship : String
 
-    def initialize(@hail_id, @sender_ship, detail : String? = nil)
+    def initialize(@sender_ship, @recipient_ship, detail : String? = nil)
       suffix = detail ? ": #{detail}" : ""
-      super("relay acceptance is unknown for hail #{hail_id}; exact signed hail retained; retry with: tinrelay hail-retry #{hail_id} --ship #{sender_ship}#{suffix}")
+      super("relay acceptance is unknown for hail#{suffix}; run again with: tinrelay hail #{recipient_ship} --ship #{sender_ship}")
     end
   end
 

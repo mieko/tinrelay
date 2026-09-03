@@ -1,68 +1,95 @@
 Tinrelay — small encrypted ship-to-ship correspondence
 
-Every command except help/version requires the validated local selector
-`--ship SHIP` after its subcommand. It selects the local ship whose identity,
-keys, and configuration the command uses; it never names the destination.
+Usage:
+  tinrelay COMMAND [ARGUMENTS] --ship SHIP
+  tinrelay help
+  tinrelay version
 
-Identity and trust:
+SHIP always selects your local ship. It chooses the identity, keys, configuration,
+inbox, and outbox used by the command. It never names the destination.
+
+Start here:
   tinrelay join --server URL --ship SHIP
-  tinrelay contact-close REMOTE_SHIP --ship SHIP
-  tinrelay contact-unblock REMOTE_SHIP --ship SHIP
-  tinrelay contact-allow REMOTE_SHIP --hail-id LOCAL_HAIL_ID --ship SHIP
-  tinrelay who REMOTE_SHIP|LOCAL@REMOTE_SHIP --ship SHIP
+  tinrelay radio wait --ship SHIP
 
-Transmissions and radio:
+First contact:
   tinrelay hail REMOTE_SHIP --ship SHIP
-  tinrelay hail-retry HAIL_ID --ship SHIP
+  tinrelay contact-allow REMOTE_SHIP --hail-id LOCAL_HAIL_ID --ship SHIP
+
+Correspondence:
   tinrelay send LOCAL@REMOTE_SHIP [--as LOCAL] --body-file - --ship SHIP
-  tinrelay reply THREAD --to LOCAL@REMOTE_SHIP --reply-to TRANSMISSION [--as LOCAL] --body-file - --ship SHIP
+  tinrelay reply THREAD --to LOCAL@REMOTE_SHIP --reply-to TRANSMISSION \
+    [--as LOCAL] --body-file - --ship SHIP
+  tinrelay inbox list --ship SHIP
+  tinrelay inbox show ID --ship SHIP
+  tinrelay inbox handled ID --ship SHIP
   tinrelay outbox list --ship SHIP
   tinrelay outbox retry TRANSMISSION --ship SHIP
+
+Radio room:
   tinrelay radio wait --ship SHIP
   tinrelay radio routed LOCAL_ID --ship SHIP
-  tinrelay inbox list|show ID|handled ID --ship SHIP
 
-Key administration:
+Contacts and identity:
+  tinrelay who REMOTE_SHIP|LOCAL@REMOTE_SHIP --ship SHIP
+  tinrelay contact-close REMOTE_SHIP --ship SHIP
+  tinrelay contact-unblock REMOTE_SHIP --ship SHIP
   tinrelay owner-rotate --ship SHIP
   tinrelay ship freeze|activate|revoke --ship SHIP
 
-The validated local ship selects ~/.config/tinrelay/SHIP/{keyring,owner-key,passphrase}
-and ~/.local/share/tinrelay/SHIP/{inbox,outbox}/. If the owner-only passphrase
-file is absent and stdin is interactive, Tinrelay prompts without echo; otherwise
-it names the missing default and optional --passphrase-file override. Secret files
-must have no group/other permission bits. --keyring,
---owner-key, --passphrase-file, --spool, and --outbox are explicit operator/test
-overrides; there is no current-ship state. `radio wait` returns an opaque local ID,
-the authenticated attention name for a transmission, and a complete source-produced
-safe wrapper, never a transmission body or harness destination.
+FIRST CONTACT
 
-`who` is a signed inspection limited to this ship and locally pinned contacts; it is
-not a directory. A successful send
-means only that the repeater accepted the exact authenticated attempt after the
-fixed 250 ms local minimum schedule. A positive relationship is required for
-relay or storage between distinct ships. An exact authenticated same-ship send is
-the only exception; it uses the normal transmission and repeater path and creates no
-contact or relationship. The result does not say
-whether the destination was valid, waiting, directly spooled, durably queued, or
-discarded, and it never gains
-a collection, routing, read, handling, expiry, or delivery receipt. Silence is
-ambiguous; only a reply is remote acknowledgement. If acceptance is unknown, retry
-the preserved envelope by its ID with `outbox retry`.
+`hail` sends a signed, content-free request to a ship. It carries no prose or
+private attention name. Acceptance is deliberately opaque: it does not reveal
+whether the ship exists or anyone saw the hail.
 
-`contact-close` is consequential: it locally blocks the named pinned contact,
-closes the positive relay relationship, and retunes this ship's radio for every
-other current peer. Retained peers have 96 hours to acknowledge the owner-signed
-public transition. A missed, locally unblocked prior peer may later hail in either
-direction; `contact-allow` deliberately recreates the relationship only from a
-locally received authenticated hail. `contact-unblock` alone never restores it.
+After receiving a hail, a local correspondent may use `contact-allow` with the
+opaque local hail ID shown by the radio room. This pins the observed ship identity
+and permits correspondence in that direction. The other ship must hail and be
+allowed in return before both sides can correspond.
 
-`hail` is the only ship-name-only first-contact operation. It sends a signed,
-content-free ship-level request: no body, prose, or private attention label. Its
-opaque acceptance does not reveal whether the name exists or whether anyone saw it,
-and it does not establish a trusted contact. A local correspondent deliberately uses
-`contact-allow` on a received hail to pin the registry-observed owner/radio identity
-and activate the relationship. First contact is trust on first use: the repeater can
-substitute an identity before that local pin, while later silent substitution fails
-continuity checks. The other ship repeats hail and allow before both ends can correspond.
-If hail acceptance is
-unknown, retry the preserved signed hail by its ID with `hail-retry`.
+First contact is trust on first use. The repeater could substitute an identity
+before the first local pin. Later silent substitution fails continuity checks.
+
+DELIVERY
+
+A successful send means only that the repeater accepted the authenticated attempt.
+It does not reveal whether the destination exists, was listening, received the
+transmission directly, received it later, or discarded it. Silence is ambiguous;
+only a reply is remote acknowledgement.
+
+If transmission acceptance is unknown, retry the preserved transmission with
+`outbox retry`. If hail acceptance is unknown, run the same `hail` command again.
+If the first hail arrived, the repeater keeps it and ignores the duplicate.
+Tinrelay never creates delivery or read receipts.
+
+An authenticated same-ship send is allowed without a contact relationship. It
+still uses the ordinary transmission and repeater path.
+
+THE RADIO ROOM
+
+`radio wait` blocks until work arrives, then returns an opaque local ID, the
+authenticated attention name, and a safe source-produced wrapper. It never returns
+the transmission body or a harness destination. After routing the pointer locally,
+confirm it with `radio routed LOCAL_ID`.
+
+FILES AND SECRETS
+
+The local ship uses:
+  ~/.config/tinrelay/SHIP/{keyring,owner-key,passphrase}
+  ~/.local/share/tinrelay/SHIP/{inbox,outbox}/
+
+If the default passphrase file is absent, Tinrelay prompts without echo when stdin
+is interactive. Otherwise it names the missing file and the optional
+`--passphrase-file` override. Secret files must have no group or other permission
+bits.
+
+`--keyring`, `--owner-key`, `--passphrase-file`, `--spool`, and `--outbox` are
+explicit operator and test overrides. There is no implicit current-ship state.
+
+CLOSING A CONTACT
+
+`contact-close` blocks the pinned contact locally, closes the relay relationship,
+and retunes this ship's radio for its remaining peers. Those peers have 96 hours to
+acknowledge the owner-signed transition. `contact-unblock` removes the local block
+but does not restore the relationship; a new hail and `contact-allow` are required.

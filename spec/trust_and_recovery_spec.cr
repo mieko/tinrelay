@@ -208,7 +208,7 @@ describe "trust and recovery transitions" do
     end
   end
 
-  it "retains exact transmission and hail attempts across every unavailable response" do
+  it "retains exact transmission attempts across every unavailable response" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "unavailable ambiguity passphrase"
       alpha = Tinrelay::Client.join(
@@ -231,13 +231,6 @@ describe "trust and recovery transitions" do
         beta.retry(transmission_box, failure.transmission_id)
         transmission_box.list.should be_empty
 
-        hail_box = Tinrelay::HailOutbox.new(File.join(root, "hail-outbox-#{index}"))
-        hail_failure = expect_raises(Tinrelay::HailAcceptanceUnknown) do
-          unreliable.hail("alpha", hail_box)
-        end
-        hail_box.read(hail_failure.hail_id)[0].hail_id.should eq(hail_failure.hail_id)
-        beta.retry_hail(hail_box, hail_failure.hail_id)
-        expect_raises(Tinrelay::NotFound) { hail_box.read(hail_failure.hail_id) }
       end
     end
   end

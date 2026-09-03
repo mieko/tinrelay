@@ -85,45 +85,4 @@ module Tinrelay
     end
   end
 
-  class HailOutbox
-    UUID = Outbox::UUID
-
-    getter directory : String
-
-    def initialize(@directory)
-      unless Dir.exists?(directory)
-        Dir.mkdir_p(directory, mode: 0o700)
-      end
-      File.chmod(directory, 0o700)
-    end
-
-    def store(hail : Hail) : String
-      encoded = hail.to_json
-      AtomicPrivateFile.write(path(hail.hail_id), encoded + '\n')
-      encoded
-    end
-
-    def read(id : String) : Tuple(Hail, String)
-      encoded = File.read(path(id)).strip
-      hail = Hail.from_json(encoded)
-      raise Invalid.new("outbox hail id does not match its file") unless hail.hail_id == id
-      {hail, encoded}
-    rescue ex : File::NotFoundError
-      raise NotFound.new("outbox hail not found")
-    rescue ex : JSON::ParseException
-      raise Invalid.new("outbox hail is invalid")
-    end
-
-    def delete(id : String) : Nil
-      target = path(id)
-      return unless File.exists?(target)
-      File.delete(target)
-      File.open(directory, "r", &.fsync)
-    end
-
-    private def path(id : String) : String
-      raise Invalid.new("invalid hail id") unless UUID.matches?(id)
-      File.join(directory, "hail-#{id}.json")
-    end
-  end
 end

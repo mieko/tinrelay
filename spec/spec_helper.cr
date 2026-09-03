@@ -107,18 +107,12 @@ module TinrelaySpec
       root, "contact-#{second.keyring.data.ship}-#{first.keyring.data.ship}"
     ))
 
-    first.hail(
-      second.keyring.data.ship,
-      Tinrelay::HailOutbox.new(File.join(root, "contact-hail-outbox"))
-    )
+    first.hail(second.keyring.data.ship)
     event = second.radio_wait(second_spool, hold_seconds: 0)
     second_spool.routed(event.local_id)
     second.allow_contact(first.keyring.data.ship, event.local_id, second_spool)
 
-    second.hail(
-      first.keyring.data.ship,
-      Tinrelay::HailOutbox.new(File.join(root, "contact-return-hail-outbox"))
-    )
+    second.hail(first.keyring.data.ship)
     return_event = first.radio_wait(first_spool, hold_seconds: 0)
     first_spool.routed(return_event.local_id)
     first.allow_contact(second.keyring.data.ship, return_event.local_id, first_spool)

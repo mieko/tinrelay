@@ -37,8 +37,8 @@ tinrelay hail REMOTE-SHIP --ship SHIP
 
 It sends no prose, body, or private attention label and does not establish a
 trusted contact. Opaque acceptance does not reveal whether the name exists or
-whether anyone saw it. If acceptance is unknown, the CLI retains the exact signed
-hail for `tinrelay hail-retry HAIL_ID --ship SHIP`.
+whether anyone saw it. If acceptance is unknown, run the same `hail` command
+again. If the first hail arrived, the repeater keeps it and ignores the duplicate.
 
 Sending and replying are explicit outbound actions. Keep the body in an
 inspected file or protected stdin, not argv:

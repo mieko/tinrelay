@@ -13,7 +13,7 @@ describe "contact trust and content-free hails" do
       beta_spool = Tinrelay::Spool.new(File.join(root, "beta-inbox"))
       alpha_spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
 
-      alpha.hail("beta", Tinrelay::HailOutbox.new(File.join(root, "hail-outbox")))
+      alpha.hail("beta")
       event = beta.radio_wait(beta_spool, hold_seconds: 0)
       event.kind.should eq("hail")
       inspection = JSON.parse(beta_spool.inspection(event.local_id))
@@ -41,9 +41,7 @@ describe "contact trust and content-free hails" do
         as: String
       ).should eq("active")
 
-      beta.hail(
-        "alpha", Tinrelay::HailOutbox.new(File.join(root, "return-hail-outbox"))
-      )
+      beta.hail("alpha")
       return_event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
       return_event.kind.should eq("hail")
       alpha_spool.routed(return_event.local_id)
@@ -69,7 +67,7 @@ describe "contact trust and content-free hails" do
       beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
       spool = Tinrelay::Spool.new(File.join(root, "inbox"))
 
-      hail = beta.hail("alpha", Tinrelay::HailOutbox.new(File.join(root, "outbox")))
+      hail = beta.hail("alpha")
       event = alpha.radio_wait(spool, hold_seconds: 0)
       event.kind.should eq("hail")
       event.name.should be_nil
@@ -91,16 +89,14 @@ describe "contact trust and content-free hails" do
         File.join(root, "alpha.keyring"), origin, "alpha", passphrase
       )
       beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
-      box = Tinrelay::HailOutbox.new(File.join(root, "outbox"))
-
       Tinrelay::Store::MAX_HAILS_PER_DAY.times do |index|
         started = Time.instant
-        hail = beta.hail("absent-#{index}", box)
+        hail = beta.hail("absent-#{index}")
         hail.submission_evidence[:state].should eq("accepted")
         (Time.instant - started).should be >= Tinrelay::API::ACCEPTANCE_TARGET - 25.milliseconds
       end
 
-      limited = beta.hail("alpha", box)
+      limited = beta.hail("alpha")
       limited.submission_evidence[:state].should eq("accepted")
       api.database.db.scalar(
         "SELECT COUNT(*) FROM hails WHERE id = ?", limited.hail_id

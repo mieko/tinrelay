@@ -179,7 +179,6 @@ module Tinrelay
     end
 
     def hail(recipient_ship : String,
-             outbox : HailOutbox = HailOutbox.new("#{keyring.path}.outbox"),
              expires_in : Int64 = HAIL_LIFETIME_SECONDS.to_i64) : Hail
       reconcile_radio_if_pending!
       recipient = Names.ship!(recipient_ship)
@@ -193,14 +192,7 @@ module Tinrelay
       hail.signature = Crypto.b64(
         Crypto.sign(hail.signing_bytes, Crypto.unb64(radio.signing.secret_key))
       )
-      submit_hail(hail, outbox)
-      hail
-    end
-
-    def retry_hail(outbox : HailOutbox, hail_id : String) : Hail
-      hail, encoded = outbox.read(hail_id)
-      raise Unauthorized.new("outbox hail belongs to another local ship") unless hail.sender_ship == keyring.data.ship
-      submit_hail_encoded(hail, encoded, outbox)
+      submit_hail(hail)
       hail
     end
 
@@ -912,20 +904,13 @@ module Tinrelay
       end
     end
 
-    private def submit_hail(hail : Hail, outbox : HailOutbox) : Nil
-      encoded = outbox.store(hail)
-      submit_hail_encoded(hail, encoded, outbox)
-    end
-
-    private def submit_hail_encoded(hail : Hail, encoded : String,
-                                    outbox : HailOutbox) : Nil
+    private def submit_hail(hail : Hail) : Nil
       response_body = begin
-        remote.post("/v1/hails", encoded)
+        remote.post("/v1/hails", hail.to_json)
       rescue ex : Invalid | Unauthorized | Conflict | Expired | ProtocolMismatch
-        outbox.delete(hail.hail_id)
         raise ex
       rescue ex : Error | IO::Error
-        raise HailAcceptanceUnknown.new(hail.hail_id, hail.sender_ship, ex.message)
+        raise HailAcceptanceUnknown.new(hail.sender_ship, hail.recipient_ship, ex.message)
       end
       accepted = begin
         JSON.parse(response_body)["state"].as_s == "accepted"
@@ -934,13 +919,10 @@ module Tinrelay
       end
       unless accepted
         raise HailAcceptanceUnknown.new(
-          hail.hail_id, hail.sender_ship,
+          hail.sender_ship, hail.recipient_ship,
           "repeater returned invalid acceptance evidence"
         )
       end
-      outbox.delete(hail.hail_id)
-    rescue ex : IO::Error
-      raise Error.new("hail #{hail.hail_id} local outbox update failed: #{ex.message}")
     end
 
     private def radio_auth(action : String, payload : Bytes,

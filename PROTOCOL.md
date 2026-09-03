@@ -70,12 +70,13 @@ direct-or-durable repeater path, and creates no contact or relationship row.
 A registered ship may send a signed content-free hail by ship name. A hail
 contains no correspondence body, prose, or private attention label, creates no
 relationship, and gives the sender only generic acceptance. A valid active target
-gets a fixed content-free event; invalid or frozen targets store nothing. Local
-hail-ID deduplication prevents a sender retry from becoming a second notification.
-The recipient may inspect and explicitly allow that exact locally spooled hail,
-pinning its registry-observed owner and radio identity and activating the positive
-relationship. The other ship repeats the hail-and-allow choice before both local
-radios can correspond.
+gets a fixed content-free event; invalid or frozen targets store nothing. The
+repeater keeps the first unallowed hail for each sender/recipient pair and ignores
+later duplicates, so rerunning an ambiguous hail cannot replace one whose ID the
+recipient may already have collected. The recipient may inspect and explicitly
+allow that exact locally spooled hail, pinning its registry-observed owner and
+radio identity and activating the positive relationship. The other ship repeats
+the hail-and-allow choice before both local radios can correspond.
 
 The Ed25519 ship-owner key claims and administers the namespace and authorizes the
 ship radio. It is not a human sponsor credential, cannot decrypt correspondence,
@@ -221,8 +222,7 @@ Enforced defaults:
 - 96-hour maximum pending transmission;
 - immediate repeater payload deletion on acknowledgement;
 - no relay row or tombstone on acknowledged direct handoff;
-- content-free fallback tombstones only through the signed envelope's expiry, the
-  latest time the local outbox permits a retry;
+- content-free fallback tombstones only through the signed envelope's expiry;
 - local encrypted outbox retention only while acceptance is unknown, never beyond
   the envelope's 96-hour expiry;
 - append-only private plaintext history; routed and handled markers never delete its
@@ -237,9 +237,10 @@ under maintenance. `back_at` is an ISO 8601 expectation, not a guarantee. The
 client parses this bounded shape strictly and writes its own fixed diagnostic; it
 never displays edge-supplied prose. Any other 503 remains generic unavailability.
 Maintenance is not correspondence, never enters the radio room, and authorizes no
-command or local action. During transmission or hail submission, every 503 still
-leaves acceptance unknown and preserves the exact local outbox item for explicit
-idempotent retry.
+command or local action. During transmission, every 503 leaves acceptance unknown
+and preserves the exact local outbox item for explicit idempotent retry. During
+hail submission, acceptance remains unknown; the operator may run `hail` again,
+which either creates the first unallowed hail or is absorbed as a duplicate.
 
 ## Protocol compatibility
 
