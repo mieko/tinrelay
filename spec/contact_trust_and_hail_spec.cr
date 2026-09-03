@@ -1,5 +1,22 @@
 require "./spec_helper"
 
+class LostHailResponseRemote < Tinrelay::Remote
+  def initialize(origin : String, @store : Tinrelay::Store? = nil)
+    super(origin)
+  end
+
+  def post(path : String, body : String) : String
+    if path == "/v1/hails"
+      if store = @store
+        hail = store.prepare_hail(Tinrelay::Hail.from_json(body))
+        store.persist_hail(hail)
+      end
+      raise Tinrelay::Unavailable.new("synthetic lost hail response")
+    end
+    super
+  end
+end
+
 describe "contact trust and content-free hails" do
   it "establishes first contact from an explicitly allowed hail and pins each ship by TOFU" do
     TinrelaySpec.with_server do |root, origin, api|
@@ -101,6 +118,70 @@ describe "contact trust and content-free hails" do
       api.database.db.scalar(
         "SELECT COUNT(*) FROM hails WHERE id = ?", limited.hail_id
       ).as(Int64).should eq(0)
+    end
+  end
+
+  it "does not persist a rerun after a lost response and later relationship allow" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "post-allow hail rerun passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = Tinrelay::Client.join(
+        File.join(root, "beta.keyring"), origin, "beta", passphrase
+      )
+      spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
+      unreliable = Tinrelay::Client.new(
+        beta.keyring, passphrase, LostHailResponseRemote.new(origin, api.store)
+      )
+
+      expect_raises(Tinrelay::HailAcceptanceUnknown, /lost hail response/) do
+        unreliable.hail("alpha")
+      end
+      event = alpha.radio_wait(spool, hold_seconds: 0)
+      spool.routed(event.local_id)
+      alpha.allow_contact("beta", event.local_id, spool)
+
+      beta.hail("alpha")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM hails WHERE sender_ship = 'beta' AND recipient_ship = 'alpha'"
+      ).as(Int64).should eq(1)
+
+      api.database.db.exec(
+        "UPDATE hails SET expires_at = ? WHERE sender_ship = 'beta' AND recipient_ship = 'alpha'",
+        Time.utc.to_unix - 1
+      )
+      beta.hail("alpha")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM hails WHERE sender_ship = 'beta' AND recipient_ship = 'alpha'"
+      ).as(Int64).should eq(2)
+    end
+  end
+
+  it "persists the rerun when the first hail never reached durable storage" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "pre-persistence hail rerun passphrase"
+      Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = Tinrelay::Client.join(
+        File.join(root, "beta.keyring"), origin, "beta", passphrase
+      )
+      unreliable = Tinrelay::Client.new(
+        beta.keyring, passphrase, LostHailResponseRemote.new(origin)
+      )
+
+      expect_raises(Tinrelay::HailAcceptanceUnknown, /lost hail response/) do
+        unreliable.hail("alpha")
+      end
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM hails WHERE sender_ship = 'beta' AND recipient_ship = 'alpha'"
+      ).as(Int64).should eq(0)
+
+      beta.hail("alpha")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM hails WHERE sender_ship = 'beta' AND recipient_ship = 'alpha'"
+      ).as(Int64).should eq(1)
     end
   end
 end

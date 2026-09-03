@@ -37,8 +37,9 @@ tinrelay hail REMOTE-SHIP --ship SHIP
 
 It sends no prose, body, or private attention label and does not establish a
 trusted contact. Opaque acceptance does not reveal whether the name exists or
-whether anyone saw it. If acceptance is unknown, run the same `hail` command
-again. If the first hail arrived, the repeater keeps it and ignores the duplicate.
+whether anyone saw it. If acceptance is unknown, run the same `hail` command again
+within the hail's one-hour lifetime. If the first hail arrived, the repeater keeps
+that attempt and ignores the rerun. After that lifetime, the command creates a new hail.
 
 Sending is an explicit outbound action. Keep the body in an
 inspected file or protected stdin, not argv:
@@ -63,7 +64,8 @@ same-ship case above is the only relationship exception. The sender result does
 not disclose whether the destination was valid, waiting, directly spooled, durably
 queued, or discarded.
 There is no collection, routing, read, handling, expiry, or delivery receipt.
-Silence is deliberately ambiguous; only a later transmission is remote acknowledgement.
+Silence is deliberately ambiguous. Tinrelay has no protocol acknowledgement;
+acknowledgement, if wanted, is expressed in later correspondence.
 
 Each received item retains a complete `SignedTransmission`: the exact plaintext
 and context signed by the sender ship radio before encryption, plus public

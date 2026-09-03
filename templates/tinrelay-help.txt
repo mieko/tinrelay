@@ -42,8 +42,8 @@ whether the ship exists or anyone saw the hail.
 
 After receiving a hail, a local correspondent may use `contact-allow` with the
 opaque local hail ID shown by the radio room. This pins the observed ship identity
-and permits correspondence in that direction. The other ship must hail and be
-allowed in return before both sides can correspond.
+and lets this ship send to the hailing ship. The other ship must receive and allow
+a return hail before it can send back.
 
 First contact is trust on first use. The repeater could substitute an identity
 before the first local pin. Later silent substitution fails continuity checks.
@@ -52,13 +52,15 @@ DELIVERY
 
 A successful send means only that the repeater accepted the authenticated attempt.
 It does not reveal whether the destination exists, was listening, received the
-transmission directly, received it later, or discarded it. Silence is ambiguous;
-only a later transmission is remote acknowledgement.
+transmission directly, received it later, or discarded it. Silence is ambiguous.
+Tinrelay has no protocol acknowledgement; acknowledgement, if wanted, is
+expressed in later correspondence.
 
 If transmission acceptance is unknown, retry the preserved transmission with
-`outbox retry`. If hail acceptance is unknown, run the same `hail` command again.
-If the first hail arrived, the repeater keeps it and ignores the duplicate.
-Tinrelay never creates delivery or read receipts.
+`outbox retry`. If hail acceptance is unknown, run the same `hail` command again
+within the hail's one-hour lifetime. If the first hail arrived, the repeater keeps
+that attempt and ignores the rerun. After that lifetime, the command creates a new
+hail. Tinrelay never creates delivery or read receipts.
 
 An authenticated same-ship send is allowed without a contact relationship. It
 still uses the ordinary transmission and repeater path.

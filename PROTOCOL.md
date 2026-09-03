@@ -14,7 +14,7 @@ The repeater has eight relational nouns:
 4. `relationships`: current positive ship-to-ship correspondence eligibility;
 5. `relationship_transitions`: one finite retained-peer set during a ship-wide
    radio retune;
-6. `hails`: at most one unallowed short-lived, signed, content-free request per ship pair;
+6. `hails`: at most one unallowed short-lived, signed, content-free request per directed sender/recipient pair;
 7. `transmissions`: durable-fallback routing metadata and one pending ciphertext, then a
    content-free cleanup tombstone;
 8. `schema_migrations`: applied forward schema versions.
@@ -71,8 +71,8 @@ contains no correspondence body, prose, or private attention label, creates no
 relationship, and gives the sender only generic acceptance. A valid active target
 gets a fixed content-free event; invalid or frozen targets store nothing. The
 repeater keeps the first unallowed hail for each sender/recipient pair and ignores
-later duplicates, so rerunning an ambiguous hail cannot replace one whose ID the
-recipient may already have collected. The recipient may inspect and explicitly
+later duplicates. Until that hail expires, rerunning an ambiguous hail cannot replace
+one whose ID the recipient may already have collected. The recipient may inspect and explicitly
 allow that exact locally spooled hail, pinning its registry-observed owner and
 radio identity and activating the positive relationship. The other ship repeats
 the hail-and-allow choice before both local radios can correspond.
@@ -173,7 +173,8 @@ generic and changed bytes under the same transmission ID conflict. The destinati
 exists only to erase repeater payload and is never sender-visible. There is no
 sender status or receipt for collection, polling, local label resolution, local
 routing, inspection, handling, expiry, or terminal state. Silence is intentionally
-ambiguous. Only a later transmission is remote acknowledgement.
+ambiguous. Tinrelay has no protocol acknowledgement; acknowledgement, if wanted,
+is expressed in later correspondence.
 
 Every authenticated new attempt consumes the sender's rolling-hour allowance before
 destination resolution, including discarded attempts. Direct, fallback, and
@@ -217,7 +218,7 @@ Enforced defaults:
   destination resolution; accounting is bounded in-process because direct success
   and discarded attempts write no relay row;
 - twelve authenticated hails per sending ship per rolling 24 hours, one unallowed hail
-  per ship pair, one-hour maximum lifetime, no body or local label;
+  per directed sender/recipient pair, one-hour maximum lifetime, no body or local label;
 - five-minute signed-action clock window;
 - 96-hour maximum pending transmission;
 - immediate repeater payload deletion on acknowledgement;
@@ -238,9 +239,10 @@ client parses this bounded shape strictly and writes its own fixed diagnostic; i
 never displays edge-supplied prose. Any other 503 remains generic unavailability.
 Maintenance is not correspondence, never enters the radio room, and authorizes no
 command or local action. During transmission, every 503 leaves acceptance unknown
-and preserves the exact local outbox item for explicit idempotent retry. During
-hail submission, acceptance remains unknown; the operator may run `hail` again,
-which either creates the first unallowed hail or is absorbed as a duplicate.
+and preserves the exact local outbox item for explicit idempotent retry. During hail
+submission, acceptance remains unknown; within the original hail's one-hour lifetime,
+the operator may run `hail` again. The rerun either creates the first stored hail or
+is absorbed as a duplicate. After that lifetime, it is a new hail.
 
 ## Protocol compatibility
 

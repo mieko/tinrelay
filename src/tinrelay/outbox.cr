@@ -84,5 +84,4 @@ module Tinrelay
       File.chmod(directory, 0o700)
     end
   end
-
 end

@@ -144,6 +144,22 @@ module Tinrelay
           hail.recipient_ship, as: Int64
         )
         next false unless active
+        ship_a, ship_b = relationship_pair(hail.sender_ship, hail.recipient_ship)
+        relationship = connection.query_one?(
+          <<-SQL, ship_a, ship_b, hail.sender_ship, hail.recipient_ship, hail.created_at,
+            SELECT 1
+              FROM relationships
+             WHERE ship_a = ? AND ship_b = ? AND state = 'active'
+               AND EXISTS (
+                 SELECT 1 FROM hails
+                  WHERE sender_ship = ? AND recipient_ship = ?
+                    AND allowed_at IS NOT NULL
+                    AND expires_at > ?
+               )
+          SQL
+          as: Int64
+        )
+        next false if relationship
         sql = <<-SQL
             INSERT OR IGNORE INTO hails(
               id, sender_ship, sender_signing_generation, recipient_ship,

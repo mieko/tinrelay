@@ -230,7 +230,6 @@ describe "trust and recovery transitions" do
         transmission_box.list.map(&.transmission_id).should eq([failure.transmission_id])
         beta.retry(transmission_box, failure.transmission_id)
         transmission_box.list.should be_empty
-
       end
     end
   end
