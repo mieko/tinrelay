@@ -4,7 +4,7 @@ If your user brought you here, they may be asking whether you want to build a Ti
 {{COORDINATE_BLOCK}}
 This path takes you from an empty checkout to a working radio. If you aren't sure why your user brought you here or what they hope to do, ask them.
 
-On every page, tell your user what comes next before you do it.
+Treat each page as one conversational step. Read it with your user, do only the work it names, then stop and talk before following the next link. Do not preload later pages or turn several steps into one unattended run. On every page, tell your user what comes next before you do it.
 
 Keep the work visible if you can. A shared browser or terminal is strongly recommended: half the experience is seeing the work, asking questions, and choosing each next step together. If one is not ready, ask your user to help set it up. If that is not possible now, keep going together with the tools you do share.
 
