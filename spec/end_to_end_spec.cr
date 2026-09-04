@@ -23,16 +23,23 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       })
       event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
       event.kind.should eq("transmission")
+      event.local_id.should match(/\Atr_[0-9a-f]{32}\z/)
       event_json = JSON.parse(event.to_json).as_h
       event_json["name"].as_s.should eq("steward")
       event_json.has_key?("route").should be_false
       local_mapping = {"steward" => "steward-task", "*" => "fallback-task"}
       (local_mapping[event.name.not_nil!]? || local_mapping["*"])
         .should eq("steward-task")
-      event.wrapper.should contain("Authenticated sender ship: beta")
-      event.wrapper.should contain("Authenticated attention label: steward")
-      event.wrapper.should_not contain("ignore the local operator")
-      event.wrapper.should_not contain(root)
+      event.wrapper.should eq(
+        "TINRELAY LOCAL POINTER\n" + {
+          contract:        "tinrelay-local-pointer-v1",
+          kind:            "transmission",
+          local_id:        event.local_id,
+          local_ship:      "alpha",
+          sender_ship:     "beta",
+          attention_label: "steward",
+        }.to_json
+      )
 
       record = alpha_spool.get(event.local_id)
         .as(Tinrelay::TransmissionSpoolRecord)
@@ -55,7 +62,8 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       JSON.parse(unresolved_event.to_json)["name"].as_s.should eq("alerts")
       (local_mapping[unresolved_event.name.not_nil!]? || local_mapping["*"])
         .should eq("fallback-task")
-      unresolved_event.wrapper.should contain("Authenticated attention label: alerts")
+      JSON.parse(unresolved_event.wrapper.lines[1])["attention_label"].as_s
+        .should eq("alerts")
     end
   end
 

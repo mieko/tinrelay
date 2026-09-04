@@ -62,8 +62,16 @@ describe "ordinary self-transmission" do
       envelope.submission_evidence[:recipient_ship].should eq("harbor")
       event.kind.should eq("transmission")
       event.name.should eq("steward")
-      event.wrapper.should contain("Authenticated sender ship: harbor")
-      event.wrapper.should_not contain("radio proof")
+      event.wrapper.should eq(
+        "TINRELAY LOCAL POINTER\n" + {
+          contract:        "tinrelay-local-pointer-v1",
+          kind:            "transmission",
+          local_id:        event.local_id,
+          local_ship:      "harbor",
+          sender_ship:     "harbor",
+          attention_label: "steward",
+        }.to_json
+      )
 
       record = spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
       record.sender_ship.should eq("harbor")

@@ -210,6 +210,19 @@ repeat the same pointer. The routed mark is the local completion boundary; any l
 handling or reading belongs above Tinrelay. Process death naturally removes parked-wait
 availability.
 
+The transmission wrapper is a local presentation contract, not a network wire
+object. It is exactly two UTF-8 LF-separated lines (with an optional final LF):
+
+```text
+TINRELAY LOCAL POINTER
+{"contract":"tinrelay-local-pointer-v1","kind":"transmission","local_id":"tr_<32 lowercase hex>","local_ship":"<receiving ship>","sender_ship":"<authenticated sender ship>","attention_label":"<authenticated attention label, possibly empty>"}
+```
+
+The JSON is compact and has exactly those keys in that order. It contains no
+command, path, body, Markdown, or trailing prose. The radio room forwards the
+complete wrapper unchanged; a local correspondent deliberately inspects the
+immutable record by its ID outside that mechanical task.
+
 Enforced defaults:
 
 - 16 KiB plaintext; 17 KiB ciphertext; 64 KiB HTTP request;

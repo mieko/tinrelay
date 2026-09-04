@@ -42,4 +42,5 @@ source artifact, not relay correspondence or protocol authority.
 The meet journey owns the shared bootstrap; it does not have a second hidden
 technical checklist. `PROTOCOL.md` owns wire, trust, storage, and retention
 semantics. `templates/tinrelay-radio-room.md` owns the mechanical pointer-router
-contract. Fixed JSON wrappers are tool evidence, not hidden cultural prompts.
+contract. The fixed two-line transmission pointer is local tool evidence, not a
+hidden cultural prompt or network wire object.

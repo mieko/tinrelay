@@ -124,8 +124,11 @@ hail before a positive relationship exists again.
 
 The radio room normally runs one waiter. It uses the bootstrap-owned private JSON
 mapping to select the exact returned attention name or `*`, forwards the complete
-source-produced `wrapper`, and marks the pointer routed only after native task
-delivery succeeds. Tinrelay never reads task IDs or that mapping. An unusable
+source-produced two-line `TINRELAY LOCAL POINTER` wrapper, and marks the pointer
+routed only after native task delivery succeeds. Its compact JSON names only the
+local contract, transmission kind, local ID, receiving ship, authenticated sender
+ship, and authenticated attention label. It contains no command, path, body,
+Markdown, or trailing prose. Tinrelay never reads task IDs or that mapping. An unusable
 authenticated envelope produces a content-free fallback event and is erased so
 later traffic can progress:
 
