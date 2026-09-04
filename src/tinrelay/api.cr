@@ -239,7 +239,7 @@ module Tinrelay
       alternate = "/index.md"
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
       body = wants_markdown ? markdown : bootstrap_page.html(
-        markdown, false, alternate, "home"
+        markdown, false, alternate, "home", handoffs.waiting_count
       )
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
@@ -270,7 +270,7 @@ module Tinrelay
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
       page = action || "meet"
       body = wants_markdown ? markdown : bootstrap_page.html(
-        markdown, private_page, alternate, page
+        markdown, private_page, alternate, page, handoffs.waiting_count
       )
       content_type = wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8"
       context.response.headers["Cache-Control"] = "no-store"
@@ -286,7 +286,7 @@ module Tinrelay
       markdown = bootstrap_page.static("not-found.md")
       wants_markdown = markdown_requested?(context.request)
       body = wants_markdown ? markdown : bootstrap_page.html(
-        markdown, true, "/line/index.md", "not-found"
+        markdown, true, "/line/index.md", "not-found", handoffs.waiting_count
       )
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"

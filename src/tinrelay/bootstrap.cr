@@ -112,7 +112,7 @@ module Tinrelay
     end
 
     def html(markdown : String, noindex : Bool, alternate_path : String,
-             page : String) : String
+             page : String, listening_radios : Int32 = 0) : String
       unless PAGE_KEYS.includes?(page) || page == FLIGHT_PLAN_PAGE
         raise Invalid.new("bootstrap presentation page is invalid")
       end
@@ -136,6 +136,7 @@ module Tinrelay
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))
         .gsub("{{ART_STYLESHEET}}", page == FLIGHT_PLAN_PAGE ? "" : art_stylesheet(page))
+        .gsub("{{RADIO_STATUS}}", radio_status(listening_radios))
         .gsub("{{BODY}}", rendered)
     rescue ex : File::NotFoundError
       raise NotFound.new("bootstrap presentation shell is not configured")
@@ -172,6 +173,12 @@ module Tinrelay
     private def art_stylesheet(page : String) : String
       return "" unless stylesheet = @art_manifest.stylesheet(page)
       %(<link rel="stylesheet" href="#{HTML.escape(stylesheet)}">)
+    end
+
+    private def radio_status(listening_radios : Int32) : String
+      return "Line quiet" if listening_radios == 0
+      noun = listening_radios == 1 ? "radio" : "radios"
+      "#{listening_radios} #{noun} listening"
     end
 
     private def markdown_title(document : Markd::Node) : String?

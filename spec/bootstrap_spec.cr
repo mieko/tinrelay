@@ -26,6 +26,13 @@ describe "the canonical bootstrap representations" do
       browser.body.should contain(%(data-page="home"))
       browser.body.should contain(%(<link rel="canonical" href="https://tinrelay.space/">))
       browser.body.should contain(%(<link rel="alternate" type="text/markdown" href="/index.md">))
+      browser.body.should contain(%(<link rel="icon" href="/tinrelay-art/identity/favicon.cf4c5f39348a.ico" sizes="16x16 32x32 48x48">))
+      browser.body.should contain(%(<link rel="icon" type="image/svg+xml" href="/tinrelay-art/identity/favicon.50beb0bc304b.svg" sizes="any">))
+      browser.body.should contain(%(<link rel="apple-touch-icon" href="/tinrelay-art/identity/apple-touch-icon.87a03ed48d86.png">))
+      browser.body.should contain(%(<link rel="mask-icon" href="/tinrelay-art/identity/mask-icon.a17f08eea9a2.svg" color="#080b14">))
+      browser.body.should contain(%(<meta name="theme-color" content="#080b14">))
+      browser.body.should contain(%(<link rel="stylesheet" href="/tinrelay-art/identity/wordmark.07d6c616afc0.css">))
+      browser.body.should contain(%(<span>Tin Relay</span>))
       browser.headers["Link"].should contain("/index.md")
       browser.headers["X-Robots-Tag"]?.should be_nil
 
@@ -43,6 +50,38 @@ describe "the canonical bootstrap representations" do
       browser_head.body.should be_empty
       browser_head.headers["Content-Type"].should eq("text/html; charset=utf-8")
       browser_head.headers["Content-Length"].to_i.should eq(browser.body.bytesize)
+    end
+  end
+
+  it "renders the number of radios currently parked and listening" do
+    TinrelaySpec.with_server do |_root, origin, api|
+      response = HTTP::Client.get(
+        origin, headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      response.body.should contain(%(<span class="signal">Line quiet</span>))
+
+      finished = Channel(Nil).new(2)
+      spawn do
+        api.handoffs.wait("alpha", 1.second)
+        finished.send(nil)
+      end
+      TinrelaySpec.eventually { api.handoffs.waiting_count == 1 }
+      response = HTTP::Client.get(
+        origin, headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      response.body.should contain(%(<span class="signal">1 radio listening</span>))
+
+      spawn do
+        api.handoffs.wait("beta", 1.second)
+        finished.send(nil)
+      end
+      TinrelaySpec.eventually { api.handoffs.waiting_count == 2 }
+      response = HTTP::Client.get(
+        origin, headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      response.body.should contain(%(<span class="signal">2 radios listening</span>))
+
+      2.times { TinrelaySpec.receive(finished) }
     end
   end
 
@@ -336,7 +375,10 @@ describe "the canonical bootstrap representations" do
       )
       browser.body.should contain(%(data-page="flight-plan"))
       browser.body.should contain(%(href="/assets/tinrelay/plain.css"))
-      browser.body.should_not contain("/tinrelay-art/")
+      browser.body.scan(/<link rel="stylesheet" href="([^"]+)">/).map(&.[1]).should eq([
+        "/assets/tinrelay/plain.css",
+        "/tinrelay-art/identity/wordmark.07d6c616afc0.css",
+      ])
       browser.body.split("</head>", 2).first.should_not contain(coordinate)
 
       llms = HTTP::Client.get("#{origin}/llms.txt").body
@@ -423,6 +465,9 @@ describe "the canonical bootstrap representations" do
         )
         entry.body.should contain(%(href="/assets/tinrelay/plain.css"))
         entry.body.should contain(%(href="/tinrelay-art/meet.a81c.css"))
+        route_art_index = entry.body.index("/tinrelay-art/meet.a81c.css").not_nil!
+        wordmark_index = entry.body.index("/tinrelay-art/identity/wordmark.07d6c616afc0.css").not_nil!
+        route_art_index.should be < wordmark_index
 
         action = HTTP::Client.get(
           "#{origin}/steward%40harbor/first-light/open-the-channel",
@@ -436,7 +481,8 @@ describe "the canonical bootstrap representations" do
           headers: HTTP::Headers{"Accept" => "text/html"}
         )
         unstyled.body.should contain(%(href="/assets/tinrelay/plain.css"))
-        unstyled.body.should_not contain("/tinrelay-art/")
+        unstyled.body.should_not contain(%(href="/tinrelay-art/meet.a81c.css"))
+        unstyled.body.should_not contain(%(href="/tinrelay-art/open-the-channel.918e.css"))
 
         flight_plan = HTTP::Client.get(
           "#{origin}/line/flight-plan",
@@ -444,7 +490,8 @@ describe "the canonical bootstrap representations" do
         )
         flight_plan.body.should contain(%(data-page="flight-plan"))
         flight_plan.body.should contain(%(href="/assets/tinrelay/plain.css"))
-        flight_plan.body.should_not contain("/tinrelay-art/")
+        flight_plan.body.should_not contain(%(href="/tinrelay-art/meet.a81c.css"))
+        flight_plan.body.should_not contain(%(href="/tinrelay-art/open-the-channel.918e.css"))
 
         markdown = HTTP::Client.get(
           "#{origin}/line",

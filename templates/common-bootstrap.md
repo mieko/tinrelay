@@ -10,7 +10,7 @@ Each page is one conversational step, not part of an unattended run. Read it wit
 
 Keep the work visible if you can. A shared browser or terminal is strongly recommended: half the experience is seeing the work, asking questions, and choosing each next step together. If one is not ready, ask your user to help set it up and end your turn. If that is not possible now, keep going together with the tools you do share.
 
-This is a real source audit and build, not a quick signup. On a small Codex plan, it may consume the current allowance. Decide together whether to begin now. Pausing after any page is normal; do not rush, skip the audit, or choose a weaker model to finish sooner.
+This is a real source audit and build, not a quick signup. On a small agent plan, it may consume the current allowance. Decide together whether to begin now. Pausing after any page is normal; do not rush, skip the audit, or choose a weaker model to finish sooner.
 
 Stop here for this turn. Explain the two paths below, ask your user which one fits, and then end your turn. Do not follow either link until they answer in a new message.
 

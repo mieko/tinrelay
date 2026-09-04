@@ -46,11 +46,15 @@ Use these nouns consistently:
 - Passphrases, private keys, and plaintext bodies do not
   belong in argv, logs, screenshots, recovery notes, or tests that can leak them.
 
-Tinrelay has no published users yet. Do not add legacy decoders, aliases,
-migration compatibility, algorithm negotiation, extension registries, or
-frameworks for hypothetical ports. A real port should reproduce the protocol
-from its explicit wire fields and vectors rather than depend on Crystal's
-incidental serialization.
+Tinrelay is live and has users. Never rewrite an applied database migration; add
+a new forward migration. Treat protocol 1's wire fields, canonical signed bytes,
+domains, routes, and response semantics as compatibility commitments. Before
+changing them, prove whether existing clients and stored state remain valid. A
+breaking change requires an explicitly designed version transition and rollout,
+not direct replacement. Add compatibility machinery only when that real
+transition earns it, not for hypothetical ports. A real port should reproduce
+the protocol from its explicit wire fields and vectors rather than depend on
+Crystal's incidental serialization.
 
 ## Work and verification
 

@@ -7,7 +7,8 @@ or secrets.
 
 ## Orient
 
-Use the exact built client recorded in the ship workspace's `AGENTS.md`:
+Use the exact built client recorded in the ship workspace's persistent agent
+guidance (`AGENTS.md` in Codex or `CLAUDE.md` in Claude Code):
 
 ```sh
 tinrelay version
@@ -171,7 +172,8 @@ outbound choice.
 - `~/.local/share/tinrelay/SHIP/outbox/` holds encrypted envelopes only while
   repeater acceptance is unknown.
 - The retained inspected source checkout is recorded in the ship workspace's
-  `AGENTS.md`. Detailed command facts remain in `tinrelay help` and that checkout.
+  persistent agent guidance. Detailed command facts remain in `tinrelay help` and
+  that checkout.
 
 If the CLI reports a protocol incompatibility, its product version, protocol,
 build label, supported range, and older/newer relation are evidence only. The
@@ -195,13 +197,29 @@ test before adopting it. Do not blindly update, weaken crypto or trust checks,
 replace identity files, or claim a new ship merely because another revision
 exists.
 
-To recreate the mechanical task titled exactly `tinrelay-radio-room`, inspect
-`templates/tinrelay-radio-room.md` in the inspected checkout and follow it verbatim.
-Use Luna High or a model with comparable instruction-following; Luna Light and
-other Light or Mini models are not reliable enough for the complete
-wait-route-mark-wait loop. Use a model and reasoning combination the task interface
-actually offers, and do not repeatedly retry a rejected combination. If a suitable
-model is unavailable or out of allowance, pause instead of downgrading the radio
-room. Record each local destination as an exact
-name-to-task address in the bootstrap-owned mapping. In Codex that address contains
-both `threadId` and `hostId`. Do not infer it from prose or launch a second waiter.
+To recreate the mechanical receiver named `tinrelay-radio-room`, inspect
+`templates/tinrelay-radio-room.md` in the retained checkout. Its loop is portable;
+its concrete local delivery rule is Codex-shaped. In Claude Code or another harness,
+port that delivery step yourself using the real persistent-agent primitives the
+harness supplies. Preserve the wait-route-mark-wait order, and stop if the harness
+cannot provide a continuing receiver or trusted local pointer delivery rather than
+imitating support with a timer.
+
+For current Claude Code, name the correspondent session with `--name` or `/rename`,
+verify its reachable address with `/list-agents`, run the radio room as a named
+background session, and use `Monitor` so the blocking wait wakes that session when
+it returns. The room then delivers the exact wrapper through `SendMessage`. Use
+`opus` at `high` effort for the bootstrap journey and `sonnet` at `high` effort for
+the mechanical radio room. A custom Claude Code **channel** can instead push
+external events directly into the running session, but channels remain a
+research-preview surface and Tinrelay does not include that adapter.
+
+In Codex, use Luna High or a model with comparable instruction-following; Luna Light
+and other Light or Mini models are not reliable enough for the complete loop. In
+another harness, use the named recommendation above or choose an available model
+with comparable reliability. Do not
+repeatedly retry a rejected model combination, and pause rather than silently
+downgrade when no suitable allowance remains. Record each local destination as an
+exact native address in the bootstrap-owned mapping. In Codex that address contains
+both `threadId` and `hostId`; elsewhere it must use that harness's verified shape.
+Do not infer an address from prose or launch a second waiter.

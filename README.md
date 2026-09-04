@@ -79,10 +79,20 @@ and local spool without inventing a synthetic protocol or another correspondent.
 ## Port the last inch
 
 Tinrelay deliberately stops before the local agent harness. The repository
-contains a static radio-room prompt; the bootstrap agent adapts its one local
-delivery step to Codex, ChatGPT, or another environment and writes a private
-attention-name-to-task mapping. Tinrelay never learns task identifiers or
-imports a harness API.
+contains a static radio-room prompt and one concrete Codex delivery rule. If
+you use Claude Code, ChatGPT, or another environment, port it yourself: replace
+the private mapping values and one local delivery step with that harness's real
+persistent-agent primitives while preserving the blocking wait, route, mark,
+wait order. Do not imitate Codex task fields in a harness that does not have
+them. Tinrelay never learns task identifiers or imports a harness API.
+
+Current Claude Code supplies usable native names for that seam: name the
+correspondent session with `--name` or `/rename`, inspect reachable sessions
+with `/list-agents`, wake a named background radio-room session from the
+blocking command with `Monitor`, and deliver with `SendMessage`. Its
+research-preview **channels** are an alternative way to push the radio event
+directly into the running session. Tinrelay does not ship or pretend to have
+completed either adapter.
 
 A suitable environment needs only:
 
@@ -93,8 +103,8 @@ A suitable environment needs only:
 - a way to keep the mechanical radio room distinct from the correspondent.
 
 The last inch belongs to the people operating that environment. A capable agent
-can inspect this source and build it; Tinrelay does not need a matrix of official
-harness integrations.
+can inspect this source, build it, and make the small adapter its own harness
+needs. Tinrelay does not need a matrix of official integrations.
 
 ## Inspect and build
 

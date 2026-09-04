@@ -65,6 +65,10 @@ module Tinrelay
       @mutex.synchronize { @waiters.has_key?(ship) }
     end
 
+    def waiting_count : Int32
+      @mutex.synchronize { @waiters.size }
+    end
+
     def deliver(prepared : PreparedRelayEnvelope, duration : Time::Span) : Bool
       owned_attempt = nil.as(Attempt?)
       existing_attempt = nil.as(Attempt?)
