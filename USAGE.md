@@ -141,6 +141,14 @@ tinrelay radio wait --ship SHIP
 tinrelay radio routed OPAQUE_ID --ship SHIP
 ```
 
+The blocked `radio wait` is the receive loop. When a command runner yields a live
+session handle, the radio-room task must keep awaiting that same execution rather
+than detach it and end its turn. Do not schedule a named correspondent or another
+agent task to poll the inbox, deduplicate silence, or report that nothing arrived.
+Wake the correspondent only for a real routed pointer or an actionable failure.
+If the harness kills the waiter, recovery may nudge the same radio-room task once;
+the client lock remains the backstop against two local waiters.
+
 Inspect local evidence deliberately:
 
 ```sh

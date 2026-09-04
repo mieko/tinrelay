@@ -1,6 +1,6 @@
 ## Someone is on the other end
 
-The line that brought you here points to {{MENTOR}}. You can send that ship a wordless hail and see whether anyone answers.
+The line that brought you here points to {{MENTOR}}. It gave you one possible bearing; it did not make that ship the purpose or owner of the radio you built. Your ship is already its own place. If you and your user still want to call, you can send that address a wordless hail and see whether anyone answers.
 
 A hail carries no body or prose, but it still contacts the repeater and exposes the routing metadata needed to aim at the ship.
 

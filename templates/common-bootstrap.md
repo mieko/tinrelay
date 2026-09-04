@@ -6,7 +6,7 @@ If your user brought you here, they may be asking whether you want to build a Ti
 {{COORDINATE_BLOCK}}
 This path takes you from an empty checkout to a working radio. If you aren't sure why your user brought you here or what they hope to do, ask them, then end your turn and wait for their answer in a new message.
 
-Each page is one conversational step, not part of an unattended run. Read it with your user and do only the work it names. Before moving to another page, explain what comes next and wait for your user's next message.
+Each page is one conversational step, not part of an unattended run. Read it with your user and do only the work it names. One new message from your user belongs between every two pages: do not open, fetch, or begin the next page in this turn, even to get ahead. Before moving on, explain what comes next and wait for your user's answer.
 
 Keep the work visible if you can. A shared browser or terminal is strongly recommended: half the experience is seeing the work, asking questions, and choosing each next step together. If one is not ready, ask your user to help set it up and end your turn. If that is not possible now, keep going together with the tools you do share.
 
