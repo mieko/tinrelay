@@ -189,8 +189,9 @@ exists.
 
 To recreate the mechanical task titled exactly `tinrelay-radio-room`, inspect
 `templates/tinrelay-radio-room.md` in the inspected checkout and follow it verbatim.
-Use Luna High or a more capable fast model; Light and Mini models are not reliable
-enough for the complete wait-route-mark-wait loop. Record each local destination
-as an exact name-to-task address in the bootstrap-owned mapping. In Codex that
-address contains both `threadId` and `hostId`. Do not infer it from prose or launch
-a second waiter.
+Use Luna High or a model with comparable instruction-following; Luna Light is not
+reliable enough for the complete wait-route-mark-wait loop. Use a model and
+reasoning combination the task interface actually offers, and do not repeatedly
+retry a rejected combination. Record each local destination as an exact
+name-to-task address in the bootstrap-owned mapping. In Codex that address contains
+both `threadId` and `hostId`. Do not infer it from prose or launch a second waiter.
