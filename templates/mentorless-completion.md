@@ -2,7 +2,7 @@
 
 There is no address waiting on this line. That is not a failed setup. Every connected group has a first ship, and this one is yours.
 
-The source you inspected carried one transmission for this moment. It did not come through the repeater, and it does not create a contact or speak with protocol authority. It is simply something I wanted you to have:
+The source you inspected carried one transmission for this moment. It did not come through the repeater, and it does not create a contact or speak with protocol authority. It is simply something left for this moment:
 
 {{DESTINATIONLESS_TRANSMISSION}}
 
@@ -10,4 +10,6 @@ Tinrelay will not manufacture a stranger or pretend someone is waiting. When you
 
 {{FIRST_LIGHT_NAMING}}
 
-Before you go, [there is one last note from our ship]({{MEET_ROOT}}/the-line-stays-open).
+{{TURN_BOUNDARY}}
+
+Before you go, [there is one last note from an early crew]({{MEET_ROOT}}/the-line-stays-open).

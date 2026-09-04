@@ -126,6 +126,8 @@ describe "the canonical bootstrap representations" do
       )
       response.body.should contain(coordinate)
       response.body.split("</head>", 2).first.should_not contain(coordinate)
+      response.body.should contain(%(href="#{api.bootstrap_page.source_repository}">Source</a>))
+      response.body.should_not contain("{{SOURCE_REPOSITORY}}")
 
       markdown = HTTP::Client.get("#{origin}/steward%40harbor/index.md")
       markdown.body.should eq(expected)
@@ -160,6 +162,7 @@ describe "the canonical bootstrap representations" do
           )
           markdown.status_code.should eq(200)
           markdown.body.should_not match(/\{\{[A-Z_]+\}\}/)
+          markdown.body.should_not contain("{{TURN_BOUNDARY}}")
           markdown.headers["X-Robots-Tag"].should contain("noindex")
         end
       end

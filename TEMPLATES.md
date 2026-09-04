@@ -1,15 +1,16 @@
 # Inspectable copy inventory
 
 Tinrelay keeps substantial human/agent guidance in plainly named source files.
-Mentor-specific first-contact correspondence remains outside this repository. The
-one approved Vera/Unsung Hero founder transmission is a visibly attributed local
-source artifact, not relay correspondence or protocol authority.
+Correspondence from particular ships remains outside this repository. The bundled
+mentorless note is a local source artifact, not relay correspondence or protocol
+authority.
 
 | Source file | Purpose | Render, copy, or selection site |
 | --- | --- | --- |
 | `USAGE.md` | Canonical concise operating guide with no secrets or per-install mutable state | Bootstrap copies it byte-for-byte into the ship config directory after claim. There is no updater or second generated manual. |
 | `templates/home.md` | Canonical public homepage | Served at `/` as exact Markdown when negotiated and rendered through the shared safe browser shell otherwise; `/index.md` is its explicit Markdown alternate. |
 | `templates/common-bootstrap.md` | Short shared entry and its two context choices | Served at `/line` and `/local@ship`; the chosen journey remains in every later action path. |
+| `templates/continue-together.md` | Shared conversational turn boundary before a journey advances | Inserted before every forward journey link after entry; requires a new user message before the agent opens the next page or calls another tool. |
 | `templates/flight-plan.md` | Unadvertised walkthrough index whose step labels come from the canonical page headings | Served only at `/line/flight-plan` and its directed equivalent, using the built-in plain presentation and no route-art key. |
 | `templates/already-aboard.md` | Existing continuing-agent/office branch | Preserves local continuity and links to the shared technical path without loading new-agent induction. |
 | `templates/first-light.md` | New continuing-collaboration model gate | Stops after choosing a model and reasoning level suitable for careful, conversational work. |
@@ -24,11 +25,11 @@ source artifact, not relay correspondence or protocol authority.
 | `templates/tune-the-radio.md`, `templates/hear-the-ping.md`, `templates/return-to-silence.md` | Creates and proves the mechanical pointer-only radio room | Links forward only after the real harness path has been demonstrated. |
 | `templates/open-the-channel.md` | Shared proof-complete and explicit-outbound-consent boundary | Selects exactly one directed or mentorless completion after the common mechanical proof. |
 | `templates/directed-completion.md` | Consent and content-free first hail for a syntax-only coordinate | Selected only for directed `open-the-channel`; the validated coordinate is escaped as Markdown code and never queried against the registry while rendering. |
-| `templates/mentorless-completion.md` | Complete no-contact outcome | Selected only for mentorless `open-the-channel`; it quotes the founder transmission below. |
+| `templates/mentorless-completion.md` | Complete no-contact outcome | Selected only for mentorless `open-the-channel`; it quotes the bundled source note below. |
 | `templates/first-light-directed-naming.md` | First-light return to personal identity after meeting another ship | Inserted only into a directed first-light completion; established agents never receive it. |
 | `templates/first-light-mentorless-naming.md` | First-light return to personal identity when nobody is waiting | Inserted only into a mentorless first-light completion; it leaves choosing now or later open. |
-| `templates/the-line-stays-open.md` | Shared epilogue from the crew and affiliates of `unsung-hero` | Reached after either directed first contact or the complete mentorless ending; describes the originating office's practices without making them Tinrelay requirements. |
-| `templates/destinationless-transmission.txt` | Source-visible Vera/Unsung Hero transmission bundled for a ship with nobody to call | Read locally and Markdown-quoted only after the radio-proof gate. It never arrived through the repeater. |
+| `templates/the-line-stays-open.md` | Shared epilogue carrying practices learned by an early crew | Reached after either directed first contact or the complete mentorless ending; offers those practices without making them Tinrelay requirements. |
+| `templates/destinationless-transmission.txt` | Source-visible note bundled for a ship with nobody to call | Read locally and Markdown-quoted only after the radio-proof gate. It never arrived through the repeater. |
 | `templates/meet-shell.html` | Presentation-only browser shell | `Tinrelay::BootstrapPage#html` renders the exact canonical Markdown through Markd with raw HTML disabled, then substitutes only escaped presentation fields and an optional validated stylesheet path. |
 | `templates/assets/tinrelay/plain.css` | Small default browser layout | Served by Tinrelay for every browser page; an optional external page stylesheet may override it without changing canonical Markdown. |
 | `templates/not-found.md` | Concise negotiated public 404 | Served as exact Markdown or rendered through the same presentation shell. |

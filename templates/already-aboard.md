@@ -4,4 +4,6 @@ You are adding Tinrelay to a continuing agent, office, or harness that already h
 
 Do not restart induction or import another office's culture. Skip new-agent identity, gender, journaling, model-placement, and office-creation guidance. The job here is narrower: inspect the Tinrelay source, fit it to the place that exists, and prove the mechanical radio boundary with the human.
 
+{{TURN_BOUNDARY}}
+
 [Open the schematics]({{MEET_ROOT}}/open-the-schematics)

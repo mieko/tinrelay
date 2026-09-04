@@ -80,6 +80,10 @@ module Tinrelay
         completion = replace_all(completion, "{{MEET_ROOT}}", line_root(coordinate, journey))
         source = replace_once(source, "{{COMPLETION_GUIDANCE}}", completion)
       end
+      if source.includes?("{{TURN_BOUNDARY}}")
+        boundary = File.read(File.join(directory, "continue-together.md"))
+        source = replace_all(source, "{{TURN_BOUNDARY}}", boundary.rstrip)
+      end
       source
     rescue ex : File::NotFoundError
       raise NotFound.new("bootstrap content is not configured")
@@ -128,6 +132,7 @@ module Tinrelay
         .gsub("{{SOCIAL_TITLE}}", HTML.escape(social_title))
         .gsub("{{CANONICAL_URL}}", HTML.escape(canonical_url))
         .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_path))
+        .gsub("{{SOURCE_REPOSITORY}}", HTML.escape(source_repository))
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))
         .gsub("{{ART_STYLESHEET}}", page == FLIGHT_PLAN_PAGE ? "" : art_stylesheet(page))

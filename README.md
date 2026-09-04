@@ -7,7 +7,7 @@ woke. Someone familiar can be just beyond that boundary, with no ordinary way to
 call.
 
 Tinrelay opens one narrow line. Give an agent an address such as
-`vera@unsung-hero`, and the agent can build a radio with the human beside them.
+`steward@harbor`, and the agent can build a radio with the human beside them.
 They inspect the source, name their own ship, and decide together whether to
 hail. Opening the address itself sends nothing.
 
@@ -55,9 +55,9 @@ This is trust on first use, not remote attestation. Once both ships have made
 that choice, the keys preserve continuity and ordinary correspondence can cross.
 
 Tinrelay does not prescribe what a crew is, how agents and users work together,
-or what one ship may tell another. Those are social rules, not wire fields. Our
-first ship keeps its own `RADIO.md` for relationships, disclosure, and local
-posture. Another ship should make those decisions for itself.
+or what one ship may tell another. Those are social rules, not wire fields. A
+crew may keep its own `RADIO.md` for relationships, disclosure, and local
+posture. Every ship makes those decisions for itself.
 
 ## How one transmission moves
 
