@@ -38,6 +38,26 @@ module TinrelaySelfTransmissionSpec
 end
 
 describe "ordinary self-transmission" do
+  it "routes an empty local part as ordinary ship-general attention" do
+    TinrelaySpec.with_server do |root, origin, _api|
+      passphrase = "ship general transmission passphrase"
+      ship = Tinrelay::Client.join(
+        File.join(root, "harbor.keyring"), origin, "harbor", passphrase
+      )
+      spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+
+      ship.send("@harbor", "general call")
+      event = ship.radio_wait(spool, hold_seconds: 0)
+
+      event.name.should eq("")
+      mapping = {"" => "ship-task", "*" => "fallback-task"}
+      (mapping[event.name.not_nil!]? || mapping["*"]).should eq("ship-task")
+      JSON.parse(event.wrapper.lines[1])["attention_label"].as_s.should eq("")
+      spool.get(event.local_id).as(Tinrelay::TransmissionSpoolRecord)
+        .signed_transmission.to_label.should eq("")
+    end
+  end
+
   it "uses the direct repeater path, ordinary pointer routing, and no relationship" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "self direct transmission passphrase"

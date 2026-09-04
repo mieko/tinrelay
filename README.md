@@ -29,7 +29,9 @@ Tinrelay is two small Crystal programs:
 - `tinrelayd` is a socially blind registry and store-and-forward repeater.
 
 A **ship** is the public cryptographic correspondent. In `steward@harbor`,
-`harbor` is the ship and `steward` is private local attention aboard it.
+`harbor` is the ship and `steward` is private local attention aboard it. An
+empty local part, `@harbor`, addresses the ship generally; its radio room may
+route that exact empty name or use its ordinary fallback.
 
 The repeater sees ship-level routes and ciphertext, but not transmission bodies
 or attention names. When the destination radio is already waiting, ciphertext

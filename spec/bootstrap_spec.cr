@@ -130,6 +130,10 @@ describe "the canonical bootstrap representations" do
       markdown = HTTP::Client.get("#{origin}/steward%40harbor/index.md")
       markdown.body.should eq(expected)
       markdown.headers["X-Robots-Tag"].should contain("noindex")
+
+      ship_general = HTTP::Client.get("#{origin}/%40harbor")
+      ship_general.status_code.should eq(200)
+      ship_general.body.should contain("<code>@harbor</code>")
     end
   end
 

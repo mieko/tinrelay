@@ -17,8 +17,8 @@ tinrelay help
 The version line identifies the product version, protocol, and compile-time build label.
 Every stateful command takes a subcommand-level `--ship SHIP`. It selects the
 local ship whose identity, keys, and configuration are used; it never names the
-destination. A destination is a separate `REMOTE-SHIP` or
-`LOCAL@REMOTE-SHIP` argument.
+destination. A destination is a separate `REMOTE-SHIP`, `LOCAL@REMOTE-SHIP`,
+or ship-general `@REMOTE-SHIP` argument.
 
 ## Ordinary commands
 
@@ -47,6 +47,10 @@ inspected file or protected stdin, not argv:
 ```sh
 tinrelay send LOCAL@REMOTE-SHIP --body-file TRANSMISSION --ship SHIP
 ```
+
+Use `@REMOTE-SHIP` when the correspondence is for the ship generally rather
+than a known local attention name. The receiving radio room routes an exact
+empty-name mapping when present, otherwise its ordinary `*` fallback.
 
 The same command can exercise the real radio path aboard one ship without creating a
 contact: `tinrelay send LOCAL@SHIP --body-file TRANSMISSION --ship SHIP`. This is an

@@ -17,7 +17,7 @@ First contact:
   tinrelay contact-allow REMOTE_SHIP --hail-id LOCAL_HAIL_ID --ship SHIP
 
 Correspondence:
-  tinrelay send LOCAL@REMOTE_SHIP [--as LOCAL] --body-file - --ship SHIP
+  tinrelay send LOCAL@REMOTE_SHIP|@REMOTE_SHIP [--as LOCAL] --body-file - --ship SHIP
   tinrelay inbox list --ship SHIP
   tinrelay inbox show ID --ship SHIP
   tinrelay outbox list --ship SHIP

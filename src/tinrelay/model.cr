@@ -13,10 +13,15 @@ module Tinrelay
       value
     end
 
+    def self.attention!(value : String) : String
+      return value if value.empty?
+      label!(value)
+    end
+
     def self.coordinate!(value : String) : Tuple(String, String)
       parts = value.split('@')
       raise Invalid.new("coordinate must be local-label@ship") unless parts.size == 2
-      {label!(parts[0]), ship!(parts[1])}
+      {attention!(parts[0]), ship!(parts[1])}
     end
   end
 

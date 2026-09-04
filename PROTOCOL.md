@@ -41,11 +41,13 @@ damaged old history record cannot stop new pointers.
 
 ## Ships, labels, and authority
 
-Within one configured relay, ship names and private labels are lowercase ASCII letters, digits, and interior
-hyphens, at most 63 bytes. In `steward@harbor`, only `harbor` is a repeater route.
+Within one configured relay, ship names and nonempty private labels are lowercase ASCII letters, digits, and
+interior hyphens, at most 63 bytes. In `steward@harbor`, only `harbor` is a repeater route.
 `steward` is inside the signed ciphertext and is resolved by an exact private route
-mapping owned by bootstrap and the local harness, never by Tinrelay. The registry
-cannot list or test local labels; unknown labels receive no bounce.
+mapping owned by bootstrap and the local harness, never by Tinrelay. An empty local
+part such as `@harbor` is an ordinary empty attention label for ship-general
+correspondence; the private mapping may own `""` exactly or fall back to `"*"`.
+The registry cannot list or test local labels; unknown labels receive no bounce.
 
 Ship names are openly first-claim-unique. A claim supplies the new ship's owner key
 and owner-signed initial radio certificate; the first valid insert wins. Claiming a

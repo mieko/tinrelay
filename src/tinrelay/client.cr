@@ -520,7 +520,7 @@ module Tinrelay
       raise Invalid.new("unsupported signed transmission version") unless transmission.object_version == 1 && transmission.protocol == PROTOCOL
       Names.ship!(transmission.sender_ship)
       Names.ship!(transmission.recipient_ship)
-      Names.label!(transmission.to_label)
+      Names.attention!(transmission.to_label)
       transmission.from_label.try { |label| Names.label!(label) }
       raise Invalid.new("received body is empty") if transmission.body.empty?
       unless Crypto.verify(
