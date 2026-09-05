@@ -29,15 +29,25 @@ module Tinrelay
     getter pending : String
     getter history : String
 
-    def initialize(@root)
+    def initialize(root)
+      initialize(root, true)
+    end
+
+    private def initialize(@root, create_directories : Bool)
       @pending = File.join(root, "pending")
       @history = File.join(root, "history")
-      [root, pending, history, routed_markers].each do |directory|
-        unless Dir.exists?(directory)
-          Dir.mkdir_p(directory, mode: 0o700)
+      if create_directories
+        [root, pending, history, routed_markers].each do |directory|
+          unless Dir.exists?(directory)
+            Dir.mkdir_p(directory, mode: 0o700)
+          end
+          File.chmod(directory, 0o700)
         end
-        File.chmod(directory, 0o700)
       end
+    end
+
+    def self.open_existing(root : String) : Spool
+      new(root, false)
     end
 
     def store_transmission(envelope : SignedRelayEnvelope,
@@ -145,6 +155,17 @@ module Tinrelay
       find_record(id) || raise NotFound.new("inbox record not found")
     end
 
+    def status(id : String) : NamedTuple(state: String, local_id: String,
+      kind: String, routed_at: Int64?)
+      record = get(id)
+      {
+        state:     record.routed_at ? "routed" : "pending",
+        local_id:  record.local_id,
+        kind:      record.kind,
+        routed_at: record.routed_at,
+      }
+    end
+
     def routed(id : String, now : Int64 = Time.utc.to_unix) : SpoolRecord
       record = get(id)
       record.routed_at = mark_once(routed_markers, id, now)
@@ -243,6 +264,9 @@ module Tinrelay
         path = File.join(directory, "#{id}.json")
         next unless File.file?(path)
         record = SpoolRecord.from_json(File.read(path))
+        unless record.local_id == id
+          raise Error.new("inbox record id does not match requested id")
+        end
         verify_record!(record)
         hydrate_state!(record)
         return record

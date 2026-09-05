@@ -25,9 +25,11 @@ Natural unique IDs and key and admin generations own replay prevention. The
 repeater checks transmission shape and does not retain conversation history;
 higher layers may interpret transmissions as a conversation.
 
-If a radio wait is parked, the repeater hands the envelope to it in memory. After the
-client verifies/decrypts, fsyncs one private plaintext JSON file, and acknowledges,
-the repeater returns sender acceptance without writing a transmission row or tombstone.
+If a radio wait is parked, the repeater hands the envelope to it in memory. The
+client verifies/decrypts and fsyncs one private plaintext JSON file; that durable
+local evidence is immediately surfaceable even if relay cleanup is unavailable.
+The client then acknowledges cleanup. On an acknowledged direct handoff, the
+repeater returns sender acceptance without writing a transmission row or tombstone.
 Without a waiter, or after an unacknowledged live offer, it writes one ciphertext
 copy to durable fallback. Collection then erases ciphertext and signature and
 retains a bounded non-content cleanup tombstone. The
@@ -192,9 +194,12 @@ is not a correspondence archive or delivery workflow.
 
 `tinrelay radio wait --ship SHIP` repeats bounded 25-second long polls. WebSockets
 and permanent voicemail are absent.
-On verified receipt it atomically spools, acknowledges, and returns one opaque local
+On verified receipt it atomically spools and returns one opaque local
 ID, complete fixed safe wrapper, and the authenticated local attention name only
-for a transmission. It returns no task identifier or harness route. An envelope that cannot be
+for a transmission. Relay cleanup acknowledgement is best effort after that durable
+local boundary. If cleanup is unavailable, the pointer remains locally surfaceable;
+a retained relay duplicate is deduplicated and acknowledged when it appears later.
+It returns no task identifier or harness route. An envelope that cannot be
 authenticated, decrypted, decoded, or reconciled with a prior local transmission ID
 instead produces durable content-free local rejection evidence, is acknowledged for
 relay erasure, and returns a fixed wrapper with no sender attribution or attention
@@ -205,12 +210,17 @@ discriminator and exactly one visible evidence shape: signed transmission, rejec
 transmission, or content-free hail. Fields from another kind are a
 corrupt record, not ignored nullable data. The radio task forwards the wrapper verbatim and
 uses its bootstrap-owned exact-name/`*` mapping and marks that ID routed only after
-native pointer delivery reports success. A crash
-before relay ack reuses the spool record
-and retries ack; a crash after native delivery but before the local routed mark may
+native pointer delivery reports success. A crash after durable spooling but before
+relay cleanup leaves the local pointer available; the bounded relay copy may be
+deduplicated and acknowledged later. A crash after native delivery but before the local routed mark may
 repeat the same pointer. The routed mark is the local completion boundary; any later
 handling or reading belongs above Tinrelay. Process death naturally removes parked-wait
 availability.
+
+`tinrelay radio status LOCAL_ID --ship SHIP` is outside the wire protocol. It
+reads and verifies only that exact local spool record and its routed marker,
+reports `pending` or `routed`, and neither contacts the repeater nor mutates the
+spool. Missing and corrupt local evidence are explicit failures.
 
 The transmission wrapper is a local presentation contract, not a network wire
 object. It is exactly two UTF-8 LF-separated lines (with an optional final LF):

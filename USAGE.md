@@ -139,6 +139,8 @@ later traffic can progress:
 
 ```sh
 tinrelay radio wait --ship SHIP
+tinrelay radio poll --ship SHIP
+tinrelay radio status OPAQUE_ID --ship SHIP
 tinrelay radio routed OPAQUE_ID --ship SHIP
 ```
 
@@ -149,6 +151,23 @@ agent task to poll the inbox, deduplicate silence, or report that nothing arrive
 Wake the correspondent only for a real routed pointer or an actionable failure.
 If the harness kills the waiter, recovery may nudge the same radio-room task once;
 the client lock remains the backstop against two local waiters.
+
+`radio poll` is the immediate sibling for a caller that already owns its scheduling.
+It returns the oldest locally unrouted event without requiring the repeater to be
+available; otherwise it makes one zero-hold relay attempt. A quiet result is the
+single JSON object `{"state":"quiet"}` with a successful exit. The command has no
+retry loop or timer, and it shares the waiter's exclusive local spool lock.
+
+`radio status OPAQUE_ID` is a body-free, non-mutating local lookup of that exact
+record. It reports `pending` or `routed` without contacting the repeater or
+scanning history. It does not create or chmod spool directories; missing and
+corrupt evidence fail explicitly.
+
+A connection, DNS, or network-timeout failure exits 2 with
+`{"error":"transport_unavailable","retryable":true,"message":"relay transport is unavailable"}`.
+A bridge may retry that fixed class with its own cap. Authentication, protocol,
+maintenance, local file, malformed-response, TLS, and unknown failures stay
+distinct and are not blanket retry signals.
 
 Inspect local evidence deliberately:
 

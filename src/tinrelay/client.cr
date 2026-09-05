@@ -30,6 +30,8 @@ module Tinrelay
       client.exec(method, uri.request_target, headers: headers, body: body) do |response|
         response_body(response.status_code, response.success?, read_body(response.body_io))
       end
+    rescue Socket::Error | IO::TimeoutError
+      raise TransportUnavailable.new
     ensure
       client.try(&.close)
     end
@@ -200,63 +202,92 @@ module Tinrelay
       end
     end
 
+    def radio_poll(spool : Spool) : RadioEvent?
+      spool.with_radio_lock do
+        if event = local_radio_event(spool)
+          event
+        else
+          reconcile_radio_if_pending!
+          radio_attempt(spool, 0)
+        end
+      end
+    end
+
     private def radio_wait_unlocked(spool : Spool,
                                     hold_seconds : Int32) : RadioEvent
-      if record = spool.next_unrouted
-        case record
-        when TransmissionSpoolRecord, RejectedTransmissionSpoolRecord
-          acknowledge(record.relay_transmission_id)
-        when HailSpoolRecord
-          acknowledge_hail(record.hail_id)
-        end
-        return radio_event(record)
+      if event = local_radio_event(spool)
+        return event
       end
       reconcile_radio_if_pending!
       loop do
-        known = keyring.data.contacts.to_h do |contact|
-          {contact.ship, contact.radio_certificate.generation}
-        end
-        placeholder = RadioAuth.new(
-          keyring.data.ship, keyring.data.active_radio_generation, 0_i64
-        )
-        request = RadioWaitRequest.new(
-          hold_seconds, placeholder, known
-        )
-        request.auth = radio_auth("radio.wait", request.payload)
-        response = RadioWaitResponse.from_json(
-          remote.post("/v1/radio/wait", request.to_json)
-        )
-        unless response.contact_updates.empty?
-          changed = false
-          response.contact_updates.each do |update|
-            contact = keyring.data.contact!(update.ship)
-            changed = apply_contact_update!(contact, update) || changed
-            acknowledge_retune(update.ship, update.to_generation)
-          end
-          keyring.save(passphrase) if changed
-          next
-        end
-        if hail = response.hail
-          record = receive_hail(hail, spool)
-          acknowledge_hail(hail.hail.hail_id)
-          next unless record
-          next if record.routed_at
-          return radio_event(record)
-        end
-        if envelope = response.envelope
-          record = begin
-            receive(envelope, spool)
-          rescue Conflict
-            spool.store_rejection(envelope, "transmission_id_conflict")
-          rescue Invalid | Unauthorized | NotFound
-            spool.store_rejection(envelope, "unusable_envelope")
-          end
-          acknowledge(envelope.transmission_id)
-          next unless record
-          next if record.routed_at
-          return radio_event(record)
+        if event = radio_attempt(spool, hold_seconds)
+          return event
         end
       end
+    end
+
+    private def local_radio_event(spool : Spool) : RadioEvent?
+      return unless record = spool.next_unrouted
+      # A durable local pointer is useful without the repeater. If its cleanup
+      # ack was lost, the bounded relay copy will be acked when it reappears.
+      radio_event(record)
+    end
+
+    private def radio_attempt(spool : Spool,
+                              hold_seconds : Int32) : RadioEvent?
+      known = keyring.data.contacts.to_h do |contact|
+        {contact.ship, contact.radio_certificate.generation}
+      end
+      placeholder = RadioAuth.new(
+        keyring.data.ship, keyring.data.active_radio_generation, 0_i64
+      )
+      request = RadioWaitRequest.new(
+        hold_seconds, placeholder, known
+      )
+      request.auth = radio_auth("radio.wait", request.payload)
+      response = RadioWaitResponse.from_json(
+        remote.post("/v1/radio/wait", request.to_json)
+      )
+      unless response.contact_updates.empty?
+        changed = false
+        response.contact_updates.each do |update|
+          contact = keyring.data.contact!(update.ship)
+          changed = apply_contact_update!(contact, update) || changed
+          acknowledge_retune(update.ship, update.to_generation)
+        end
+        keyring.save(passphrase) if changed
+        return
+      end
+      if hail = response.hail
+        record = receive_hail(hail, spool)
+        record ? acknowledge_local_record(record) : acknowledge_hail(hail.hail.hail_id)
+        return unless record && !record.routed_at
+        return radio_event(record)
+      end
+      if envelope = response.envelope
+        record = begin
+          receive(envelope, spool)
+        rescue Conflict
+          spool.store_rejection(envelope, "transmission_id_conflict")
+        rescue Invalid | Unauthorized | NotFound
+          spool.store_rejection(envelope, "unusable_envelope")
+        end
+        record ? acknowledge_local_record(record) : acknowledge(envelope.transmission_id)
+        return unless record && !record.routed_at
+        return radio_event(record)
+      end
+    end
+
+    # Local evidence is already the durable recovery boundary. Relay cleanup is
+    # best effort here so an unavailable repeater cannot hide an unrouted pointer.
+    private def acknowledge_local_record(record : SpoolRecord) : Nil
+      case record
+      when TransmissionSpoolRecord, RejectedTransmissionSpoolRecord
+        acknowledge(record.relay_transmission_id)
+      when HailSpoolRecord
+        acknowledge_hail(record.hail_id)
+      end
+    rescue Unavailable
     end
 
     def acknowledge(transmission_id : String) : Nil

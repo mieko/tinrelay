@@ -101,6 +101,12 @@ module Tinrelay
         message: "This source-built Tinrelay client is incompatible with the service. Inspect the retained checkout, the actual error, tests, local configuration, safe logs, and relevant upstream changes; explain and test any proposed repair before adoption.",
       }.to_json)
       exit 2
+    rescue ex : TransportUnavailable
+      STDERR.puts({
+        error: "transport_unavailable", retryable: true,
+        message: ex.message,
+      }.to_json)
+      exit 2
     rescue ex : Error
       STDERR.puts({error: ex.class.name.split("::").last.underscore, message: ex.message}.to_json)
       exit 2
@@ -110,20 +116,30 @@ module Tinrelay
     end
 
     private def self.radio(argv, ship, paths, keyring_path, owner_path, passphrase_file) : Nil
-      operation = argv.shift? || raise Invalid.new("radio requires wait or routed")
+      operation = argv.shift? || raise Invalid.new("radio requires wait, poll, status, or routed")
       case operation
       when "wait"
         spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
         puts client(keyring_path, owner_path, ship, passphrase_file).radio_wait(spool).to_json
+      when "poll"
+        spool = Spool.new(extract(argv, "--spool") || paths.spool)
+        no_extra!(argv)
+        event = client(keyring_path, owner_path, ship, passphrase_file).radio_poll(spool)
+        puts(event ? event.to_json : %({"state":"quiet"}))
       when "routed"
         id = argv.shift? || raise Invalid.new("radio routed requires a local transmission id")
         spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
         record = spool.routed(id)
         puts({state: "routed", id: record.local_id, routed_at: record.routed_at}.to_json)
+      when "status"
+        id = argv.shift? || raise Invalid.new("radio status requires a local transmission id")
+        spool = Spool.open_existing(extract(argv, "--spool") || paths.spool)
+        no_extra!(argv)
+        puts spool.status(id).to_json
       else
-        raise Invalid.new("radio requires wait or routed")
+        raise Invalid.new("radio requires wait, poll, status, or routed")
       end
     end
 

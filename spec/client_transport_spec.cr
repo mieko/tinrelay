@@ -14,9 +14,54 @@ module TinrelayClientTransportSpec
   ensure
     server.try(&.close)
   end
+
+  def self.with_raw_response(response : String, scheme = "http", &)
+    server = TCPServer.new("127.0.0.1", 0)
+    address = server.local_address
+    spawn do
+      socket = server.accept
+      socket << response
+      socket.flush
+      socket.close
+    end
+    yield "#{scheme}://127.0.0.1:#{address.port}"
+  ensure
+    server.try(&.close)
+  end
 end
 
 describe Tinrelay::Remote do
+  it "classifies network transport failures for bounded caller retry" do
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.local_address.port
+    server.close
+
+    error = expect_raises(Tinrelay::TransportUnavailable) do
+      Tinrelay::Remote.new("http://127.0.0.1:#{port}").post("/v1/test", %({}))
+    end
+    error.message.should eq("relay transport is unavailable")
+  end
+
+  it "does not classify malformed HTTP framing as a retryable transport failure" do
+    response = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nnot-a-size\r\n"
+    TinrelayClientTransportSpec.with_raw_response(response) do |origin|
+      error = expect_raises(IO::Error) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.should_not be_a(Tinrelay::TransportUnavailable)
+    end
+  end
+
+  it "does not classify TLS negotiation or verification failures as retryable" do
+    response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+    TinrelayClientTransportSpec.with_raw_response(response, "https") do |origin|
+      error = expect_raises(OpenSSL::Error) do
+        Tinrelay::Remote.new(origin).post("/v1/test", %({}))
+      end
+      error.should_not be_a(Tinrelay::TransportUnavailable)
+    end
+  end
+
   it "bounds every response before parsing it" do
     oversized = %({"padding":"#{"x" * (Tinrelay::Remote::MAX_RESPONSE_BYTES + 1)}"})
     TinrelayClientTransportSpec.with_response(200, oversized) do |origin|

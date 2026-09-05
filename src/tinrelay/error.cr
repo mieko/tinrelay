@@ -14,6 +14,14 @@ module Tinrelay
   class Unavailable < Error
   end
 
+  # A failure at the relay's network boundary. Its distinct type lets a caller
+  # retry narrowly without treating local I/O or unknown failures as transient.
+  class TransportUnavailable < Unavailable
+    def initialize
+      super("relay transport is unavailable")
+    end
+  end
+
   class Maintenance < Unavailable
     getter back_at : Time?
 
