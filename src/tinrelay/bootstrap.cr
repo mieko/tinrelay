@@ -1,4 +1,5 @@
 require "uri"
+require "digest/sha256"
 
 module Tinrelay
   class BootstrapPage
@@ -161,7 +162,7 @@ module Tinrelay
                     end
       social_title = home ? markdown_title || "Tinrelay" : "Open a Tinrelay line"
       canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/line"
-      shell
+      html = shell
         .gsub("{{ROBOTS}}", noindex ? "noindex,nofollow,noarchive" : "index,follow")
         .gsub("{{DESCRIPTION}}", HTML.escape(description))
         .gsub("{{SOCIAL_TITLE}}", HTML.escape(social_title))
@@ -173,6 +174,8 @@ module Tinrelay
         .gsub("{{ART_STYLESHEET}}", page == FLIGHT_PLAN_PAGE ? "" : art_stylesheet(page))
         .gsub("{{RADIO_STATUS}}", radio_status(listening_radios))
         .gsub("{{BODY}}", rendered)
+      return html unless html.includes?("{{PLAIN_STYLESHEET}}")
+      html.gsub("{{PLAIN_STYLESHEET}}", plain_stylesheet_link)
     rescue ex : File::NotFoundError
       raise NotFound.new("bootstrap presentation shell is not configured")
     end
@@ -187,10 +190,11 @@ module Tinrelay
     end
 
     def asset(name : String) : String
-      unless name == "plain.css"
+      stylesheet = plain_stylesheet
+      unless name == plain_stylesheet_name(stylesheet)
         raise NotFound.new("public asset does not exist")
       end
-      File.read(File.join(File.dirname(common_path), "assets", "tinrelay", name))
+      stylesheet
     rescue ex : File::NotFoundError
       raise NotFound.new("public asset does not exist")
     end
@@ -208,6 +212,22 @@ module Tinrelay
     private def art_stylesheet(page : String) : String
       return "" unless stylesheet = @art_manifest.stylesheet(page)
       %(<link rel="stylesheet" href="#{HTML.escape(stylesheet)}">)
+    end
+
+    private def plain_stylesheet_link : String
+      stylesheet = plain_stylesheet
+      name = plain_stylesheet_name(stylesheet)
+      %(<link rel="stylesheet" href="/assets/tinrelay/#{name}">)
+    end
+
+    private def plain_stylesheet : String
+      File.read(
+        File.join(File.dirname(common_path), "assets", "tinrelay", "plain.css")
+      )
+    end
+
+    private def plain_stylesheet_name(stylesheet : String) : String
+      "plain.#{Digest::SHA256.hexdigest(stylesheet)}.css"
     end
 
     private def radio_status(listening_radios : Int32) : String

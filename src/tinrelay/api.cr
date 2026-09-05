@@ -329,7 +329,7 @@ module Tinrelay
     end
 
     private def public_asset(context : HTTP::Server::Context, name : String) : Int32
-      context.response.headers["Cache-Control"] = "public, max-age=86400"
+      context.response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
       context.response.headers["X-Content-Type-Options"] = "nosniff"
       write_body(
         context, 200, "text/css; charset=utf-8", bootstrap_page.asset(name)

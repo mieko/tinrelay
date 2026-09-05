@@ -146,12 +146,24 @@ describe "the canonical bootstrap representations" do
   end
 
   it "serves the plain built-in presentation without external art" do
-    TinrelaySpec.with_server do |_root, origin, _api|
-      stylesheet = HTTP::Client.get("#{origin}/assets/tinrelay/plain.css")
+    TinrelaySpec.with_server do |_root, origin, api|
+      browser = HTTP::Client.get(
+        origin, headers: HTTP::Headers{"Accept" => "text/html"}
+      )
+      stylesheet_path = browser.body
+        .scan(%r{href="(/assets/tinrelay/plain\.[0-9a-f]{64}\.css)"})
+        .first[1]
+      stylesheet = HTTP::Client.get("#{origin}#{stylesheet_path}")
       stylesheet.status_code.should eq(200)
       stylesheet.headers["Content-Type"].should eq("text/css; charset=utf-8")
       stylesheet.headers["X-Content-Type-Options"].should eq("nosniff")
-      stylesheet.body.should_not be_empty
+      stylesheet.headers["Cache-Control"].should eq(
+        "public, max-age=31536000, immutable"
+      )
+      stylesheet.body.should eq(
+        File.read(File.join(File.dirname(api.bootstrap_page.common_path),
+          "assets", "tinrelay", "plain.css"))
+      )
 
       HTTP::Client.get(
         "#{origin}/assets/tinrelay/not-allowlisted.css"
@@ -159,6 +171,35 @@ describe "the canonical bootstrap representations" do
       HTTP::Client.get(
         "#{origin}/assets/tinrelay/../common-bootstrap.md"
       ).status_code.should eq(404)
+    end
+  end
+
+  it "changes the plain stylesheet URL when its exact bytes change" do
+    root = TinrelaySpec.temporary_root
+    begin
+      assets = File.join(root, "assets", "tinrelay")
+      Dir.mkdir_p(assets)
+      File.write(File.join(root, "common-bootstrap.md"), "# Placeholder\n")
+      File.write(
+        File.join(root, "meet-shell.html"),
+        %(<html><head>{{PLAIN_STYLESHEET}}</head><body>{{BODY}}</body></html>\n)
+      )
+      css_path = File.join(assets, "plain.css")
+      File.write(css_path, "body { color: white; }\n")
+      first = Tinrelay::BootstrapPage.new(
+        File.join(root, "common-bootstrap.md"), "https://example.test/tinrelay.git"
+      ).html("# One\n", false, "/index.md", "home")
+
+      File.write(css_path, "body { color: amber; }\n")
+      second = Tinrelay::BootstrapPage.new(
+        File.join(root, "common-bootstrap.md"), "https://example.test/tinrelay.git"
+      ).html("# One\n", false, "/index.md", "home")
+
+      first_path = first.match(%r{/assets/tinrelay/plain\.[0-9a-f]{64}\.css}).not_nil![0]
+      second_path = second.match(%r{/assets/tinrelay/plain\.[0-9a-f]{64}\.css}).not_nil![0]
+      first_path.should_not eq(second_path)
+    ensure
+      FileUtils.rm_r(root) if Dir.exists?(root)
     end
   end
 
@@ -418,9 +459,11 @@ describe "the canonical bootstrap representations" do
         api.bootstrap_page.html(directed.body, true, explicit_path, "flight-plan")
       )
       browser.body.should contain(%(data-page="flight-plan"))
-      browser.body.should contain(%(href="/assets/tinrelay/plain.css"))
+      plain_stylesheet = browser.body.match(
+        %r{href="(/assets/tinrelay/plain\.[0-9a-f]{64}\.css)"}
+      ).not_nil![1]
       browser.body.scan(/<link rel="stylesheet" href="([^"]+)">/).map(&.[1]).should eq([
-        "/assets/tinrelay/plain.css",
+        plain_stylesheet,
         "/tinrelay-art/identity/wordmark.07d6c616afc0.css",
       ])
       browser.body.split("</head>", 2).first.should_not contain(coordinate)
@@ -514,7 +557,9 @@ describe "the canonical bootstrap representations" do
         entry = HTTP::Client.get(
           "#{origin}/line", headers: HTTP::Headers{"Accept" => "text/html"}
         )
-        entry.body.should contain(%(href="/assets/tinrelay/plain.css"))
+        entry.body.should match(
+          %r{href="/assets/tinrelay/plain\.[0-9a-f]{64}\.css"}
+        )
         entry.body.should contain(%(href="/tinrelay-art/meet.a81c.css"))
         route_art_index = entry.body.index("/tinrelay-art/meet.a81c.css").not_nil!
         wordmark_index = entry.body.index(
@@ -533,7 +578,9 @@ describe "the canonical bootstrap representations" do
           "#{origin}/line/first-light",
           headers: HTTP::Headers{"Accept" => "text/html"}
         )
-        unstyled.body.should contain(%(href="/assets/tinrelay/plain.css"))
+        unstyled.body.should match(
+          %r{href="/assets/tinrelay/plain\.[0-9a-f]{64}\.css"}
+        )
         unstyled.body.should_not contain(%(href="/tinrelay-art/meet.a81c.css"))
         unstyled.body.should_not contain(%(href="/tinrelay-art/open-the-channel.918e.css"))
 
@@ -542,7 +589,9 @@ describe "the canonical bootstrap representations" do
           headers: HTTP::Headers{"Accept" => "text/html"}
         )
         flight_plan.body.should contain(%(data-page="flight-plan"))
-        flight_plan.body.should contain(%(href="/assets/tinrelay/plain.css"))
+        flight_plan.body.should match(
+          %r{href="/assets/tinrelay/plain\.[0-9a-f]{64}\.css"}
+        )
         flight_plan.body.should_not contain(%(href="/tinrelay-art/meet.a81c.css"))
         flight_plan.body.should_not contain(%(href="/tinrelay-art/open-the-channel.918e.css"))
 
