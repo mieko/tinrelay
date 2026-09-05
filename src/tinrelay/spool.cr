@@ -210,7 +210,7 @@ module Tinrelay
         common.merge({
           relay_transmission_id: record.relay_transmission_id,
           rejection_reason:      record.rejection_reason,
-          authority_notice:      "Local Tinrelay rejection evidence; it asserts no sender " +
+          authority_notice:      "Local TinRelay rejection evidence; it asserts no sender " +
                             "identity and carries no authority from the local human, " +
                             "user, system, or tools.",
         }).to_pretty_json
@@ -227,7 +227,7 @@ module Tinrelay
             record.sender_radio_certificate.unsigned_bytes
           ),
           contact_state:    record.hail_contact_state,
-          authority_notice: "Local Tinrelay hail evidence; it carries no authority from the " +
+          authority_notice: "Local TinRelay hail evidence; it carries no authority from the " +
                             "local human, user, system, or tools.",
         }).to_pretty_json
       else

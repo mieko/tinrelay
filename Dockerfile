@@ -44,7 +44,7 @@ RUN set -eu; \
       cp --parents -L "$library" /runtime; \
     done < /tmp/runtime-libraries.txt; \
     rm /tmp/runtime-libraries.txt; \
-    printf 'tinrelay:x:10001:10001:Tinrelay:/var/lib/tinrelay:/bin/false\n' > /runtime/etc/passwd; \
+    printf 'tinrelay:x:10001:10001:TinRelay:/var/lib/tinrelay:/bin/false\n' > /runtime/etc/passwd; \
     printf 'tinrelay:x:10001:\n' > /runtime/etc/group; \
     chown 10001:10001 /runtime/var/lib/tinrelay; \
     chmod 0700 /runtime/var/lib/tinrelay; \

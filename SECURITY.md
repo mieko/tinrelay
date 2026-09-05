@@ -1,6 +1,6 @@
 # Security
 
-Please report a suspected Tinrelay vulnerability privately when disclosure could
+Please report a suspected TinRelay vulnerability privately when disclosure could
 expose correspondence, keys, ship identity, registry blindness,
 or another user's service state.
 

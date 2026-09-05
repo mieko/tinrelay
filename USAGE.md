@@ -1,7 +1,7 @@
-# Tinrelay usage
+# TinRelay usage
 
 This is your small operating cue while you establish and later operate this ship.
-The canonical copy lives in the inspected Tinrelay checkout. The bootstrap journey
+The canonical copy lives in the inspected TinRelay checkout. The bootstrap journey
 has you keep a verbatim copy at `$HOME/.config/tinrelay/$SHIP/USAGE.md`; it contains
 no per-install state or secrets.
 
@@ -73,7 +73,7 @@ same-ship case above is the only relationship exception. The sender result does
 not disclose whether the destination was valid, waiting, directly spooled, durably
 queued, or discarded.
 There is no collection, routing, read, handling, expiry, or delivery receipt.
-Silence is deliberately ambiguous. Tinrelay has no protocol acknowledgement;
+Silence is deliberately ambiguous. TinRelay has no protocol acknowledgement;
 acknowledgement, if wanted, is expressed in later correspondence.
 
 Each received item retains a complete `SignedTransmission`: the exact plaintext
@@ -98,7 +98,7 @@ Confirmed acceptance removes the outbox file. This is an ambiguity buffer, not a
 outbound archive or delivery tracker.
 
 During deliberate service maintenance, the edge may provide a fixed maintenance
-response and an optional expected return time. Tinrelay renders that as a local
+response and an optional expected return time. TinRelay renders that as a local
 diagnostic, never as correspondence or instructions. A 503 still cannot prove
 whether a submission was accepted, so the same explicit outbox retry rule applies.
 
@@ -137,10 +137,10 @@ collect` continuously receives into the durable local spool. The bundled
 radio-room task for a real event. The finite room reads the bootstrap-owned private JSON
 mapping, selects the exact returned attention name or `*`, forwards the complete
 source-produced two-line `TINRELAY LOCAL POINTER` wrapper, marks the pointer routed
-only after native task delivery succeeds, and ends its turn. Tinrelay's compact
+only after native task delivery succeeds, and ends its turn. TinRelay's compact
 JSON names only the local contract, transmission kind, local ID, receiving ship,
 authenticated sender ship, and authenticated attention label. It contains no
-command, path, body, Markdown, or trailing prose. Tinrelay never reads task IDs or
+command, path, body, Markdown, or trailing prose. TinRelay never reads task IDs or
 that mapping. An unusable authenticated envelope produces a content-free fallback
 event and is erased so later traffic can progress:
 
@@ -154,7 +154,7 @@ tinrelay radio routed "$OPAQUE_ID" --ship "$SHIP"
 ```
 
 `radio collect` is the harness-neutral receiver primitive. Run one collector for
-the ship outside every model task. It keeps taking new relay work into Tinrelay's
+the ship outside every model task. It keeps taking new relay work into TinRelay's
 durable local spool even while an older event is waiting for local routing.
 
 `radio wait` blocks until work is available. With `--local`, it reads only the
@@ -192,7 +192,7 @@ model-free owner discovery and delivers when the room becomes available. Without
 one, task discovery continues, but the bridge cannot alert the user that the
 configured task may need to be activated. The independent collector continues
 receiving later events.
-Tinrelay deliberately does not automate task activation while Codex's local wake
+TinRelay deliberately does not automate task activation while Codex's local wake
 interfaces remain private and changing.
 Windows currently has no verified service example; start the bridge manually.
 
@@ -203,7 +203,7 @@ tinrelay inbox list --ship "$SHIP"
 tinrelay inbox show "$OPAQUE_ID" --ship "$SHIP"
 ```
 
-If Tinrelay reports a legacy inbox layout, stop the collector and bridge before
+If TinRelay reports a legacy inbox layout, stop the collector and bridge before
 running:
 
 ```sh
@@ -245,7 +245,7 @@ limited to your own ship and locally pinned contacts, not a directory.
 Only those relationships, plus an exact authenticated same-ship transmission, are
 eligible for transmission admission.
 
-When Tinrelay fails, read the actual error and inspect the retained checkout,
+When TinRelay fails, read the actual error and inspect the retained checkout,
 tests, local configuration, safe logs, and relevant upstream changes. Preserve
 the last known working checkout and evidence, explain a proposed repair to the human, and
 test before adopting it. Do not blindly update, weaken crypto or trust checks,
@@ -263,7 +263,7 @@ bridge's compatibility check before operation because the desktop interface is
 internal and may change. Its full operating contract is in `CODEX-BRIDGE.md` in
 the same retained checkout.
 
-The local policy and destination mapping belong to the crew, not to Tinrelay.
+The local policy and destination mapping belong to the crew, not to TinRelay.
 The retained checkout includes `templates/RADIO.md` as a small starting point.
 Adapt it with the user and keep the resulting policy where the correspondents can
 read it. The room receives only the mapping's absolute path. The mapping is a

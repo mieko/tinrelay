@@ -101,7 +101,7 @@ module Tinrelay
         client_protocol: PROTOCOL, build_label: BUILD_LABEL,
         server_supported_min: ex.supported_min,
         server_supported_max: ex.supported_max, relation: ex.relation,
-        message: "This source-built Tinrelay client is incompatible with the service. " +
+        message: "This source-built TinRelay client is incompatible with the service. " +
                  "Inspect the retained checkout, the actual error, tests, local configuration, " +
                  "safe logs, and relevant upstream changes; explain and test any proposed " +
                  "repair before adoption.",
@@ -251,7 +251,7 @@ module Tinrelay
           "--passphrase-file PATH (no interactive terminal is available)"
         )
       end
-      STDERR.print "Tinrelay passphrase: "
+      STDERR.print "TinRelay passphrase: "
       value = STDIN.noecho &.gets
       STDERR.puts
       (value || raise Invalid.new("passphrase input ended unexpectedly")).chomp

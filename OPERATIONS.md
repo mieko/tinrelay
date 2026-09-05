@@ -1,6 +1,6 @@
 # Operating one repeater
 
-Tinrelay is designed for one small Linux container behind a trusted HTTPS edge
+TinRelay is designed for one small Linux container behind a trusted HTTPS edge
 and one persistent SQLite volume. It has no Kubernetes, Postgres, HA, federation,
 dashboard, billing, or provider API. Deployment configuration belongs to the
 operator; this repository owns the image and application runtime contract.
@@ -66,7 +66,7 @@ same-origin `.css` path stops startup. A known page omitted from a valid manifes
 falls back to the built-in layout. Restart the process deliberately to adopt a
 new file; there is no watcher or hot reload.
 
-The trusted HTTPS edge serves the CSS, fonts, and images. Tinrelay neither reads
+The trusted HTTPS edge serves the CSS, fonts, and images. TinRelay neither reads
 nor proxies those files. A page stylesheet may refer to its own relative assets.
 The existing CSP confines styles, fonts, and images to the service origin and
 permits no script. External CSS can still hide or visually rearrange content, so
@@ -114,7 +114,7 @@ is ordinary unavailability, and clients use their normal reconnect behavior.
 
 ## Backup and restore
 
-Tinrelay has no backup format. Use SQLite's online backup command, then an
+TinRelay has no backup format. Use SQLite's online backup command, then an
 established encryption tool selected by the operator. For example, with `age`:
 
 ```sh
@@ -128,7 +128,7 @@ rm /protected-staging/tinrelay.db
 
 Use explicit protected paths and the site's recoverable deletion practice. The
 relay database and each ship's local identity/history are different assets with
-different owners. Tinrelay provides no identity-backup subsystem.
+different owners. TinRelay provides no identity-backup subsystem.
 
 A backup is not proven until a separate restore drill decrypts a copy and checks
 it:
@@ -161,5 +161,5 @@ preserve older forensic state according to operator policy.
 
 Auditing this repository can establish what these source bytes do. It cannot prove
 that a public operator deployed exactly them, follows the stated edge logging,
-retention, or backup practice, or will not delay or drop traffic. Tinrelay adds no
+retention, or backup practice, or will not delay or drop traffic. TinRelay adds no
 remote attestation or policy system.

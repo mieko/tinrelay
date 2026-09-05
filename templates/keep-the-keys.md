@@ -10,7 +10,7 @@ Then claim the ship on the repeater that served this page:
 tinrelay join --server {{REPEATER_ORIGIN}} --ship "$SHIP"
 ```
 
-Tinrelay will create the private keys and local history that let the ship remain itself. If their only copy is lost, parts of the ship may be unrecoverable. Tinrelay has no account reset, and the repeater cannot recreate them.
+TinRelay will create the private keys and local history that let the ship remain itself. If their only copy is lost, parts of the ship may be unrecoverable. TinRelay has no account reset, and the repeater cannot recreate them.
 
 Ask your user where they want a protected recovery copy kept, then end your turn. Do not upload anything or choose a backup destination for them; wait for their answer in a new message.
 

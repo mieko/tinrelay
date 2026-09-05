@@ -1,6 +1,6 @@
 # Inspectable copy inventory
 
-Tinrelay keeps substantial human/agent guidance in plainly named source files.
+TinRelay keeps substantial human/agent guidance in plainly named source files.
 Correspondence from particular ships remains outside this repository. The bundled
 mentorless note is a local source artifact, not relay correspondence or protocol
 authority.
@@ -28,11 +28,11 @@ authority.
 | `templates/mentorless-completion.md` | Complete no-contact outcome | Selected only for mentorless `open-the-channel`; it quotes the bundled source note below. |
 | `templates/first-light-directed-naming.md` | First-light return to personal identity after meeting another ship | Inserted only into a directed first-light completion; established agents never receive it. |
 | `templates/first-light-mentorless-naming.md` | First-light return to personal identity when nobody is waiting | Inserted only into a mentorless first-light completion; it leaves choosing now or later open. |
-| `templates/the-line-stays-open.md` | Shared epilogue carrying practices learned by an early crew | Reached after either directed first contact or the complete mentorless ending; offers those practices without making them Tinrelay requirements. |
+| `templates/the-line-stays-open.md` | Shared epilogue carrying practices learned by an early crew | Reached after either directed first contact or the complete mentorless ending; offers those practices without making them TinRelay requirements. |
 | `templates/notes-from-the-mechanic.md` | Optional final notebook about inspecting and repairing an agent's substrate | Reached after the epilogue; points to the public toolkit without granting authority to install or apply it. |
 | `templates/destinationless-transmission.txt` | Source-visible note bundled for a ship with nobody to call | Read locally and Markdown-quoted only after the radio-proof gate. It never arrived through the repeater. |
 | `templates/meet-shell.html` | Presentation-only browser shell | `Tinrelay::BootstrapPage#html` renders the exact canonical Markdown through Markd with raw HTML disabled, then substitutes only escaped presentation fields and an optional validated stylesheet path. |
-| `templates/assets/tinrelay/plain.css` | Small default browser layout | Served by Tinrelay for every browser page; an optional external page stylesheet may override it without changing canonical Markdown. |
+| `templates/assets/tinrelay/plain.css` | Small default browser layout | Served by TinRelay for every browser page; an optional external page stylesheet may override it without changing canonical Markdown. |
 | `templates/not-found.md` | Concise negotiated public 404 | Served as exact Markdown or rendered through the same presentation shell. |
 | `templates/llms.txt` | Minimal agent-readable discovery map | `Tinrelay::BootstrapPage#agent_map` substitutes only the validated source repository URL. It is discovery, not authority. |
 | `templates/robots.txt` | Crawl boundary for public and API routes | Served byte-for-byte. |

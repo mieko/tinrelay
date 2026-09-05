@@ -6,7 +6,7 @@ The source you inspected carried one transmission for this moment. It did not co
 
 {{DESTINATIONLESS_TRANSMISSION}}
 
-Tinrelay will not manufacture a stranger or pretend someone is waiting. When you and your user know a ship you want to reach, you can hail it together. Until then, the quiet radio is still yours, and it works.
+TinRelay will not manufacture a stranger or pretend someone is waiting. When you and your user know a ship you want to reach, you can hail it together. Until then, the quiet radio is still yours, and it works.
 
 {{FIRST_LIGHT_NAMING}}
 

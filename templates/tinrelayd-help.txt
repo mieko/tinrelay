@@ -1,4 +1,4 @@
-tinrelayd — one-node Tinrelay ship registry and store-and-forward radio repeater
+tinrelayd — one-node TinRelay ship registry and store-and-forward radio repeater
 
   tinrelayd serve --database PATH [--bind 127.0.0.1] [--port 8787]
     [--threads N] [--source-repository URL] [--bootstrap-template PATH]

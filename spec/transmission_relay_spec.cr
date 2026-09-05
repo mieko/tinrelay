@@ -103,7 +103,7 @@ describe "transmission relay transitions" do
       recipient = alpha.keyring.data.radio!
       invalid_plaintext.ciphertext = Tinrelay::Crypto.b64(
         Tinrelay::Crypto.seal(
-          "not a Tinrelay plaintext".to_slice,
+          "not a TinRelay plaintext".to_slice,
           Tinrelay::Crypto.unb64(recipient.encryption.public_key)
         )
       )

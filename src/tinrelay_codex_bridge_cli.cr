@@ -34,7 +34,7 @@ module TinrelayCodexBridge
     parser = OptionParser.new do |p|
       p.on("--ship SHIP", "Local ship") { |v| ship = v }
       p.on("--radio-room-task UUID", "Existing local task") { |v| task = v }
-      p.on("--tinrelay PATH", "Tinrelay executable") { |v| executable = v }
+      p.on("--tinrelay PATH", "TinRelay executable") { |v| executable = v }
       p.on("--codex-home PATH", "Codex home") { |v| codex_home = v }
       p.on("--notify-command PATH", "Blocking unavailable-room notifier") do |v|
         notify_command = v

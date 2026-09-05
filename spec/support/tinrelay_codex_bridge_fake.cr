@@ -13,9 +13,9 @@ end
 config = JSON.parse(File.read(File.join(root, "fixture.json")))
 
 case
-when args == ["Tinrelay Radio Room"]
+when args == ["TinRelay Radio Room"]
   number = File.read_lines(File.join(root, "child_calls.jsonl")).count do |row|
-    JSON.parse(row)["args"].as_a.map(&.as_s) == ["Tinrelay Radio Room"]
+    JSON.parse(row)["args"].as_a.map(&.as_s) == ["TinRelay Radio Room"]
   end
   release = File.join(root, "notify-release-#{number}")
   loop { break if File.exists?(release); sleep 20.milliseconds }

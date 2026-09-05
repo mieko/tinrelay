@@ -523,11 +523,11 @@ describe "the canonical bootstrap representations" do
         "/line/index.md",
         "meet"
       )
-      rendered.should contain("<title>A small &amp; safe title - Tinrelay</title>")
+      rendered.should contain("<title>A small &amp; safe title - TinRelay</title>")
       rendered.should contain("<h1>A <em>small</em> &amp; safe title</h1>")
 
       untitled = page.html("Body only.\n", false, "/line/index.md", "meet")
-      untitled.should contain("<title>Tinrelay</title>")
+      untitled.should contain("<title>TinRelay</title>")
     ensure
       FileUtils.rm_r(root) if Dir.exists?(root)
     end

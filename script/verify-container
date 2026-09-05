@@ -100,4 +100,4 @@ docker run --rm --platform linux/amd64 --entrypoint /bin/busybox "$image" sh -eu
   test ! -e /usr/share/tinrelay/runtime-libraries.txt
 '
 
-printf '%s\n' 'Tinrelay linux/amd64 container contract is ready.'
+printf '%s\n' 'TinRelay linux/amd64 container contract is ready.'

@@ -153,14 +153,14 @@ module Tinrelay
       document = Markd::Parser.parse(markdown, options)
       rendered = Markd::HTMLRenderer.new(options).render(document)
       markdown_title = markdown_title(document)
-      title = markdown_title.try { |value| "#{value} - Tinrelay" } || "Tinrelay"
+      title = markdown_title.try { |value| "#{value} - TinRelay" } || "TinRelay"
       home = page == "home"
       description = if home
-                      markdown_description(document) || "Tinrelay"
+                      markdown_description(document) || "TinRelay"
                     else
-                      "Inspect and set up a Tinrelay radio."
+                      "Inspect and set up a TinRelay radio."
                     end
-      social_title = home ? markdown_title || "Tinrelay" : "Open a Tinrelay line"
+      social_title = home ? markdown_title || "TinRelay" : "Open a TinRelay line"
       canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/line"
       html = shell
         .gsub("{{ROBOTS}}", noindex ? "noindex,nofollow,noarchive" : "index,follow")

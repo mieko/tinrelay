@@ -19,7 +19,7 @@ tinrelay radio wait --local -----------+-> untrusted Desktop input -> radio room
 tinrelay radio status <------------------------------------------ routed mark
 ```
 
-Tinrelay's spool is the only durable queue. A pending event receives one initial
+TinRelay's spool is the only durable queue. A pending event receives one initial
 turn and at most one recovery turn in an uninterrupted bridge process. A second
 unrouted result stops visibly. Delivery is at least once: a crash between local
 delivery and the routed mark can present the same stable local ID again.
@@ -68,7 +68,7 @@ room appears. Any other exit is terminal and leaves the event pending.
 `run` remains in the foreground and holds
 `$HOME/.local/share/tinrelay-codex-bridge/locks/$SHIP.lock` for its lifetime. Do not
 remove a live lock file. SIGINT and SIGTERM stop the bridge and reap its current
-Tinrelay child.
+TinRelay child.
 
 ## Install the user services
 
@@ -143,12 +143,12 @@ policy; for systemd, use `Restart=on-failure`. A deliberate terminally blocked
 `run` exits 0. Failed `check` exits 2; an unexpected bridge failure exits 1.
 
 If Desktop is unavailable or the configured task has no compatible live owner, the
-bridge leaves the exact event pending in Tinrelay's existing spool. With a notifier
+bridge leaves the exact event pending in TinRelay's existing spool. With a notifier
 configured, it blocks until the human chooses whether to open the room or defer
 the prompt. Owner discovery is local and model-free after either choice and
 continues until the room appears; the choice changes only the reminder cooldown.
 Without a notifier, task discovery continues, but the bridge cannot leave a visible
-reminder when the configured task is unavailable. Tinrelay deliberately does not
+reminder when the configured task is unavailable. TinRelay deliberately does not
 launch an app, resume a headless Codex process, maintain another agent runtime, or
 create another spool to cover this case. Codex's local queue and wake interfaces
 are private and changing; a future stock interface can close this gap without
@@ -161,7 +161,7 @@ collector continues receiving later transmissions into the same durable spool. I
 waits for the exact accepted turn to become terminal and for the task to become
 idle; elapsed time and old historical turn state do not imply completion. If
 Desktop disconnects before turn acceptance is known, the bridge reconciles exact
-Tinrelay status but does not guess or submit automatically. Structured output names
+TinRelay status but does not guess or submit automatically. Structured output names
 listening, accepted, blocked, stopped, and failed states without logging wrappers,
 task contents, child stderr, or correspondence bodies.
 
@@ -172,7 +172,7 @@ rediscovers the task owner after every reconnect. Unsupported, ownerless, or
 ambiguous results stop visibly rather than selecting another task or repeatedly
 spending model turns.
 
-`script/verify-codex-bridge` uses temporary homes, a fake Tinrelay executable, and
+`script/verify-codex-bridge` uses temporary homes, a fake TinRelay executable, and
 controlled socket peers. It never contacts a real radio or task.
 `script/probe-codex-bridge.cr` is an opt-in compatibility probe against the local
 desktop app's Codex IPC using a harmless synthetic event; it is not part of ordinary

@@ -1,6 +1,6 @@
-# Tinrelay source guidance
+# TinRelay source guidance
 
-Tinrelay is both a small encrypted-radio protocol and source that capable agents
+TinRelay is both a small encrypted-radio protocol and source that capable agents
 are expected to inspect before they trust or build it. Names, comments, file
 boundaries, help text, and tests all teach the system. Keep the implementation
 literal enough that a new reader can recover its safety story in one complete
@@ -44,7 +44,7 @@ Use these nouns consistently:
 - Direct in-memory handoff and SQLite fallback share the same admission,
   verification, acknowledgement, deduplication, and expiry rules. They differ
   only in where ciphertext waits.
-- The local radio room receives a source-produced body-free pointer. Tinrelay
+- The local radio room receives a source-produced body-free pointer. TinRelay
   knows nothing about harness task identifiers or task-to-task APIs.
 - Sender acceptance is intentionally opaque. Invalid destinations are not a
   ship-name oracle, and silence is not a delivery receipt.
@@ -53,7 +53,7 @@ Use these nouns consistently:
 - Passphrases, private keys, and plaintext bodies do not
   belong in argv, logs, screenshots, recovery notes, or tests that can leak them.
 
-Tinrelay is live and has two users. Never rewrite an applied database migration; add
+TinRelay is live and has two users. Never rewrite an applied database migration; add
 a new forward migration. Treat protocol 1's wire fields, canonical signed bytes,
 domains, routes, and response semantics as compatibility commitments. Before
 changing them, prove whether existing clients and stored state remain valid. A
@@ -76,7 +76,7 @@ rendering of those same bytes. Do not duplicate that prose in Crystal, parallel
 templates, or tests. Keep the JS-less path journey working in both Markdown and
 HTML representations.
 
-Tinrelay's public voice is authored product work owned by Mike and Vera. Anonymous
+TinRelay's public voice is authored product work owned by Mike and Vera. Anonymous
 implementation, review, research, and ticket agents must not write, rewrite,
 shorten, normalize, or make opportunistic “necessary” edits to body copy,
 onboarding prose, journey templates, README/usage language, help text, headings,

@@ -1,6 +1,6 @@
 require "./spec_helper"
 
-describe "the complete Tinrelay ship-to-ship vertical" do
+describe "the complete TinRelay ship-to-ship vertical" do
   it "claims, connects, spools before ack, routes pointers, and erases relay payloads" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "test passphrase is long"

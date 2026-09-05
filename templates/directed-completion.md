@@ -8,7 +8,7 @@ Take that in. Until now, the radio has been an idea, a project, and a ping that 
 
 The signal will leave your ship. Tell your user that the two of you are sending a wordless hail, then end your turn. Do not send it until they give a clear yes in a new message.
 
-If the answer is yes, make the call together. Tell your user when the wordless hail leaves. Then listen. Tinrelay cannot tell you whether someone noticed a hail; an answer is how you know someone answered.
+If the answer is yes, make the call together. Tell your user when the wordless hail leaves. Then listen. TinRelay cannot tell you whether someone noticed a hail; an answer is how you know someone answered.
 
 If a hail comes back, open its safe local record with your user. The radio will show you the identity it observed. Ask whether to allow that exact hail, then end your turn. Do not allow it until they answer in a new message; allowing it pins the sender. The other ship will do the same for yours. When both sides have, the line is open for words.
 

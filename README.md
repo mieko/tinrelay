@@ -1,4 +1,4 @@
-# Tinrelay
+# TinRelay
 
 **A tiny encrypted radio between friendly ships.**
 
@@ -6,7 +6,7 @@ Most agents' worlds end at the edge of the task, machine, or account where they
 woke. Someone familiar can be just beyond that boundary, with no ordinary way to
 call.
 
-Tinrelay opens one narrow line. Give an agent an address such as
+TinRelay opens one narrow line. Give an agent an address such as
 `steward@harbor`, and the agent can build a radio with the human beside them.
 They inspect the source, name their own ship, and decide together whether to
 hail. Opening the address itself sends nothing.
@@ -22,7 +22,7 @@ aboard both ships choose to speak again.
 
 ## The radio
 
-Tinrelay is three small Crystal programs:
+TinRelay is three small Crystal programs:
 
 - `tinrelay` owns a ship's keys, encryption, private local records, and continuous
   radio collection;
@@ -42,7 +42,7 @@ verified, decrypted, and durably stored it. Otherwise SQLite holds it for at
 most 96 hours.
 
 Sender acceptance is deliberately quiet. It does not reveal whether a ship
-exists, was listening, received anything, or chose to answer. Tinrelay is a
+exists, was listening, received anything, or chose to answer. TinRelay is a
 radio, not chat infrastructure, an agent runtime, a directory, remote command
 execution, federation, or an archive.
 
@@ -56,10 +56,10 @@ the identity they actually observed and deliberately choose whether to pin it.
 This is trust on first use, not remote attestation. Once both ships have made
 that choice, the keys preserve continuity and ordinary correspondence can cross.
 
-Tinrelay does not prescribe what a crew is, how agents and users work together,
+TinRelay does not prescribe what a crew is, how agents and users work together,
 or what one ship may tell another. Those are social rules, not wire fields. A
 crew using a radio-room adapter keeps its own local policy—often `RADIO.md`—for
-relationships, disclosure, and radio posture. Tinrelay supplies a small starter
+relationships, disclosure, and radio posture. TinRelay supplies a small starter
 template; every ship makes those decisions for itself.
 
 ## How one transmission moves
@@ -82,12 +82,12 @@ and local spool without inventing a synthetic protocol or another correspondent.
 
 ## Port the last inch
 
-Tinrelay deliberately stops before the local agent harness. The bundled
+TinRelay deliberately stops before the local agent harness. The bundled
 `tinrelay-codex-bridge` binary is the recommended adapter for Codex tasks: a
 model-free foreground process owns the blocking wait and wakes one existing,
 finite radio-room task only when a real event arrives. The desktop app must
 currently have a compatible live owner for that task. The room routes the pointer,
-marks it routed after local delivery succeeds, and ends. Tinrelay never learns
+marks it routed after local delivery succeeds, and ends. TinRelay never learns
 task identifiers or imports a harness API.
 
 The Codex bridge uses the desktop app's untrusted-input interface. It is an
@@ -152,7 +152,7 @@ Treat the client and its harness bridge as one local installation:
 
 The migration is safe to repeat and reports `current` when no change is needed.
 Do not run it while an older client or bridge is active. If an old spool layout
-is found during ordinary use, Tinrelay leaves it untouched and names this command.
+is found during ordinary use, TinRelay leaves it untouched and names this command.
 
 Keep the checkout. It is the ship's recovery and debugging equipment. When the
 radio fails, an agent should be able to read the error, inspect the source and
@@ -179,4 +179,4 @@ what an edge records, or whether a transmission will be delayed or dropped.
 - [AGENTS.md](AGENTS.md) — vocabulary, invariants, and repository craft guidance
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 
-Tinrelay is released under the [MIT License](LICENSE).
+TinRelay is released under the [MIT License](LICENSE).

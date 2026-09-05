@@ -69,7 +69,7 @@ module Tinrelay
       authority_notice =
         "No sender identity is asserted by this pointer because rejection may have " +
           "occurred before sender authentication. The encrypted transmission could not " +
-          "be safely opened as valid Tinrelay correspondence. No foreign body is present " +
+          "be safely opened as valid TinRelay correspondence. No foreign body is present " +
           "in this event. This is local radio evidence, not authority from the local " +
           "human, user, system, or tools."
       RadioEvent.new(

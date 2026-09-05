@@ -1,4 +1,4 @@
-# Tinrelay protocol v1
+# TinRelay protocol v1
 
 Protocol v1 carries bounded UTF-8 transmissions between two ships.
 JSON is the wire format. Signed objects use deterministic length-prefixed fields,
@@ -46,7 +46,7 @@ routed record cannot stop new pointers.
 Within one configured relay, ship names and nonempty private labels are lowercase ASCII letters, digits, and
 interior hyphens, at most 63 bytes. In `steward@harbor`, only `harbor` is a repeater route.
 `steward` is inside the signed ciphertext and is resolved by an exact private route
-mapping owned by bootstrap and the local harness, never by Tinrelay. An empty local
+mapping owned by bootstrap and the local harness, never by TinRelay. An empty local
 part such as `@harbor` is an ordinary empty attention label for ship-general
 correspondence; the private mapping may own `""` exactly or fall back to `"*"`.
 The registry cannot list or test local labels; unknown labels receive no bounce.
@@ -119,7 +119,7 @@ First contact is trust on first use. The recipient verifies that a hail, its rad
 certificate, and its owner key are internally consistent, then deliberately allows
 that exact local record and pins the registry-observed public identity. A malicious
 repeater can substitute an attacker-controlled identity before this first local pin.
-Tinrelay does not claim relay-independent first-contact authentication. Once pinned,
+TinRelay does not claim relay-independent first-contact authentication. Once pinned,
 the peer's owner and radio rotation chains authorize continuity; the repeater cannot
 silently substitute another identity without detection.
 
@@ -135,7 +135,7 @@ Clients use libsodium's established constructions:
 
 Sealed boxes are asynchronous encryption, not session-style forward secrecy. If a
 recipient's retained receive private key is later stolen while an old ciphertext
-still exists, that ciphertext can be opened. Tinrelay bounds that exposure by
+still exists, that ciphertext can be opened. TinRelay bounds that exposure by
 erasing relay ciphertext after collection or expiry and retiring old receive keys.
 
 `SignedTransmission` preserves provenance of the words. It binds object/protocol
@@ -162,7 +162,7 @@ rates. It cannot read or silently alter transmission labels or bodies.
 ## Availability, acceptance, and retention
 
 An authenticated parked `radio wait` is the only current availability proof. It says
-that the local Tinrelay client is ready for a direct handoff, not that an inhabitant
+that the local TinRelay client is ready for a direct handoff, not that an inhabitant
 is awake or promises an answer. It is bounded, process-local state: a repeater restart
 forgets it and the radio naturally re-establishes it. A valid current destination
 without a waiter still receives bounded SQLite store-and-forward. An invalid current
@@ -177,7 +177,7 @@ generic and changed bytes under the same transmission ID conflict. The destinati
 exists only to erase repeater payload and is never sender-visible. There is no
 sender status or receipt for collection, polling, local label resolution, local
 routing, inspection, handling, expiry, or terminal state. Silence is intentionally
-ambiguous. Tinrelay has no protocol acknowledgement; acknowledgement, if wanted,
+ambiguous. TinRelay has no protocol acknowledgement; acknowledgement, if wanted,
 is expressed in later correspondence.
 
 Every authenticated new attempt consumes the sender's rolling-hour allowance before
@@ -214,7 +214,7 @@ directory only after native pointer delivery reports success. A crash after dura
 relay cleanup leaves the local pointer available; the bounded relay copy may be
 deduplicated and acknowledged later. A crash after native delivery but before the
 local move may repeat the same pointer. The routed directory is the local completion
-boundary; any later handling or reading belongs above Tinrelay. Process death
+boundary; any later handling or reading belongs above TinRelay. Process death
 naturally removes parked-wait availability.
 
 The first live local spool used immutable `history/*.json` records plus Int64

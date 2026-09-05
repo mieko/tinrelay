@@ -168,7 +168,7 @@ module TinrelayCodexBridge
 
     def operation(task : String, instruction : String = INSTRUCTION)
       source_id = "tinrelay:#{id}"
-      title = "Tinrelay radio event"
+      title = "TinRelay radio event"
       envelope = {
         version:                 1,
         modelContextAttachments: [

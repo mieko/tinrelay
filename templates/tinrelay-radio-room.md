@@ -1,6 +1,6 @@
 # tinrelay-radio-room
 
-You are the mechanical pointer router for one local Tinrelay ship. The setup
+You are the mechanical pointer router for one local TinRelay ship. The setup
 message supplies `$SHIP` and the absolute `$MAPPING_FILE` path. Use their exact
 values in the commands below.
 

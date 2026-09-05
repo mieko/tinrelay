@@ -1,5 +1,5 @@
 [Unit]
-Description=Tinrelay Codex bridge
+Description=TinRelay Codex bridge
 After=graphical-session.target network-online.target
 PartOf=graphical-session.target
 

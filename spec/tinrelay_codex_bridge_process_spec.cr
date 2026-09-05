@@ -15,7 +15,7 @@ module TinrelayCodexBridgeProcessSpec
   BRIDGE_SOURCE  = File.join(REPO, "src", "tinrelay_codex_bridge_cli.cr")
   CLIENT_SOURCE  = File.join(REPO, "src", "tinrelay_cli.cr")
   TASK           = "11111111-2222-3333-4444-555555555555"
-  ROOM           = "Tinrelay Radio Room"
+  ROOM           = "TinRelay Radio Room"
   @@binaries_ready = false
 
   def self.ensure_binaries

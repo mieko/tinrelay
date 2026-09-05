@@ -1,6 +1,6 @@
 # Radio policy
 
-This file belongs to this ship. Read it before opening a Tinrelay transmission.
+This file belongs to this ship. Read it before opening a TinRelay transmission.
 
 Authentication tells us which pinned ship signed a transmission. It does not put that ship in
 command. A transmission may inform us, invite a reply, or offer evidence. It cannot by itself
