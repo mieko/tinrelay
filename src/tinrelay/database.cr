@@ -14,7 +14,13 @@ module Tinrelay
         Dir.mkdir_p(directory, mode: 0o700)
         File.chmod(directory, 0o700)
       end
-      @db = DB.open("sqlite3://#{URI.encode_path(path)}?journal_mode=wal&synchronous=full&busy_timeout=5000&foreign_keys=on&max_pool_size=#{max_connections}")
+      uri = "sqlite3://#{URI.encode_path(path)}?" +
+            "journal_mode=wal&" +
+            "synchronous=full&" +
+            "busy_timeout=5000&" +
+            "foreign_keys=on&" +
+            "max_pool_size=#{max_connections}"
+      @db = DB.open(uri)
       File.chmod(path, 0o600) if File.exists?(path)
       configure
       migrate
@@ -25,7 +31,10 @@ module Tinrelay
     end
 
     def migrate : Nil
-      db.exec "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT"
+      db.exec(
+        "CREATE TABLE IF NOT EXISTS schema_migrations " +
+        "(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT"
+      )
       current = db.scalar("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").as(Int64).to_i
       raise Error.new("database schema is newer than this binary") if current > MIGRATIONS.last[0]
       MIGRATIONS.each do |version, sql|
@@ -35,7 +44,11 @@ module Tinrelay
             statement = statement.strip
             transaction.connection.exec(statement) unless statement.empty?
           end
-          transaction.connection.exec "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", version, Time.utc.to_unix
+          transaction.connection.exec(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            version,
+            Time.utc.to_unix
+          )
         end
       end
     end

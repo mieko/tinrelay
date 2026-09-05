@@ -1,0 +1,14 @@
+[Unit]
+Description=Tinrelay radio collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tinrelay radio collect --ship SHIP
+Restart=no
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

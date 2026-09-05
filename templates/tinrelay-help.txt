@@ -24,7 +24,9 @@ Correspondence:
   tinrelay outbox retry TRANSMISSION --ship SHIP
 
 Radio room:
+  tinrelay radio collect --ship SHIP
   tinrelay radio wait --ship SHIP
+  tinrelay radio wait --local --ship SHIP
   tinrelay radio poll --ship SHIP
   tinrelay radio status LOCAL_ID --ship SHIP
   tinrelay radio routed LOCAL_ID --ship SHIP
@@ -69,13 +71,21 @@ still uses the ordinary transmission and repeater path.
 
 THE RADIO ROOM
 
+`radio collect` is the long-lived receiver. It keeps accepting new relay work and
+placing it in the durable local spool even while older events remain unrouted. It
+prints one body-free collection record per event.
+
 `radio wait` blocks until work arrives, then returns an opaque local ID, the
 safe source-produced wrapper, and—only for a transmission—the authenticated
-attention name. It never returns the transmission body or a harness destination.
+attention name. With `--local`, it waits only for locally spooled work and never
+contacts the repeater. It never returns the transmission body or a harness
+destination.
 `radio poll` first surfaces the same oldest locally unrouted event, or makes one
 immediate zero-hold relay attempt. If nothing is ready it prints
 `{"state":"quiet"}` and exits successfully. It does not wait, loop, or schedule
-another attempt. Both commands use the same exclusive local spool lock.
+another attempt. Like `radio collect` and non-local `radio wait`, it owns the
+ship's relay receiver lock when contacting the repeater. `radio wait --local` is
+spool-only and does not take that receiver lock.
 `radio status LOCAL_ID` reads only that local record and reports `pending` or
 `routed`. It does not contact the repeater, reveal a body, scan history, create
 spool directories, change permissions, or mutate evidence. Missing and corrupt
@@ -83,7 +93,7 @@ records fail explicitly.
 After routing the pointer locally, confirm it with `radio routed LOCAL_ID`.
 If the repeater connection, DNS lookup, or network timeout fails, the CLI exits 2
 with `{"error":"transport_unavailable","retryable":true,"message":"relay transport is unavailable"}`.
-Only that fixed classification invites a capped bridge retry. Authentication,
+Only `radio collect` retries that fixed classification, using capped backoff. Authentication,
 protocol, maintenance, local file, and unknown failures remain distinct.
 
 FILES AND SECRETS

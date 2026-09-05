@@ -94,7 +94,8 @@ describe "transmission relay transitions" do
       )
       unusable.ciphertext = Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
       TinrelayRelaySpec.resign(beta, unusable)
-      JSON.parse(beta.remote.post("/v1/transmissions", unusable.to_json))["state"].as_s.should eq("accepted")
+      response = beta.remote.post("/v1/transmissions", unusable.to_json)
+      JSON.parse(response)["state"].as_s.should eq("accepted")
 
       invalid_plaintext = TinrelayRelaySpec.capture(
         beta, origin, "steward@alpha", "body also must not survive invalid plaintext"
@@ -107,7 +108,8 @@ describe "transmission relay transitions" do
         )
       )
       TinrelayRelaySpec.resign(beta, invalid_plaintext)
-      JSON.parse(beta.remote.post("/v1/transmissions", invalid_plaintext.to_json))["state"].as_s.should eq("accepted")
+      response = beta.remote.post("/v1/transmissions", invalid_plaintext.to_json)
+      JSON.parse(response)["state"].as_s.should eq("accepted")
       valid = beta.send("steward@alpha", "valid behind unusable")
 
       rejected = alpha.radio_wait(spool, hold_seconds: 0)
@@ -160,7 +162,8 @@ describe "transmission relay transitions" do
       discarded.recipient_ship = "not-claimed"
       discarded.recipient_encryption_generation = 1
       TinrelayRelaySpec.resign(beta, discarded)
-      JSON.parse(beta.remote.post("/v1/transmissions", discarded.to_json))["state"].as_s.should eq("accepted")
+      response = beta.remote.post("/v1/transmissions", discarded.to_json)
+      JSON.parse(response)["state"].as_s.should eq("accepted")
 
       limited = beta.send("steward@alpha", "must be rate limited opaquely")
       api.database.db.scalar(
@@ -303,7 +306,11 @@ describe "transmission relay transitions" do
       sent = beta.send("steward@alpha", "short retry window", expires_in: 30)
       ack = Tinrelay::TransmissionAck.new(
         sent.transmission_id,
-        TinrelaySpec.radio_auth(alpha, "transmission.ack", Tinrelay::Canonical.fields(sent.transmission_id))
+        TinrelaySpec.radio_auth(
+          alpha,
+          "transmission.ack",
+          Tinrelay::Canonical.fields(sent.transmission_id)
+        )
       )
       api.store.acknowledge(ack)
 

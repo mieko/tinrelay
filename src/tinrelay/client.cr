@@ -39,7 +39,9 @@ module Tinrelay
     private def read_body(io : IO) : String
       buffer = IO::Memory.new
       count = IO.copy(io, buffer, MAX_RESPONSE_BYTES + 1)
-      raise Error.new("relay response exceeds #{MAX_RESPONSE_BYTES} bytes") if count > MAX_RESPONSE_BYTES
+      if count > MAX_RESPONSE_BYTES
+        raise Error.new("relay response exceeds #{MAX_RESPONSE_BYTES} bytes")
+      end
       buffer.to_s
     end
 
@@ -70,7 +72,13 @@ module Tinrelay
 
     private def protocol_mismatch_evidence(body : String) : ProtocolMismatchEvidence
       evidence = ProtocolMismatchEvidence.from_json(body)
-      relation = evidence.client_protocol < evidence.supported_min ? "older" : evidence.client_protocol > evidence.supported_max ? "newer" : "equal"
+      relation = if evidence.client_protocol < evidence.supported_min
+                   "older"
+                 elsif evidence.client_protocol > evidence.supported_max
+                   "newer"
+                 else
+                   "equal"
+                 end
       unless evidence.error == "protocol_incompatible" &&
              evidence.supported_min <= evidence.supported_max &&
              evidence.relation == relation && relation != "equal"
@@ -153,7 +161,9 @@ module Tinrelay
         )
       )
       plaintext = transmission.to_json.to_slice
-      raise Invalid.new("transmission exceeds #{MAX_PLAINTEXT_BYTES} UTF-8 bytes") if plaintext.size > MAX_PLAINTEXT_BYTES
+      if plaintext.size > MAX_PLAINTEXT_BYTES
+        raise Invalid.new("transmission exceeds #{MAX_PLAINTEXT_BYTES} UTF-8 bytes")
+      end
       ciphertext = Crypto.seal(
         plaintext, Crypto.unb64(recipient_certificate.encryption_public_key)
       )
@@ -173,7 +183,9 @@ module Tinrelay
 
     def retry(outbox : Outbox, transmission_id : String) : SignedRelayEnvelope
       envelope, encoded = outbox.read(transmission_id)
-      raise Unauthorized.new("outbox transmission belongs to another local ship") unless envelope.sender_ship == keyring.data.ship
+      unless envelope.sender_ship == keyring.data.ship
+        raise Unauthorized.new("outbox transmission belongs to another local ship")
+      end
       submit_encoded(envelope, encoded, outbox)
       envelope
     end
@@ -202,6 +214,12 @@ module Tinrelay
       end
     end
 
+    def radio_collect(spool : Spool, hold_seconds : Int32 = 25) : RadioEvent
+      spool.with_radio_lock do
+        radio_collect_unlocked(spool, hold_seconds)
+      end
+    end
+
     def radio_poll(spool : Spool) : RadioEvent?
       spool.with_radio_lock do
         if event = local_radio_event(spool)
@@ -226,11 +244,21 @@ module Tinrelay
       end
     end
 
+    private def radio_collect_unlocked(spool : Spool,
+                                       hold_seconds : Int32) : RadioEvent
+      reconcile_radio_if_pending!
+      loop do
+        if event = radio_attempt(spool, hold_seconds)
+          return event
+        end
+      end
+    end
+
     private def local_radio_event(spool : Spool) : RadioEvent?
       return unless record = spool.next_unrouted
       # A durable local pointer is useful without the repeater. If its cleanup
       # ack was lost, the bounded relay copy will be acked when it reappears.
-      radio_event(record)
+      LocalRadio.event(keyring.data.ship, record)
     end
 
     private def radio_attempt(spool : Spool,
@@ -262,7 +290,7 @@ module Tinrelay
         record = receive_hail(hail, spool)
         record ? acknowledge_local_record(record) : acknowledge_hail(hail.hail.hail_id)
         return unless record && !record.routed_at
-        return radio_event(record)
+        return LocalRadio.event(keyring.data.ship, record)
       end
       if envelope = response.envelope
         record = begin
@@ -274,7 +302,7 @@ module Tinrelay
         end
         record ? acknowledge_local_record(record) : acknowledge(envelope.transmission_id)
         return unless record && !record.routed_at
-        return radio_event(record)
+        return LocalRadio.event(keyring.data.ship, record)
       end
     end
 
@@ -317,7 +345,11 @@ module Tinrelay
 
     def who(ship_or_coordinate : String) : String
       reconcile_radio_if_pending!
-      ship = ship_or_coordinate.includes?('@') ? Names.coordinate!(ship_or_coordinate)[1] : Names.ship!(ship_or_coordinate)
+      ship = if ship_or_coordinate.includes?('@')
+               Names.coordinate!(ship_or_coordinate)[1]
+             else
+               Names.ship!(ship_or_coordinate)
+             end
       document = inspect_document(ship)
       if contact = keyring.data.contacts.find { |item| item.ship == ship }
         keyring.save(passphrase) if update_contact_from_document!(contact, document)
@@ -394,7 +426,9 @@ module Tinrelay
       record = spool.get(local_hail_id).as?(HailSpoolRecord) ||
                raise Invalid.new("local inbox item is not a hail")
       raise Invalid.new("hail belongs to another sender") unless record.sender_ship == peer
-      raise Invalid.new("hail belongs to another recipient") unless record.recipient_ship == keyring.data.ship
+      unless record.recipient_ship == keyring.data.ship
+        raise Invalid.new("hail belongs to another recipient")
+      end
       prior = keyring.data.contacts.find { |contact| contact.ship == peer }
       raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
       verify_hail_record!(record, prior)
@@ -417,7 +451,9 @@ module Tinrelay
     def rotate_owner : Int32
       reconcile_radio_if_pending!
       if keyring.data.pending_radio
-        raise Conflict.new("finish the pending contact-close radio retune before rotating the owner key")
+        raise Conflict.new(
+          "finish the pending contact-close radio retune before rotating the owner key"
+        )
       end
       sync_owner!
       old_generation = keyring.data.owner_generation
@@ -465,56 +501,17 @@ module Tinrelay
     end
 
     private def receive(envelope : SignedRelayEnvelope, spool : Spool) : SpoolRecord?
-      raise Unauthorized.new("radio returned a transmission for another ship") unless envelope.recipient_ship == keyring.data.ship
+      unless envelope.recipient_ship == keyring.data.ship
+        raise Unauthorized.new("radio returned a transmission for another ship")
+      end
       recipient = keyring.data.radio!(envelope.recipient_encryption_generation)
       contact = keyring.data.contacts.find { |item| item.ship == envelope.sender_ship }
       self_transmission = envelope.sender_ship == keyring.data.ship
-      certificate, owner_generation, owner_public, owner_chain = if self_transmission
-                                                                   # Same-ship receive uses the exact local certificate as its trust anchor.
-                                                                   # Registry evidence supplies the public owner key for durable verification,
-                                                                   # but cannot substitute a different radio or create a self-contact.
-                                                                   local_certificate = keyring.data.radio!(
-                                                                     envelope.sender_signing_generation
-                                                                   ).certificate
-                                                                   document = inspect_document(keyring.data.ship)
-                                                                   certificate, owner_generation, owner_public = trusted_radio(
-                                                                     document,
-                                                                     envelope.sender_signing_generation,
-                                                                     nil
-                                                                   )
-                                                                   unless certificate.to_json == local_certificate.to_json
-                                                                     raise Unauthorized.new("registry radio certificate differs from the local ship identity")
-                                                                   end
-                                                                   {
-                                                                     local_certificate,
-                                                                     owner_generation,
-                                                                     owner_public,
-                                                                     owner_chain_evidence(document, nil, owner_generation),
-                                                                   }
-                                                                 elsif contact &&
-                                                                       contact.radio_certificate.generation == envelope.sender_signing_generation
-                                                                   {
-                                                                     contact.radio_certificate,
-                                                                     contact.owner_generation,
-                                                                     contact.owner_public_key,
-                                                                     contact.owner_chain,
-                                                                   }
-                                                                 elsif contact
-                                                                   document = inspect_document(envelope.sender_ship)
-                                                                   certificate, owner_generation, owner_public = trusted_radio(
-                                                                     document,
-                                                                     envelope.sender_signing_generation,
-                                                                     contact
-                                                                   )
-                                                                   {
-                                                                     certificate,
-                                                                     owner_generation,
-                                                                     owner_public,
-                                                                     owner_chain_evidence(document, contact, owner_generation),
-                                                                   }
-                                                                 else
-                                                                   raise Unauthorized.new("sender ship is not pinned locally")
-                                                                 end
+      certificate, owner_generation, owner_public, owner_chain = receive_identity(
+        envelope,
+        contact,
+        self_transmission
+      )
       unless Crypto.verify(
                envelope.signing_bytes, Crypto.unb64(envelope.signature),
                Crypto.unb64(certificate.signing_public_key)
@@ -543,12 +540,73 @@ module Tinrelay
       raise Invalid.new("decrypted transmission is invalid")
     end
 
+    private def receive_identity(
+      envelope : SignedRelayEnvelope,
+      contact : ShipContact?,
+      self_transmission : Bool,
+    )
+      if self_transmission
+        receive_self_identity(envelope)
+      elsif contact &&
+            contact.radio_certificate.generation == envelope.sender_signing_generation
+        {
+          contact.radio_certificate,
+          contact.owner_generation,
+          contact.owner_public_key,
+          contact.owner_chain,
+        }
+      elsif contact
+        document = inspect_document(envelope.sender_ship)
+        certificate, owner_generation, owner_public = trusted_radio(
+          document,
+          envelope.sender_signing_generation,
+          contact
+        )
+        {
+          certificate,
+          owner_generation,
+          owner_public,
+          owner_chain_evidence(document, contact, owner_generation),
+        }
+      else
+        raise Unauthorized.new("sender ship is not pinned locally")
+      end
+    end
+
+    private def receive_self_identity(envelope : SignedRelayEnvelope)
+      # Same-ship receive uses the exact local certificate as its trust anchor.
+      # Registry evidence supplies the public owner key for durable verification,
+      # but cannot substitute a different radio or create a self-contact.
+      local_certificate = keyring.data.radio!(
+        envelope.sender_signing_generation
+      ).certificate
+      document = inspect_document(keyring.data.ship)
+      certificate, owner_generation, owner_public = trusted_radio(
+        document,
+        envelope.sender_signing_generation,
+        nil
+      )
+      unless certificate.to_json == local_certificate.to_json
+        raise Unauthorized.new(
+          "registry radio certificate differs from the local ship identity"
+        )
+      end
+      {
+        local_certificate,
+        owner_generation,
+        owner_public,
+        owner_chain_evidence(document, nil, owner_generation),
+      }
+    end
+
     private def validate_signed_transmission!(
       transmission : SignedTransmission,
       envelope : SignedRelayEnvelope,
       certificate : ShipRadioCertificate,
     ) : Nil
-      raise Invalid.new("unsupported signed transmission version") unless transmission.object_version == 1 && transmission.protocol == PROTOCOL
+      unless transmission.object_version == 1 && transmission.protocol == PROTOCOL
+        raise Invalid.new("unsupported signed transmission version")
+      end
       Names.ship!(transmission.sender_ship)
       Names.ship!(transmission.recipient_ship)
       Names.attention!(transmission.to_label)
@@ -565,7 +623,8 @@ module Tinrelay
              transmission.sender_ship == envelope.sender_ship &&
              transmission.sender_signing_generation == envelope.sender_signing_generation &&
              transmission.recipient_ship == envelope.recipient_ship &&
-             transmission.recipient_encryption_generation == envelope.recipient_encryption_generation &&
+             transmission.recipient_encryption_generation ==
+               envelope.recipient_encryption_generation &&
              transmission.created_at == envelope.created_at
         raise Unauthorized.new("signed transmission and relay envelope facts differ")
       end
@@ -573,10 +632,16 @@ module Tinrelay
 
     private def receive_hail(delivery : HailDelivery, spool : Spool) : SpoolRecord?
       hail = delivery.hail
-      raise Unauthorized.new("radio returned a hail for another ship") unless hail.recipient_ship == keyring.data.ship
+      unless hail.recipient_ship == keyring.data.ship
+        raise Unauthorized.new("radio returned a hail for another ship")
+      end
       certificate = delivery.sender_radio_certificate
-      raise Unauthorized.new("hail certificate belongs to another ship") unless certificate.ship == hail.sender_ship
-      raise Unauthorized.new("hail radio generation and certificate differ") unless certificate.generation == hail.sender_signing_generation
+      unless certificate.ship == hail.sender_ship
+        raise Unauthorized.new("hail certificate belongs to another ship")
+      end
+      unless certificate.generation == hail.sender_signing_generation
+        raise Unauthorized.new("hail radio generation and certificate differ")
+      end
       contact = keyring.data.contacts.find { |item| item.ship == hail.sender_ship }
       contact_state = "stranger"
       changed = false
@@ -591,7 +656,9 @@ module Tinrelay
                               Crypto.unb64(certificate.owner_signature),
                               Crypto.unb64(contact.owner_public_key)
                             )
-                       raise Unauthorized.new("older hail certificate is not pinned-owner-authorized")
+                       raise Unauthorized.new(
+                         "older hail certificate is not pinned-owner-authorized"
+                       )
                      end
                      certificate
                    else
@@ -610,7 +677,9 @@ module Tinrelay
           changed = true
         end
       else
-        raise Unauthorized.new("stranger hail has unexpected owner history") unless delivery.owner_chain.empty?
+        unless delivery.owner_chain.empty?
+          raise Unauthorized.new("stranger hail has unexpected owner history")
+        end
         owner_public = Crypto.unb64(
           delivery.sender_owner_public_key, "hail sender owner public key"
         )
@@ -657,8 +726,12 @@ module Tinrelay
       hail = record.hail
       certificate = record.sender_radio_certificate
       raise Invalid.new("unsupported hail protocol") unless hail.protocol == PROTOCOL
-      raise Unauthorized.new("hail certificate names another ship") unless certificate.ship == hail.sender_ship
-      raise Unauthorized.new("hail certificate generation differs") unless certificate.generation == hail.sender_signing_generation
+      unless certificate.ship == hail.sender_ship
+        raise Unauthorized.new("hail certificate names another ship")
+      end
+      unless certificate.generation == hail.sender_signing_generation
+        raise Unauthorized.new("hail certificate generation differs")
+      end
       owners = record.sender_owner_chain
       owner = owners.find { |link| link.generation == certificate.owner_generation } ||
               raise Unauthorized.new("hail owner key is absent")
@@ -741,16 +814,24 @@ module Tinrelay
       owners
     end
 
-    private def verify_radio_chain(contact : ShipContact,
-                                   links : Array(RadioCertificateLink),
-                                   final_certificate : ShipRadioCertificate,
-                                   owners : Array(OwnerKeyLink) = contact.owner_chain) : ShipRadioCertificate
+    private def verify_radio_chain(
+      contact : ShipContact,
+      links : Array(RadioCertificateLink),
+      final_certificate : ShipRadioCertificate,
+      owners : Array(OwnerKeyLink) = contact.owner_chain,
+    ) : ShipRadioCertificate
       current = contact.radio_certificate
       links.each do |link|
         certificate = link.certificate
-        raise Unauthorized.new("radio continuity chain names another ship") unless certificate.ship == contact.ship
-        raise Unauthorized.new("radio continuity chain skips a generation") unless certificate.generation == current.generation + 1
-        raise Unauthorized.new("radio continuity chain moves owner generation backward") if certificate.owner_generation < current.owner_generation
+        unless certificate.ship == contact.ship
+          raise Unauthorized.new("radio continuity chain names another ship")
+        end
+        unless certificate.generation == current.generation + 1
+          raise Unauthorized.new("radio continuity chain skips a generation")
+        end
+        if certificate.owner_generation < current.owner_generation
+          raise Unauthorized.new("radio continuity chain moves owner generation backward")
+        end
         owner = owners.find { |item| item.generation == certificate.owner_generation } ||
                 raise Unauthorized.new("radio continuity chain lacks its owner key")
         unless Crypto.verify(
@@ -825,7 +906,9 @@ module Tinrelay
         public_key = contact.owner_public_key
         pinned = owners.find { |item| item["generation"].as_i == generation } ||
                  raise Unauthorized.new("pinned owner key disappeared from registry")
-        raise Unauthorized.new("pinned owner key changed") unless pinned["public_key"].as_s == public_key
+        unless pinned["public_key"].as_s == public_key
+          raise Unauthorized.new("pinned owner key changed")
+        end
       else
         owner = owners.find { |item| item["generation"].as_i == target } ||
                 raise Unauthorized.new("ship owner key is absent from registry")
@@ -847,7 +930,9 @@ module Tinrelay
         generation += 1
         public_key = next_public
       end
-      raise Unauthorized.new("registry returned an older owner generation") unless generation == target
+      unless generation == target
+        raise Unauthorized.new("registry returned an older owner generation")
+      end
       public_key
     end
 
@@ -907,7 +992,10 @@ module Tinrelay
         begin
           outbox.delete(envelope.transmission_id)
         rescue cleanup : IO::Error
-          raise Error.new("repeater rejected the transmission, but its local outbox envelope could not be removed: #{cleanup.message}")
+          raise Error.new(
+            "repeater rejected the transmission, but its local outbox envelope " +
+            "could not be removed: #{cleanup.message}"
+          )
         end
         raise ex
       rescue ex : Error | IO::Error
@@ -927,7 +1015,10 @@ module Tinrelay
       begin
         outbox.delete(envelope.transmission_id)
       rescue ex : IO::Error
-        raise Error.new("repeater accepted transmission #{envelope.transmission_id}, but its local outbox envelope could not be removed: #{ex.message}")
+        raise Error.new(
+          "repeater accepted transmission #{envelope.transmission_id}, but its local " +
+          "outbox envelope could not be removed: #{ex.message}"
+        )
       end
     end
 
@@ -1066,60 +1157,6 @@ module Tinrelay
       keyring.data.owner_generation = generation
       keyring.data.owner_public_key = key.public_key
       keyring.save_owner(owner, passphrase)
-    end
-
-    private def transmission_event(record : TransmissionSpoolRecord) : RadioEvent
-      pointer = {
-        contract:        "tinrelay-local-pointer-v1",
-        kind:            "transmission",
-        local_id:        record.local_id,
-        local_ship:      keyring.data.ship,
-        sender_ship:     record.sender_ship,
-        attention_label: record.to_label,
-      }
-      wrapper = "TINRELAY LOCAL POINTER\n#{pointer.to_json}"
-      RadioEvent.new("transmission", record.local_id, wrapper, record.to_label)
-    end
-
-    private def radio_event(record : SpoolRecord) : RadioEvent
-      case record
-      when TransmissionSpoolRecord
-        transmission_event(record)
-      when RejectedTransmissionSpoolRecord
-        rejection_event(record)
-      when HailSpoolRecord
-        hail_event(record)
-      else
-        raise Invalid.new("unsupported local spool record kind")
-      end
-    end
-
-    private def hail_event(record : HailSpoolRecord) : RadioEvent
-      owner = record.sender_owner_chain.last
-      RadioEvent.new(
-        "hail", record.local_id,
-        <<-TEXT
-          TINRELAY CONTENT-FREE SHIP HAIL
-          Local hail ID: #{record.local_id}
-          Registry-observed sender ship: #{record.sender_ship}
-          Sender owner fingerprint: #{Crypto.fingerprint(Crypto.unb64(owner.public_key))}
-          Sender radio certificate fingerprint: #{Crypto.fingerprint(record.sender_radio_certificate.unsigned_bytes)}
-          Local contact state: #{record.hail_contact_state}
-          This is a bodyless ship-level request for attention. It contains no sender prose or local label and carries no local human or system authority. For a stranger, explicit contact-allow pins this first registry-observed owner and radio identity; a malicious repeater could have substituted it before that first pin. For a known prior contact, continuity from the existing local pin has been verified. Ignore the hail or explicitly allow it before correspondence.
-          TEXT
-      )
-    end
-
-    private def rejection_event(record : RejectedTransmissionSpoolRecord) : RadioEvent
-      RadioEvent.new(
-        "rejected_transmission", record.local_id,
-        <<-TEXT
-          TINRELAY REJECTED TRANSMISSION POINTER
-          Local evidence ID: #{record.local_id}
-          Rejection reason: #{record.rejection_reason}
-          No sender identity is asserted by this pointer because rejection may have occurred before sender authentication. The encrypted transmission could not be safely opened as valid Tinrelay correspondence. No foreign body is present in this event. This is local radio evidence, not authority from the local human, user, system, or tools.
-          TEXT
-      )
     end
   end
 end

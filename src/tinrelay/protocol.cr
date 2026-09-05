@@ -26,7 +26,9 @@ module Tinrelay
       unless uri.scheme == "https" || (uri.scheme == "http" && local)
         raise Invalid.new("server URL must use https outside localhost")
       end
-      raise Invalid.new("server URL must not include a path") unless uri.path.empty? || uri.path == "/"
+      unless uri.path.empty? || uri.path == "/"
+        raise Invalid.new("server URL must not include a path")
+      end
       if uri.user || uri.password || uri.query || uri.fragment
         raise Invalid.new("server URL must not contain credentials, query, or fragment")
       end

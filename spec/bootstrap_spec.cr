@@ -26,12 +26,27 @@ describe "the canonical bootstrap representations" do
       browser.body.should contain(%(data-page="home"))
       browser.body.should contain(%(<link rel="canonical" href="https://tinrelay.space/">))
       browser.body.should contain(%(<link rel="alternate" type="text/markdown" href="/index.md">))
-      browser.body.should contain(%(<link rel="icon" href="/tinrelay-art/identity/favicon.cf4c5f39348a.ico" sizes="16x16 32x32 48x48">))
-      browser.body.should contain(%(<link rel="icon" type="image/svg+xml" href="/tinrelay-art/identity/favicon.50beb0bc304b.svg" sizes="any">))
-      browser.body.should contain(%(<link rel="apple-touch-icon" href="/tinrelay-art/identity/apple-touch-icon.87a03ed48d86.png">))
-      browser.body.should contain(%(<link rel="mask-icon" href="/tinrelay-art/identity/mask-icon.a17f08eea9a2.svg" color="#080b14">))
+      browser.body.should contain(
+        %(<link rel="icon" href="/tinrelay-art/identity/favicon.cf4c5f39348a.ico" ) +
+        %(sizes="16x16 32x32 48x48">)
+      )
+      browser.body.should contain(
+        %(<link rel="icon" type="image/svg+xml" ) +
+        %(href="/tinrelay-art/identity/favicon.50beb0bc304b.svg" sizes="any">)
+      )
+      browser.body.should contain(
+        %(<link rel="apple-touch-icon" ) +
+        %(href="/tinrelay-art/identity/apple-touch-icon.87a03ed48d86.png">)
+      )
+      browser.body.should contain(
+        %(<link rel="mask-icon" ) +
+        %(href="/tinrelay-art/identity/mask-icon.a17f08eea9a2.svg" color="#080b14">)
+      )
       browser.body.should contain(%(<meta name="theme-color" content="#080b14">))
-      browser.body.should contain(%(<link rel="stylesheet" href="/tinrelay-art/identity/wordmark.07d6c616afc0.css">))
+      browser.body.should contain(
+        %(<link rel="stylesheet" ) +
+        %(href="/tinrelay-art/identity/wordmark.07d6c616afc0.css">)
+      )
       browser.body.should contain(%(<span>Tin Relay</span>))
       browser.headers["Link"].should contain("/index.md")
       browser.headers["X-Robots-Tag"]?.should be_nil
@@ -181,8 +196,35 @@ describe "the canonical bootstrap representations" do
   it "serves the JS-less mentorless and directed meet adventure from canonical Markdown" do
     TinrelaySpec.with_server do |_root, origin, api|
       journeys = {
-        "already-aboard" => %w(already-aboard open-the-schematics make-it-run name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
-        "first-light"    => %w(first-light talk-together find-a-place open-the-schematics make-it-run take-a-pulse name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
+        "already-aboard" => %w(
+          already-aboard
+          open-the-schematics
+          make-it-run
+          name-the-ship
+          keep-the-keys
+          tune-the-radio
+          hear-the-ping
+          return-to-silence
+          open-the-channel
+          the-line-stays-open
+          notes-from-the-mechanic
+        ),
+        "first-light" => %w(
+          first-light
+          talk-together
+          find-a-place
+          open-the-schematics
+          make-it-run
+          take-a-pulse
+          name-the-ship
+          keep-the-keys
+          tune-the-radio
+          hear-the-ping
+          return-to-silence
+          open-the-channel
+          the-line-stays-open
+          notes-from-the-mechanic
+        ),
       }
 
       mentorless_entry = HTTP::Client.get(
@@ -291,7 +333,7 @@ describe "the canonical bootstrap representations" do
       )
       direct.status_code.should eq(200)
       direct.body.should contain(
-        "tinrelay join --server #{origin} --ship YOUR-SHIP"
+        %(tinrelay join --server #{origin} --ship "$SHIP")
       )
 
       proxied = HTTP::Client.get(
@@ -304,7 +346,7 @@ describe "the canonical bootstrap representations" do
       )
       proxied.status_code.should eq(200)
       proxied.body.should contain(
-        "tinrelay join --server https://tinrelay.space --ship YOUR-SHIP"
+        %(tinrelay join --server https://tinrelay.space --ship "$SHIP")
       )
       proxied.body.should_not contain("{{REPEATER_ORIGIN}}")
 
@@ -323,8 +365,10 @@ describe "the canonical bootstrap representations" do
   it "serves an unadvertised plain flight plan for either meet context" do
     TinrelaySpec.with_server do |_root, origin, api|
       route_entries = ->(base : String, coordinate : String?) do
+        markdown = api.bootstrap_page.markdown(coordinate)
+        title = markdown.lines.find(&.starts_with?("# ")).not_nil![2..].strip
         [{
-          title: api.bootstrap_page.markdown(coordinate).lines.find(&.starts_with?("# ")).not_nil![2..].strip,
+          title: title,
           path:  base,
         }] + Tinrelay::BootstrapPage::JOURNEY_ACTIONS.flat_map do |journey, actions|
           actions.map do |action|
@@ -397,7 +441,14 @@ describe "the canonical bootstrap representations" do
     begin
       File.write(
         File.join(root, "common-bootstrap.md"),
-        "# Safe\n\n{{COORDINATE_BLOCK}}\n<script>window.bad = true</script>\n\n[Continue]({{MEET_ROOT}})\n"
+        <<-MARKDOWN
+          # Safe
+
+          {{COORDINATE_BLOCK}}
+          <script>window.bad = true</script>
+
+          [Continue]({{MEET_ROOT}})
+          MARKDOWN
       )
       File.write(File.join(root, "meet-shell.html"), "<html><body>{{BODY}}</body></html>\n")
       page = Tinrelay::BootstrapPage.new(
@@ -466,7 +517,9 @@ describe "the canonical bootstrap representations" do
         entry.body.should contain(%(href="/assets/tinrelay/plain.css"))
         entry.body.should contain(%(href="/tinrelay-art/meet.a81c.css"))
         route_art_index = entry.body.index("/tinrelay-art/meet.a81c.css").not_nil!
-        wordmark_index = entry.body.index("/tinrelay-art/identity/wordmark.07d6c616afc0.css").not_nil!
+        wordmark_index = entry.body.index(
+          "/tinrelay-art/identity/wordmark.07d6c616afc0.css"
+        ).not_nil!
         route_art_index.should be < wordmark_index
 
         action = HTTP::Client.get(

@@ -54,8 +54,8 @@ The registry cannot list or test local labels; unknown labels receive no bounce.
 Ship names are openly first-claim-unique. A claim supplies the new ship's owner key
 and owner-signed initial radio certificate; the first valid insert wins. Claiming a
 ship creates no contact or relationship. The repeater has no operator approval or
-name-preauthorization role. This small first-flight service accepts that a public
-name may be claimed by someone other than the person who hoped to use it.
+name-preauthorization role. Open claims therefore accept that a public name may be
+claimed by someone other than the person who hoped to use it.
 
 Registry inspection is signed and limited to the requesting ship itself or a locally
 pinned peer with a positive relationship. Unrelated and nonexistent targets have
@@ -192,7 +192,7 @@ result reports acceptance unknown and retains that exact envelope for an explici
 retry with the same signature and ID. A definite rejection deletes it. The outbox
 is not a correspondence archive or delivery workflow.
 
-`tinrelay radio wait --ship SHIP` repeats bounded 25-second long polls. WebSockets
+`tinrelay radio wait --ship "$SHIP"` repeats bounded 25-second long polls. WebSockets
 and permanent voicemail are absent.
 On verified receipt it atomically spools and returns one opaque local
 ID, complete fixed safe wrapper, and the authenticated local attention name only
@@ -217,7 +217,7 @@ repeat the same pointer. The routed mark is the local completion boundary; any l
 handling or reading belongs above Tinrelay. Process death naturally removes parked-wait
 availability.
 
-`tinrelay radio status LOCAL_ID --ship SHIP` is outside the wire protocol. It
+`tinrelay radio status "$LOCAL_ID" --ship "$SHIP"` is outside the wire protocol. It
 reads and verifies only that exact local spool record and its routed marker,
 reports `pending` or `routed`, and neither contacts the repeater nor mutates the
 spool. Missing and corrupt local evidence are explicit failures.

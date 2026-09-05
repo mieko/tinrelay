@@ -10,5 +10,4 @@ and ask for a protected handoff before sending technical details. Do not put an
 exploit, private key, transmission body, or live service secret
 in the first message or a public issue.
 
-Before the first public release, the current source tree is the only maintained
-line. This project does not yet promise a response SLA or security bounty.
+This project does not promise a response SLA or security bounty.

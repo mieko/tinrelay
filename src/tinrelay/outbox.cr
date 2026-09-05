@@ -31,7 +31,9 @@ module Tinrelay
       target = path(id)
       encoded = File.read(target).strip
       envelope = SignedRelayEnvelope.from_json(encoded)
-      raise Invalid.new("outbox transmission id does not match its file") unless envelope.transmission_id == id
+      unless envelope.transmission_id == id
+        raise Invalid.new("outbox transmission id does not match its file")
+      end
       {envelope, encoded}
     rescue ex : File::NotFoundError
       raise NotFound.new("outbox transmission not found")

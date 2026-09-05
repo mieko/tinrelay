@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+
+violations=$(
+  find src spec script -type f -name '*.cr' -exec awk '
+    length($0) > 100 {
+      printf "%s:%d:%d:%s\n", FILENAME, FNR, length($0), $0
+    }
+  ' {} +
+)
+
+if [ -n "$violations" ]; then
+  printf '%s\n' "Crystal source lines must not exceed 100 columns:" >&2
+  printf '%s\n' "$violations" >&2
+  exit 1
+fi

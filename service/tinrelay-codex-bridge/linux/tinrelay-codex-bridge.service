@@ -1,0 +1,15 @@
+[Unit]
+Description=Tinrelay Codex bridge
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tinrelay-codex-bridge run --ship SHIP --radio-room-task 00000000-0000-0000-0000-000000000000 --tinrelay %h/.local/bin/tinrelay --codex-home %h/.codex
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -104,7 +104,8 @@ describe "inbox recovery transitions" do
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 
-  it "turns changed signed words under a directly delivered ID into content-free conflict evidence" do
+  it "turns changed signed words under a directly delivered ID " +
+     "into content-free conflict evidence" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "direct duplicate conflict passphrase"
       alpha = Tinrelay::Client.join(
@@ -224,7 +225,9 @@ describe "inbox recovery transitions" do
         beta.send("steward@alpha", "frozen sender must not transmit")
       end
       failure.message.should eq(
-        "relay acceptance is unknown for transmission #{failure.transmission_id}; exact encrypted envelope retained; retry with: tinrelay outbox retry #{failure.transmission_id} --ship beta: relay is unavailable"
+        "relay acceptance is unknown for transmission #{failure.transmission_id}; " +
+        "exact encrypted envelope retained; retry with: tinrelay outbox retry " +
+        "#{failure.transmission_id} --ship beta: relay is unavailable"
       )
       Tinrelay::Outbox.new("#{beta.keyring.path}.outbox")
         .list.map(&.transmission_id).should eq([failure.transmission_id])

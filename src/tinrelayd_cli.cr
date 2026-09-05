@@ -35,7 +35,8 @@ module Tinrelay
       bind = extract(argv, "--bind") || "127.0.0.1"
       port = (extract(argv, "--port") || "8787").to_i
       template = extract(argv, "--bootstrap-template") || "templates/common-bootstrap.md"
-      source_repository = extract(argv, "--source-repository") || "https://github.com/mieko/tinrelay"
+      source_repository = extract(argv, "--source-repository") ||
+                          "https://github.com/mieko/tinrelay"
       art_manifest_path = ENV["TINRELAY_ART_MANIFEST"]?
       threads = ServerRuntime.thread_count(extract(argv, "--threads"))
       no_extra!(argv)
@@ -62,7 +63,13 @@ module Tinrelay
           sleep 60.seconds
           break if stopping
           result = api.store.cleanup
-          STDERR.puts({event: "cleanup", expired: result[:expired], deleted: result[:deleted]}.to_json) if result.values.any?(&.> 0)
+          if result.values.any?(&.> 0)
+            STDERR.puts({
+              event:   "cleanup",
+              expired: result[:expired],
+              deleted: result[:deleted],
+            }.to_json)
+          end
         rescue ex
           STDERR.puts({event: "cleanup_failed", error: ex.class.name}.to_json)
         end

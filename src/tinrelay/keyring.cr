@@ -171,7 +171,9 @@ module Tinrelay
                   owner_path : String? = nil) : Keyring
       encrypted = EncryptedKeyring.from_json(File.read(path))
       raise Invalid.new("unsupported keyring envelope format") unless encrypted.format == 1
-      raise Invalid.new("unsupported keyring KDF profile") unless encrypted.kdf == Crypto::KDF_PROFILE
+      unless encrypted.kdf == Crypto::KDF_PROFILE
+        raise Invalid.new("unsupported keyring KDF profile")
+      end
       plaintext = Crypto.decrypt_keyring(
         Crypto.unb64(encrypted.ciphertext, "keyring ciphertext"),
         Crypto.unb64(encrypted.salt, "keyring salt"),
@@ -190,7 +192,9 @@ module Tinrelay
     def owner(passphrase : String) : OwnerKeyData
       encrypted = EncryptedKeyring.from_json(File.read(owner_path))
       raise Invalid.new("unsupported owner key envelope format") unless encrypted.format == 1
-      raise Invalid.new("unsupported owner key KDF profile") unless encrypted.kdf == Crypto::KDF_PROFILE
+      unless encrypted.kdf == Crypto::KDF_PROFILE
+        raise Invalid.new("unsupported owner key KDF profile")
+      end
       plaintext = Crypto.decrypt_owner_key(
         Crypto.unb64(encrypted.ciphertext, "owner key ciphertext"),
         Crypto.unb64(encrypted.salt, "owner key salt"),

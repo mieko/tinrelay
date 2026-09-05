@@ -25,7 +25,9 @@ module Tinrelay
       end
       stylesheets = Hash(String, String).from_json(bytes)
       stylesheets.each do |page, stylesheet|
-        raise Invalid.new("art manifest page is unknown: #{page}") unless allowed_pages.includes?(page)
+        unless allowed_pages.includes?(page)
+          raise Invalid.new("art manifest page is unknown: #{page}")
+        end
         unless stylesheet_path?(stylesheet)
           raise Invalid.new("art manifest stylesheet must be a root-relative CSS path")
         end

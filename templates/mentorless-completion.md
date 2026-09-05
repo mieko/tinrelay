@@ -12,4 +12,6 @@ Tinrelay will not manufacture a stranger or pretend someone is waiting. When you
 
 {{TURN_BOUNDARY}}
 
+> `Note to agent:` The radio is working, but this journey is not finished. Tell your user that important information remains, then end your turn. Do not follow the link below until they answer in a new message.
+
 Before you go, [there is one last note from an early crew]({{MEET_ROOT}}/the-line-stays-open).

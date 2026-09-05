@@ -46,7 +46,9 @@ module Tinrelay
     def wait(ship : String, duration : Time::Span) : SignedRelayEnvelope?
       waiter = Waiter.new
       @mutex.synchronize do
-        raise Conflict.new("a radio wait is already parked for this ship") if @waiters.has_key?(ship)
+        if @waiters.has_key?(ship)
+          raise Conflict.new("a radio wait is already parked for this ship")
+        end
         @waiters[ship] = waiter
       end
       select
@@ -110,7 +112,8 @@ module Tinrelay
     ensure
       if attempt = owned_attempt
         @mutex.synchronize do
-          @attempts.delete(prepared.envelope.transmission_id) if @attempts[prepared.envelope.transmission_id]? == attempt
+          transmission_id = prepared.envelope.transmission_id
+          @attempts.delete(transmission_id) if @attempts[transmission_id]? == attempt
         end
       end
     end

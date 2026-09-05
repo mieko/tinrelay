@@ -6,6 +6,13 @@ boundaries, help text, and tests all teach the system. Keep the implementation
 literal enough that a new reader can recover its safety story in one complete
 reading.
 
+It is also a carefully authored bootstrapping prose path and an experimental art
+project. Those are product surfaces, not packaging generated around the radio.
+Protocol behavior, language, and visual direction must remain truthful to one
+another, but authority to change code does not confer authority to rewrite the
+journey or recast its art. Report cross-surface consequences to their owners
+instead of absorbing another discipline into an implementation task.
+
 ## Begin with the product
 
 Read `README.md` and `PROTOCOL.md`, then the source and tests governing the
@@ -21,7 +28,7 @@ Use these nouns consistently:
 - the **repeater** verifies and routes ciphertext but does not correspond;
 - the **radio room** is a mechanical local pointer router, not a person;
 - an **attention name** is private local routing inside the destination ship;
-- `--ship SHIP` always selects the local identity and never names a destination.
+- `--ship "$SHIP"` always selects the local identity and never names a destination.
 
 ## Preserve the causal spine
 
@@ -46,7 +53,7 @@ Use these nouns consistently:
 - Passphrases, private keys, and plaintext bodies do not
   belong in argv, logs, screenshots, recovery notes, or tests that can leak them.
 
-Tinrelay is live and has users. Never rewrite an applied database migration; add
+Tinrelay is live and has two users. Never rewrite an applied database migration; add
 a new forward migration. Treat protocol 1's wire fields, canonical signed bytes,
 domains, routes, and response semantics as compatibility commitments. Before
 changing them, prove whether existing clients and stored state remain valid. A
@@ -69,9 +76,26 @@ rendering of those same bytes. Do not duplicate that prose in Crystal, parallel
 templates, or tests. Keep the JS-less path journey working in both Markdown and
 HTML representations.
 
+Tinrelay's public voice is authored product work owned by Mike and Vera. Anonymous
+implementation, review, research, and ticket agents must not write, rewrite,
+shorten, normalize, or make opportunistic “necessary” edits to body copy,
+onboarding prose, journey templates, README/usage language, help text, headings,
+link captions, or the radio-room prompt. When behavior makes existing words false
+or incomplete, report the exact factual delta, affected surface, and any structural
+or layout consequence to Mike and Vera; they choose the language. An agent may
+mechanically apply exact replacement text only when Mike or Vera supplies that text
+and explicitly asks the agent to place it. Code authority, correctness work, or a
+documentation-update requirement does not confer authorship of the prose.
+
+Keep handwritten Crystal source at 100 columns or fewer. This applies to
+`src/`, `spec/`, and Crystal programs under `script/`; use
+`script/check-source-width` rather than relying on the formatter to catch long
+strings, SQL, or test data.
+
 Run focused checks first, then the relevant broad gates:
 
 ```sh
+script/check-source-width
 crystal tool format --check src spec
 crystal spec
 shards build tinrelay tinrelayd --release --warnings=all --error-on-warnings

@@ -52,14 +52,24 @@ describe Tinrelay::Crypto do
   it "authenticates sealed-box ciphertext and encrypted keyring blobs" do
     recipient = Tinrelay::Crypto.box_keypair
     ciphertext = Tinrelay::Crypto.seal("private transmission".to_slice, recipient.public_key)
-    String.new(Tinrelay::Crypto.open(ciphertext, recipient.public_key, recipient.secret_key)).should eq("private transmission")
+    plaintext = Tinrelay::Crypto.open(
+      ciphertext,
+      recipient.public_key,
+      recipient.secret_key
+    )
+    String.new(plaintext).should eq("private transmission")
     ciphertext[0] ^= 1
     expect_raises(Tinrelay::Unauthorized) do
       Tinrelay::Crypto.open(ciphertext, recipient.public_key, recipient.secret_key)
     end
 
-    salt, nonce, encrypted = Tinrelay::Crypto.encrypt_keyring("secret keys".to_slice, "correct horse battery staple")
-    String.new(Tinrelay::Crypto.decrypt_keyring(encrypted, salt, nonce, "correct horse battery staple")).should eq("secret keys")
+    password = "correct horse battery staple"
+    salt, nonce, encrypted = Tinrelay::Crypto.encrypt_keyring(
+      "secret keys".to_slice,
+      password
+    )
+    plaintext = Tinrelay::Crypto.decrypt_keyring(encrypted, salt, nonce, password)
+    String.new(plaintext).should eq("secret keys")
     expect_raises(Tinrelay::Unauthorized) do
       Tinrelay::Crypto.decrypt_keyring(encrypted, salt, nonce, "wrong passphrase here")
     end

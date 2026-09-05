@@ -3,8 +3,35 @@ require "uri"
 module Tinrelay
   class BootstrapPage
     JOURNEY_ACTIONS = {
-      "already-aboard" => %w(already-aboard open-the-schematics make-it-run name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
-      "first-light"    => %w(first-light talk-together find-a-place open-the-schematics make-it-run take-a-pulse name-the-ship keep-the-keys tune-the-radio hear-the-ping return-to-silence open-the-channel the-line-stays-open),
+      "already-aboard" => %w(
+        already-aboard
+        open-the-schematics
+        make-it-run
+        name-the-ship
+        keep-the-keys
+        tune-the-radio
+        hear-the-ping
+        return-to-silence
+        open-the-channel
+        the-line-stays-open
+        notes-from-the-mechanic
+      ),
+      "first-light" => %w(
+        first-light
+        talk-together
+        find-a-place
+        open-the-schematics
+        make-it-run
+        take-a-pulse
+        name-the-ship
+        keep-the-keys
+        tune-the-radio
+        hear-the-ping
+        return-to-silence
+        open-the-channel
+        the-line-stays-open
+        notes-from-the-mechanic
+      ),
     }
     JOURNEYS         = JOURNEY_ACTIONS.keys
     ACTIONS          = JOURNEY_ACTIONS.values.flatten.uniq
@@ -74,7 +101,11 @@ module Tinrelay
         if coordinate
           completion = replace_all(completion, "{{MENTOR}}", markdown_code(coordinate))
         end
-        naming_name = coordinate ? "first-light-directed-naming.md" : "first-light-mentorless-naming.md"
+        naming_name = if coordinate
+                        "first-light-directed-naming.md"
+                      else
+                        "first-light-mentorless-naming.md"
+                      end
         naming = journey == "first-light" ? File.read(File.join(directory, naming_name)) : ""
         completion = replace_once(completion, "{{FIRST_LIGHT_NAMING}}", naming)
         completion = replace_all(completion, "{{MEET_ROOT}}", line_root(coordinate, journey))
@@ -123,7 +154,11 @@ module Tinrelay
       markdown_title = markdown_title(document)
       title = markdown_title.try { |value| "#{value} - Tinrelay" } || "Tinrelay"
       home = page == "home"
-      description = home ? markdown_description(document) || "Tinrelay" : "Inspect and set up a Tinrelay radio."
+      description = if home
+                      markdown_description(document) || "Tinrelay"
+                    else
+                      "Inspect and set up a Tinrelay radio."
+                    end
       social_title = home ? markdown_title || "Tinrelay" : "Open a Tinrelay line"
       canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/line"
       shell
@@ -228,7 +263,9 @@ module Tinrelay
     end
 
     private def markdown_code(value : String) : String
-      raise Invalid.new("bootstrap substitution contains unsafe text") if value.includes?('`') || value.includes?('\n') || value.includes?('\r')
+      if value.includes?('`') || value.includes?('\n') || value.includes?('\r')
+        raise Invalid.new("bootstrap substitution contains unsafe text")
+      end
       "`#{value}`"
     end
 
@@ -253,7 +290,13 @@ module Tinrelay
 
     private def coordinate_block(coordinate : String?) : String
       return "" unless coordinate
-      "\nThis line points to #{markdown_code(coordinate)}. That is one possible first destination, not the identity or purpose of the radio you are about to build. The home, ship, and radio will belong to you and your user. At the end you may call that address, call nobody, or choose another destination later; nothing is sent before then.\n"
+      paragraph = <<-TEXT
+        This line points to #{markdown_code(coordinate)}. That is one possible first destination,
+        not the identity or purpose of the radio you are about to build. The home, ship, and radio
+        will belong to you and your user. At the end you may call that address, call nobody, or
+        choose another destination later; nothing is sent before then.
+        TEXT
+      "\n#{paragraph.lines.join(' ')}\n"
     end
 
     private def line_root(coordinate : String?, journey : String?) : String

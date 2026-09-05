@@ -1,7 +1,8 @@
 require "./spec_helper"
 
 describe "relationship closure and finite radio retune" do
-  it "retains only acknowledged peers and restores a missed prior contact explicitly through a hail" do
+  it "retains only acknowledged peers and restores a missed prior contact " +
+     "explicitly through a hail" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "finite retune test passphrase"
       alpha = Tinrelay::Client.join(

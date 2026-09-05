@@ -106,6 +106,28 @@ describe "immediate radio polling" do
     end
   end
 
+  it "collects new relay work while older local work remains unrouted" do
+    TinrelaySpec.with_server do |root, origin, _api|
+      passphrase = "background radio collection passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, "beta", passphrase, alpha
+      )
+      spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+      beta.send("steward@alpha", "first local transmission")
+      first = alpha.radio_wait(spool, hold_seconds: 0)
+      beta.send("steward@alpha", "second relay transmission")
+
+      second = alpha.radio_collect(spool, hold_seconds: 0)
+
+      second.local_id.should_not eq(first.local_id)
+      spool.next_unrouted.not_nil!.local_id.should eq(first.local_id)
+      spool.list.count(&.routed_at.nil?).should eq(2)
+    end
+  end
+
   it "makes exactly one zero-hold relay attempt and reports quiet" do
     TinrelaySpec.with_server do |root, origin, _api|
       passphrase = "quiet radio poll passphrase"

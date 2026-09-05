@@ -8,18 +8,69 @@ module Tinrelay
 
     fun crypto_sign_keypair(pk : UInt8*, sk : UInt8*) : Int32
     fun crypto_sign_seed_keypair(pk : UInt8*, sk : UInt8*, seed : UInt8*) : Int32
-    fun crypto_sign_detached(sig : UInt8*, siglen : UInt64*, message : UInt8*, message_len : UInt64, sk : UInt8*) : Int32
-    fun crypto_sign_verify_detached(sig : UInt8*, message : UInt8*, message_len : UInt64, pk : UInt8*) : Int32
+    fun crypto_sign_detached(
+      sig : UInt8*,
+      siglen : UInt64*,
+      message : UInt8*,
+      message_len : UInt64,
+      sk : UInt8*,
+    ) : Int32
+    fun crypto_sign_verify_detached(
+      sig : UInt8*,
+      message : UInt8*,
+      message_len : UInt64,
+      pk : UInt8*,
+    ) : Int32
 
     fun crypto_box_keypair(pk : UInt8*, sk : UInt8*) : Int32
-    fun crypto_box_seal(ciphertext : UInt8*, message : UInt8*, message_len : UInt64, pk : UInt8*) : Int32
-    fun crypto_box_seal_open(message : UInt8*, ciphertext : UInt8*, ciphertext_len : UInt64, pk : UInt8*, sk : UInt8*) : Int32
+    fun crypto_box_seal(
+      ciphertext : UInt8*,
+      message : UInt8*,
+      message_len : UInt64,
+      pk : UInt8*,
+    ) : Int32
+    fun crypto_box_seal_open(
+      message : UInt8*,
+      ciphertext : UInt8*,
+      ciphertext_len : UInt64,
+      pk : UInt8*,
+      sk : UInt8*,
+    ) : Int32
 
-    fun crypto_pwhash(out : UInt8*, out_len : UInt64, password : UInt8*, password_len : UInt64, salt : UInt8*, opslimit : UInt64, memlimit : LibC::SizeT, algorithm : Int32) : Int32
+    fun crypto_pwhash(
+      out : UInt8*,
+      out_len : UInt64,
+      password : UInt8*,
+      password_len : UInt64,
+      salt : UInt8*,
+      opslimit : UInt64,
+      memlimit : LibC::SizeT,
+      algorithm : Int32,
+    ) : Int32
     fun crypto_pwhash_alg_argon2id13 : Int32
 
-    fun crypto_aead_xchacha20poly1305_ietf_encrypt(ciphertext : UInt8*, ciphertext_len : UInt64*, message : UInt8*, message_len : UInt64, additional : UInt8*, additional_len : UInt64, nsec : UInt8*, nonce : UInt8*, key : UInt8*) : Int32
-    fun crypto_aead_xchacha20poly1305_ietf_decrypt(message : UInt8*, message_len : UInt64*, nsec : UInt8*, ciphertext : UInt8*, ciphertext_len : UInt64, additional : UInt8*, additional_len : UInt64, nonce : UInt8*, key : UInt8*) : Int32
+    fun crypto_aead_xchacha20poly1305_ietf_encrypt(
+      ciphertext : UInt8*,
+      ciphertext_len : UInt64*,
+      message : UInt8*,
+      message_len : UInt64,
+      additional : UInt8*,
+      additional_len : UInt64,
+      nsec : UInt8*,
+      nonce : UInt8*,
+      key : UInt8*,
+    ) : Int32
+    fun crypto_aead_xchacha20poly1305_ietf_decrypt(
+      message : UInt8*,
+      message_len : UInt64*,
+      nsec : UInt8*,
+      ciphertext : UInt8*,
+      ciphertext_len : UInt64,
+      additional : UInt8*,
+      additional_len : UInt64,
+      nonce : UInt8*,
+      key : UInt8*,
+    ) : Int32
   end
 
   module Crypto
@@ -69,7 +120,10 @@ module Tinrelay
       init
       public_key = Bytes.new(SIGN_PUBLIC_BYTES)
       secret_key = Bytes.new(SIGN_SECRET_BYTES)
-      check LibSodium.crypto_sign_seed_keypair(public_key, secret_key, seed), "seeded signing key generation"
+      check(
+        LibSodium.crypto_sign_seed_keypair(public_key, secret_key, seed),
+        "seeded signing key generation"
+      )
       SigningKeyPair.new(public_key, secret_key)
     end
 
@@ -85,7 +139,16 @@ module Tinrelay
       require_size(secret_key, SIGN_SECRET_BYTES, "signing secret key")
       signature = Bytes.new(SIGNATURE_BYTES)
       signature_len = 0_u64
-      check LibSodium.crypto_sign_detached(signature, pointerof(signature_len), message, message.size.to_u64, secret_key), "signature"
+      check(
+        LibSodium.crypto_sign_detached(
+          signature,
+          pointerof(signature_len),
+          message,
+          message.size.to_u64,
+          secret_key
+        ),
+        "signature"
+      )
       raise Error.new("unexpected signature length") unless signature_len == SIGNATURE_BYTES
       signature
     end
@@ -93,13 +156,21 @@ module Tinrelay
     def self.verify(message : Bytes, signature : Bytes, public_key : Bytes) : Bool
       require_size(signature, SIGNATURE_BYTES, "signature")
       require_size(public_key, SIGN_PUBLIC_BYTES, "signing public key")
-      LibSodium.crypto_sign_verify_detached(signature, message, message.size.to_u64, public_key) == 0
+      LibSodium.crypto_sign_verify_detached(
+        signature,
+        message,
+        message.size.to_u64,
+        public_key
+      ) == 0
     end
 
     def self.seal(message : Bytes, public_key : Bytes) : Bytes
       require_size(public_key, BOX_PUBLIC_BYTES, "encryption public key")
       ciphertext = Bytes.new(message.size + SEAL_OVERHEAD_BYTES)
-      check LibSodium.crypto_box_seal(ciphertext, message, message.size.to_u64, public_key), "sealed-box encryption"
+      check(
+        LibSodium.crypto_box_seal(ciphertext, message, message.size.to_u64, public_key),
+        "sealed-box encryption"
+      )
       ciphertext
     end
 
@@ -108,7 +179,13 @@ module Tinrelay
       require_size(secret_key, BOX_SECRET_BYTES, "encryption secret key")
       raise Invalid.new("sealed box is too short") if ciphertext.size < SEAL_OVERHEAD_BYTES
       message = Bytes.new(ciphertext.size - SEAL_OVERHEAD_BYTES)
-      result = LibSodium.crypto_box_seal_open(message, ciphertext, ciphertext.size.to_u64, public_key, secret_key)
+      result = LibSodium.crypto_box_seal_open(
+        message,
+        ciphertext,
+        ciphertext.size.to_u64,
+        public_key,
+        secret_key
+      )
       raise Unauthorized.new("ciphertext authentication failed") unless result == 0
       message
     end
@@ -145,7 +222,11 @@ module Tinrelay
       encrypt_blob(plaintext, passphrase, OWNER_KEY_AD)
     end
 
-    def self.encrypt_blob(plaintext : Bytes, passphrase : String, additional : Bytes) : Tuple(Bytes, Bytes, Bytes)
+    def self.encrypt_blob(
+      plaintext : Bytes,
+      passphrase : String,
+      additional : Bytes,
+    ) : Tuple(Bytes, Bytes, Bytes)
       salt = random(PWHASH_SALT_BYTES)
       nonce = random(XCHACHA_NONCE_BYTES)
       key = derive_key(passphrase, salt)
@@ -164,11 +245,21 @@ module Tinrelay
       end
     end
 
-    def self.decrypt_keyring(ciphertext : Bytes, salt : Bytes, nonce : Bytes, passphrase : String) : Bytes
+    def self.decrypt_keyring(
+      ciphertext : Bytes,
+      salt : Bytes,
+      nonce : Bytes,
+      passphrase : String,
+    ) : Bytes
       decrypt_blob(ciphertext, salt, nonce, passphrase, KEYRING_AD)
     end
 
-    def self.decrypt_owner_key(ciphertext : Bytes, salt : Bytes, nonce : Bytes, passphrase : String) : Bytes
+    def self.decrypt_owner_key(
+      ciphertext : Bytes,
+      salt : Bytes,
+      nonce : Bytes,
+      passphrase : String,
+    ) : Bytes
       decrypt_blob(ciphertext, salt, nonce, passphrase, OWNER_KEY_AD)
     end
 

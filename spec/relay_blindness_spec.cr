@@ -45,7 +45,8 @@ describe "the socially blind repeater boundary" do
       pending[0].transmission_id.should eq(failure.transmission_id)
       unreliable_remote.saw_preserved_envelope.should be_true
       File.info(File.join(root, "outbox")).permissions.value.should eq(0o700)
-      File.info(File.join(root, "outbox", "#{failure.transmission_id}.json")).permissions.value.should eq(0o600)
+      path = File.join(root, "outbox", "#{failure.transmission_id}.json")
+      File.info(path).permissions.value.should eq(0o600)
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", failure.transmission_id
       ).as(Int64).should eq(1)
@@ -59,7 +60,8 @@ describe "the socially blind repeater boundary" do
       event.local_id.should_not be_empty
 
       # Collection and relay payload erasure do not change sender evidence.
-      JSON.parse(beta.remote.post("/v1/transmissions", retried.to_json))["state"].as_s.should eq("accepted")
+      response = beta.remote.post("/v1/transmissions", retried.to_json)
+      JSON.parse(response)["state"].as_s.should eq("accepted")
 
       changed = Tinrelay::SignedRelayEnvelope.from_json(retried.to_json)
       changed.ciphertext = Tinrelay::Crypto.b64(Tinrelay::Crypto.random(48))

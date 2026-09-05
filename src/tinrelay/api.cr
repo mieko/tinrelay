@@ -67,7 +67,11 @@ module Tinrelay
         rescue ex : Unavailable
           status = error(context, 503, "unavailable", ex.message || "unavailable")
         rescue ex
-          STDERR.puts({event: "request_failed", error: ex.class.name, request_id: request_id(context)}.to_json)
+          STDERR.puts({
+            event:      "request_failed",
+            error:      ex.class.name,
+            request_id: request_id(context),
+          }.to_json)
           status = error(context, 500, "internal", "internal server error")
         ensure
           STDERR.puts({
@@ -192,7 +196,9 @@ module Tinrelay
 
     private def parse_body(context, type : T.class) : T forall T
       content_length = context.request.headers["Content-Length"]?.try(&.to_i64?)
-      raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes") if content_length && content_length > MAX_REQUEST_BYTES
+      if content_length && content_length > MAX_REQUEST_BYTES
+        raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
+      end
       body = read_limited(context.request.body)
       type.from_json(body)
     end
@@ -206,7 +212,9 @@ module Tinrelay
         read = input.read(buffer)
         break if read == 0
         total += read
-        raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes") if total > MAX_REQUEST_BYTES
+        if total > MAX_REQUEST_BYTES
+          raise Invalid.new("request body exceeds #{MAX_REQUEST_BYTES} bytes")
+        end
         output.write(buffer[0, read])
       end
       output.to_s
@@ -217,9 +225,23 @@ module Tinrelay
       return public_not_found(context) unless request.method.in?({"GET", "HEAD"})
       path = request.path
       return homepage(context, path == "/index.md") if path.in?({"/", "/index.md"})
-      return public_text(context, bootstrap_page.agent_map, "text/plain; charset=utf-8") if path == "/llms.txt"
-      return public_text(context, bootstrap_page.static("robots.txt"), "text/plain; charset=utf-8") if path == "/robots.txt"
-      return public_text(context, bootstrap_page.static("sitemap.xml"), "application/xml; charset=utf-8") if path == "/sitemap.xml"
+      if path == "/llms.txt"
+        return public_text(context, bootstrap_page.agent_map, "text/plain; charset=utf-8")
+      end
+      if path == "/robots.txt"
+        return public_text(
+          context,
+          bootstrap_page.static("robots.txt"),
+          "text/plain; charset=utf-8"
+        )
+      end
+      if path == "/sitemap.xml"
+        return public_text(
+          context,
+          bootstrap_page.static("sitemap.xml"),
+          "application/xml; charset=utf-8"
+        )
+      end
       if name = public_asset_name(path)
         return public_asset(context, name)
       end
@@ -244,8 +266,8 @@ module Tinrelay
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
       context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
-      context.response.headers["Link"] = %(<#{alternate}>; rel="alternate"; type="text/markdown", </llms.txt>; rel="describedby")
+      context.response.headers["Content-Security-Policy"] = content_security_policy
+      context.response.headers["Link"] = alternate_link(alternate)
       write_body(
         context, 200,
         wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8",
@@ -276,9 +298,9 @@ module Tinrelay
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
       context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+      context.response.headers["Content-Security-Policy"] = content_security_policy
       context.response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive" if private_page
-      context.response.headers["Link"] = %(<#{alternate}>; rel="alternate"; type="text/markdown", </llms.txt>; rel="describedby")
+      context.response.headers["Link"] = alternate_link(alternate)
       write_body(context, 200, content_type, body)
     end
 
@@ -291,7 +313,7 @@ module Tinrelay
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
       context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+      context.response.headers["Content-Security-Policy"] = content_security_policy
       context.response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
       write_body(
         context, 404,
@@ -351,7 +373,12 @@ module Tinrelay
       directed_line_path?(path) ? "/:coordinate" : path
     end
 
-    private def line_route(path : String) : NamedTuple(coordinate: String?, journey: String?, action: String?, explicit_markdown: Bool)?
+    private def line_route(path : String) : NamedTuple(
+      coordinate: String?,
+      journey: String?,
+      action: String?,
+      explicit_markdown: Bool,
+    )?
       return nil unless path.starts_with?('/') && path.size > 1 && !path.ends_with?('/')
       segments = path[1..].split('/')
       explicit_markdown = segments.last? == "index.md"
@@ -366,9 +393,21 @@ module Tinrelay
                      first
                    end
 
-      return {coordinate: coordinate, journey: nil, action: nil, explicit_markdown: explicit_markdown} if segments.empty?
+      if segments.empty?
+        return {
+          coordinate:        coordinate,
+          journey:           nil,
+          action:            nil,
+          explicit_markdown: explicit_markdown,
+        }
+      end
       if segments.size == 1 && segments[0] == BootstrapPage::FLIGHT_PLAN_PAGE
-        return {coordinate: coordinate, journey: nil, action: segments[0], explicit_markdown: explicit_markdown}
+        return {
+          coordinate:        coordinate,
+          journey:           nil,
+          action:            segments[0],
+          explicit_markdown: explicit_markdown,
+        }
       end
 
       return nil unless segments.size.in?(1..2)
@@ -376,12 +415,21 @@ module Tinrelay
       return nil unless BootstrapPage::JOURNEYS.includes?(journey)
       action = segments[1]? || journey
       return nil unless BootstrapPage.action_allowed?(journey, action)
-      {coordinate: coordinate, journey: journey, action: action, explicit_markdown: explicit_markdown}
+      {
+        coordinate:        coordinate,
+        journey:           journey,
+        action:            action,
+        explicit_markdown: explicit_markdown,
+      }
     rescue Invalid
       nil
     end
 
-    private def line_markdown_path(coordinate : String?, journey : String?, action : String?) : String
+    private def line_markdown_path(
+      coordinate : String?,
+      journey : String?,
+      action : String?,
+    ) : String
       path = coordinate ? "/#{URI.encode_path_segment(coordinate)}" : "/line"
       if action == BootstrapPage::FLIGHT_PLAN_PAGE
         return "#{path}/#{BootstrapPage::FLIGHT_PLAN_PAGE}/index.md"
@@ -390,6 +438,20 @@ module Tinrelay
       path = "#{path}/#{journey}"
       path = "#{path}/#{action}" if action && action != journey
       "#{path}/index.md"
+    end
+
+    private def content_security_policy : String
+      "default-src 'none'; " +
+        "style-src 'self'; " +
+        "img-src 'self'; " +
+        "font-src 'self'; " +
+        "base-uri 'none'; " +
+        "form-action 'none'"
+    end
+
+    private def alternate_link(alternate : String) : String
+      %(<#{alternate}>; rel="alternate"; type="text/markdown", ) +
+        %(</llms.txt>; rel="describedby")
     end
 
     private def directed_line_path?(path : String) : Bool

@@ -103,7 +103,8 @@ describe "direct radio handoff" do
 
       composer.send("steward@alpha", "no waiter", "caller")
       absent = capture.captured.not_nil!
-      JSON.parse(beta.remote.post("/v1/transmissions", absent.to_json))["state"].as_s.should eq("accepted")
+      response = beta.remote.post("/v1/transmissions", absent.to_json)
+      JSON.parse(response)["state"].as_s.should eq("accepted")
       api.database.db.query_one(
         "SELECT state, ciphertext IS NOT NULL FROM transmissions WHERE id = ?",
         absent.transmission_id, as: {String, Int64}

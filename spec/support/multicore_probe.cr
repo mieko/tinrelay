@@ -207,7 +207,9 @@ begin
     threads:        threads,
     direct_handoff: {wall_ms: direct_ms, relay_transmission_rows: direct_rows},
     reads:          read_result.merge({wall_ms: read_wall, requests: reads}).merge(read_metrics),
-    sqlite_writes:  write_result.merge({wall_ms: write_wall, requests: writes}).merge(write_metrics),
+    sqlite_writes:  write_result.merge(
+      {wall_ms: write_wall, requests: writes}
+    ).merge(write_metrics),
   }.to_json)
 ensure
   server.try(&.close)

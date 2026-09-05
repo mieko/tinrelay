@@ -17,7 +17,10 @@ module Tinrelay
     MAX_CIPHERTEXT_BYTES       = 17 * 1024
     MAX_PENDING_SECONDS        = FALLBACK_LIFETIME_SECONDS
     AUTH_SKEW_SECONDS          = 5 * 60
-    UUID                       = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
+    UUID                       = /\A
+      [0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-
+      [89ab][0-9a-f]{3}-[0-9a-f]{12}
+    \z/x
 
     getter database : Database
 
@@ -29,9 +32,15 @@ module Tinrelay
       ship = Names.ship!(claim.ship)
       certificate = claim.radio_certificate
       raise Invalid.new("claim ship and radio certificate differ") unless certificate.ship == ship
-      raise Invalid.new("initial key generations must be 1") unless certificate.generation == 1 && certificate.owner_generation == 1
+      unless certificate.generation == 1 && certificate.owner_generation == 1
+        raise Invalid.new("initial key generations must be 1")
+      end
       owner_key = Crypto.unb64(claim.owner_public_key, "owner public key")
-      unless Crypto.verify(certificate.unsigned_bytes, Crypto.unb64(certificate.owner_signature), owner_key)
+      unless Crypto.verify(
+               certificate.unsigned_bytes,
+               Crypto.unb64(certificate.owner_signature),
+               owner_key
+             )
         raise Unauthorized.new("initial radio certificate is not signed by the ship owner")
       end
 
@@ -80,14 +89,26 @@ module Tinrelay
                 now : Int64 = Time.utc.to_unix) : PreparedRelayEnvelope?
       validate_envelope_shape!(envelope)
       ciphertext = Crypto.unb64(envelope.ciphertext, "ciphertext")
-      raise Invalid.new("ciphertext exceeds #{MAX_CIPHERTEXT_BYTES} bytes") if ciphertext.size > MAX_CIPHERTEXT_BYTES
+      if ciphertext.size > MAX_CIPHERTEXT_BYTES
+        raise Invalid.new("ciphertext exceeds #{MAX_CIPHERTEXT_BYTES} bytes")
+      end
       signature = Crypto.unb64(envelope.signature, "relay envelope signature")
       envelope_digest = Digest::SHA256.digest(envelope.signing_bytes + signature)
       disposition = database.db.transaction do |transaction|
         connection = transaction.connection
-        if connection.query_one?("SELECT 1 FROM transmissions WHERE id = ?", envelope.transmission_id, as: Int64)
-          stored_digest = connection.query_one("SELECT envelope_digest FROM transmissions WHERE id = ?", envelope.transmission_id, as: Bytes)
-          raise Conflict.new("transmission id was reused with different contents") unless Crypto.constant_time_equal?(stored_digest, envelope_digest)
+        if connection.query_one?(
+             "SELECT 1 FROM transmissions WHERE id = ?",
+             envelope.transmission_id,
+             as: Int64
+           )
+          stored_digest = connection.query_one(
+            "SELECT envelope_digest FROM transmissions WHERE id = ?",
+            envelope.transmission_id,
+            as: Bytes
+          )
+          unless Crypto.constant_time_equal?(stored_digest, envelope_digest)
+            raise Conflict.new("transmission id was reused with different contents")
+          end
           next :accepted
         end
 
@@ -117,8 +138,12 @@ module Tinrelay
       Names.ship!(hail.sender_ship)
       Names.ship!(hail.recipient_ship)
       raise Invalid.new("a ship cannot hail itself") if hail.sender_ship == hail.recipient_ship
-      raise Invalid.new("hail creation time is outside the authentication window") unless (hail.created_at - now).abs <= AUTH_SKEW_SECONDS
-      raise Invalid.new("hail expiry must be within one hour") unless hail.expires_at.in?((now + 1)..(now + HAIL_LIFETIME_SECONDS))
+      unless (hail.created_at - now).abs <= AUTH_SKEW_SECONDS
+        raise Invalid.new("hail creation time is outside the authentication window")
+      end
+      unless hail.expires_at.in?((now + 1)..(now + HAIL_LIFETIME_SECONDS))
+        raise Invalid.new("hail expiry must be within one hour")
+      end
       signature = Crypto.unb64(hail.signature, "hail signature")
       database.db.transaction do |transaction|
         connection = transaction.connection
@@ -211,7 +236,9 @@ module Tinrelay
 
     def wait_once(request : RadioWaitRequest,
                   now : Int64 = Time.utc.to_unix) : RadioWaitResponse
-      raise Invalid.new("wait hold must be between 0 and 25 seconds") unless request.hold_seconds.in?(0..25)
+      unless request.hold_seconds.in?(0..25)
+        raise Invalid.new("wait hold must be between 0 and 25 seconds")
+      end
       database.db.transaction do |transaction|
         connection = transaction.connection
         verify_radio_action(connection, request.auth, "radio.wait", request.payload, now)
@@ -263,7 +290,8 @@ module Tinrelay
         connection = transaction.connection
         verify_radio_action(connection, request.auth, "hail.ack", request.payload, now)
         connection.exec(
-          "UPDATE hails SET collected_at = COALESCE(collected_at, ?) WHERE id = ? AND recipient_ship = ?",
+          "UPDATE hails SET collected_at = COALESCE(collected_at, ?) " +
+          "WHERE id = ? AND recipient_ship = ?",
           now, request.hail_id, request.auth.ship
         )
       end
@@ -283,7 +311,10 @@ module Tinrelay
           if include_admin
             json.field "admin_generation", ship_row[2]
           end
-          json.field "authority_notice", "ship namespace administration only; never human sponsor authority"
+          json.field(
+            "authority_notice",
+            "ship namespace administration only; never human sponsor authority"
+          )
           json.field "owner_keys" { write_owner_keys(json, ship) }
           json.field "radio_keys" { write_radio_keys(json, ship) }
         end
@@ -294,7 +325,9 @@ module Tinrelay
                            now : Int64 = Time.utc.to_unix) : Nil
       peer = Names.ship!(request.peer_ship)
       retained = request.retained_ships.map { |ship| Names.ship!(ship) }.uniq.sort
-      raise Invalid.new("a ship cannot retain or close itself") if peer == request.auth.ship || retained.includes?(request.auth.ship)
+      if peer == request.auth.ship || retained.includes?(request.auth.ship)
+        raise Invalid.new("a ship cannot retain or close itself")
+      end
       raise Invalid.new("closed peer cannot be retained") if retained.includes?(peer)
       certificate = request.certificate
       database.db.transaction do |transaction|
@@ -302,12 +335,16 @@ module Tinrelay
         verify_owner_action(
           connection, request.auth, "relationship.close", request.payload, now
         )
-        raise Invalid.new("radio certificate belongs to another ship") unless certificate.ship == request.auth.ship
+        unless certificate.ship == request.auth.ship
+          raise Invalid.new("radio certificate belongs to another ship")
+        end
         prior_generation = connection.scalar(
           "SELECT MAX(generation) FROM ship_radio_keys WHERE ship = ?",
           certificate.ship
         ).as(Int64).to_i
-        raise Invalid.new("radio generation must advance by one") unless certificate.generation == prior_generation + 1
+        unless certificate.generation == prior_generation + 1
+          raise Invalid.new("radio generation must advance by one")
+        end
         verify_radio_certificate(connection, certificate)
         prior_key = radio_key(connection, certificate.ship, prior_generation)
         unless Crypto.verify(
@@ -317,7 +354,8 @@ module Tinrelay
           raise Unauthorized.new("radio retune lacks the prior radio signature")
         end
         connection.exec(
-          "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? WHERE ship = ? AND state = 'active'",
+          "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
+          "WHERE ship = ? AND state = 'active'",
           now, certificate.ship
         )
         insert_radio_key(connection, certificate, request.prior_radio_signature)
@@ -331,7 +369,8 @@ module Tinrelay
         deadline = now + MAX_PENDING_SECONDS
         active_peers = [] of String
         connection.query(
-          "SELECT ship_a, ship_b FROM relationships WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
+          "SELECT ship_a, ship_b FROM relationships " +
+          "WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
           request.auth.ship, request.auth.ship
         ) do |rows|
           rows.each do
@@ -340,13 +379,14 @@ module Tinrelay
           end
         end
         connection.exec(
-          "UPDATE relationships SET state = 'transitioning', transition_until = ? WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
+          "UPDATE relationships SET state = 'transitioning', transition_until = ? " +
+          "WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
           deadline, request.auth.ship, request.auth.ship
         )
         retained.each do |retained_ship|
           next unless active_peers.includes?(retained_ship)
           connection.exec(
-            <<-SQL, request.auth.ship, retained_ship, prior_generation, certificate.generation, deadline
+            <<-SQL,
               INSERT INTO relationship_transitions(
                 owner_ship, peer_ship, from_generation, to_generation, expires_at
               ) VALUES (?, ?, ?, ?, ?)
@@ -355,6 +395,11 @@ module Tinrelay
                 to_generation = excluded.to_generation,
                 expires_at = excluded.expires_at
             SQL
+            request.auth.ship,
+            retained_ship,
+            prior_generation,
+            certificate.generation,
+            deadline
           )
         end
         advance_admin(connection, request.auth)
@@ -366,7 +411,13 @@ module Tinrelay
       owner_ship = Names.ship!(request.owner_ship)
       database.db.transaction do |transaction|
         connection = transaction.connection
-        verify_radio_action(connection, request.auth, "relationship.retune.ack", request.payload, now)
+        verify_radio_action(
+          connection,
+          request.auth,
+          "relationship.retune.ack",
+          request.payload,
+          now
+        )
         connection.query_one?(
           <<-SQL, owner_ship, request.auth.ship, request.to_generation, now,
             SELECT 1 FROM relationship_transitions
@@ -377,7 +428,8 @@ module Tinrelay
         ) || raise NotFound.new("retune transition is unavailable")
         ship_a, ship_b = relationship_pair(owner_ship, request.auth.ship)
         connection.exec(
-          "UPDATE relationships SET state = 'active', transition_until = NULL WHERE ship_a = ? AND ship_b = ? AND state = 'transitioning'",
+          "UPDATE relationships SET state = 'active', transition_until = NULL " +
+          "WHERE ship_a = ? AND ship_b = ? AND state = 'transitioning'",
           ship_a, ship_b
         )
         connection.exec(
@@ -423,15 +475,27 @@ module Tinrelay
       database.db.transaction do |transaction|
         connection = transaction.connection
         verify_owner_action(connection, rotation.auth, "owner.rotate", rotation.payload, now)
-        raise Invalid.new("owner generation must advance by one") unless rotation.new_generation == rotation.auth.owner_generation + 1
+        unless rotation.new_generation == rotation.auth.owner_generation + 1
+          raise Invalid.new("owner generation must advance by one")
+        end
         new_key = Crypto.unb64(rotation.new_public_key, "new owner public key")
         old_key = owner_key(connection, rotation.auth.ship, rotation.auth.owner_generation)
-        bytes = Canonical.fields("tinrelay-owner-rotation-v1", rotation.auth.ship, rotation.new_generation.to_s, rotation.new_public_key)
+        bytes = Canonical.fields(
+          "tinrelay-owner-rotation-v1",
+          rotation.auth.ship,
+          rotation.new_generation.to_s,
+          rotation.new_public_key
+        )
         unless Crypto.verify(bytes, Crypto.unb64(rotation.prior_signature), old_key)
           raise Unauthorized.new("owner rotation lacks the prior owner signature")
         end
         prior_signature = Crypto.unb64(rotation.prior_signature)
-        connection.exec("UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? WHERE ship = ? AND state = 'active'", now, rotation.auth.ship)
+        connection.exec(
+          "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
+          "WHERE ship = ? AND state = 'active'",
+          now,
+          rotation.auth.ship
+        )
         connection.exec(
           <<-SQL, rotation.auth.ship, rotation.new_generation, new_key, now, prior_signature
             INSERT INTO ship_owner_keys(
@@ -446,20 +510,39 @@ module Tinrelay
 
     def ship_change(change : ShipChange,
                     now : Int64 = Time.utc.to_unix) : Nil
-      raise Invalid.new("ship operation must be freeze, activate, or revoke") unless change.operation.in?({"freeze", "activate", "revoke"})
+      unless change.operation.in?({"freeze", "activate", "revoke"})
+        raise Invalid.new("ship operation must be freeze, activate, or revoke")
+      end
       database.db.transaction do |transaction|
         connection = transaction.connection
         verify_owner_action(connection, change.auth, "ship.change", change.payload, now)
-        current = connection.scalar("SELECT state FROM ships WHERE name = ?", change.auth.ship).as(String)
+        current = connection.scalar(
+          "SELECT state FROM ships WHERE name = ?",
+          change.auth.ship
+        ).as(String)
         raise Conflict.new("revoked ships cannot be reactivated") if current == "revoked"
-        state = change.operation == "activate" ? "active" : change.operation == "revoke" ? "revoked" : "frozen"
+        state = case change.operation
+                when "activate" then "active"
+                when "revoke"   then "revoked"
+                else                 "frozen"
+                end
         connection.exec(
           "UPDATE ships SET state = ? WHERE name = ?",
           state, change.auth.ship
         )
         if state == "revoked"
-          connection.exec("UPDATE ship_owner_keys SET state = 'revoked', revoked_at = ? WHERE ship = ? AND state = 'active'", now, change.auth.ship)
-          connection.exec("UPDATE ship_radio_keys SET state = 'revoked', revoked_at = ? WHERE ship = ? AND state = 'active'", now, change.auth.ship)
+          connection.exec(
+            "UPDATE ship_owner_keys SET state = 'revoked', revoked_at = ? " +
+            "WHERE ship = ? AND state = 'active'",
+            now,
+            change.auth.ship
+          )
+          connection.exec(
+            "UPDATE ship_radio_keys SET state = 'revoked', revoked_at = ? " +
+            "WHERE ship = ? AND state = 'active'",
+            now,
+            change.auth.ship
+          )
         end
         advance_admin(connection, change.auth)
       end
@@ -499,15 +582,21 @@ module Tinrelay
     end
 
     private def validate_envelope_shape!(envelope : SignedRelayEnvelope) : Nil
-      raise Invalid.new("unsupported signed relay envelope") unless envelope.object_version == 1 && envelope.protocol == PROTOCOL
+      unless envelope.object_version == 1 && envelope.protocol == PROTOCOL
+        raise Invalid.new("unsupported signed relay envelope")
+      end
       require_uuid!(envelope.transmission_id, "transmission id")
       Names.ship!(envelope.sender_ship)
       Names.ship!(envelope.recipient_ship)
     end
 
     private def validate_new_envelope_time!(envelope : SignedRelayEnvelope, now : Int64) : Nil
-      raise Invalid.new("transmission creation time is outside the authentication window") unless (envelope.created_at - now).abs <= AUTH_SKEW_SECONDS
-      raise Invalid.new("transmission expiry must be within 96 hours") unless envelope.expires_at.in?((now + 1)..(now + MAX_PENDING_SECONDS))
+      unless (envelope.created_at - now).abs <= AUTH_SKEW_SECONDS
+        raise Invalid.new("transmission creation time is outside the authentication window")
+      end
+      unless envelope.expires_at.in?((now + 1)..(now + MAX_PENDING_SECONDS))
+        raise Invalid.new("transmission expiry must be within 96 hours")
+      end
     end
 
     private def insert_transmission(connection : DB::Connection,
@@ -688,9 +777,16 @@ module Tinrelay
         SQL
       ) do |rows|
         rows.each do
-          generation, signing, encryption, issued_at, owner_generation, owner_signature, prior_signature = rows.read(
+          values = rows.read(
             Int64, Bytes, Bytes, Int64, Int64, Bytes, Bytes?
           )
+          generation = values[0]
+          signing = values[1]
+          encryption = values[2]
+          issued_at = values[3]
+          owner_generation = values[4]
+          owner_signature = values[5]
+          prior_signature = values[6]
           certificate = ShipRadioCertificate.new(
             ship, generation.to_i, Crypto.b64(signing), Crypto.b64(encryption),
             issued_at, owner_generation.to_i, Crypto.b64(owner_signature)
@@ -735,14 +831,17 @@ module Tinrelay
           )
         end
       end
-      raise Error.new("owner continuity chain is incomplete") unless links.size == to_generation - from_generation
+      unless links.size == to_generation - from_generation
+        raise Error.new("owner continuity chain is incomplete")
+      end
       links
     end
 
     private def radio_key(connection : DB::Connection, ship : String,
                           generation : Int32) : Tuple(Bytes, Bytes, String)
       connection.query_one?(
-        "SELECT signing_public_key, encryption_public_key, state FROM ship_radio_keys WHERE ship = ? AND generation = ?",
+        "SELECT signing_public_key, encryption_public_key, state " +
+        "FROM ship_radio_keys WHERE ship = ? AND generation = ?",
         ship, generation, as: {Bytes, Bytes, String}
       ) || raise Unauthorized.new("ship radio key is not registered")
     end
@@ -750,7 +849,8 @@ module Tinrelay
     private def owner_key(connection : DB::Connection, ship : String,
                           generation : Int32) : Bytes
       connection.query_one?(
-        "SELECT public_key FROM ship_owner_keys WHERE ship = ? AND generation = ? AND state = 'active'",
+        "SELECT public_key FROM ship_owner_keys " +
+        "WHERE ship = ? AND generation = ? AND state = 'active'",
         ship, generation, as: Bytes
       ) || raise Unauthorized.new("ship owner key is not active")
     end
@@ -788,7 +888,9 @@ module Tinrelay
         as: {Int64, String}
       ) || unauthenticated!
       raise Unavailable.new("ship is revoked") if current[1] == "revoked"
-      raise Conflict.new("admin generation must advance by one") unless auth.admin_generation == current[0] + 1
+      unless auth.admin_generation == current[0] + 1
+        raise Conflict.new("admin generation must advance by one")
+      end
     end
 
     private def authenticate_radio_signature(
@@ -799,7 +901,8 @@ module Tinrelay
       signature : Bytes,
     ) : Tuple(Bytes, Bytes, String)
       key = connection.query_one?(
-        "SELECT signing_public_key, encryption_public_key, state FROM ship_radio_keys WHERE ship = ? AND generation = ?",
+        "SELECT signing_public_key, encryption_public_key, state " +
+        "FROM ship_radio_keys WHERE ship = ? AND generation = ?",
         ship, generation, as: {Bytes, Bytes, String}
       )
       verification_key = key.try(&.[0]) || dummy_signing_public_key
@@ -828,13 +931,21 @@ module Tinrelay
     end
 
     private def advance_admin(connection : DB::Connection, auth : OwnerAuth) : Nil
-      connection.exec("UPDATE ships SET admin_generation = ? WHERE name = ?", auth.admin_generation, auth.ship)
+      connection.exec(
+        "UPDATE ships SET admin_generation = ? WHERE name = ?",
+        auth.admin_generation,
+        auth.ship
+      )
     end
 
     private def verify_radio_certificate(connection : DB::Connection,
                                          certificate : ShipRadioCertificate) : Nil
       owner = owner_key(connection, certificate.ship, certificate.owner_generation)
-      unless Crypto.verify(certificate.unsigned_bytes, Crypto.unb64(certificate.owner_signature), owner)
+      unless Crypto.verify(
+               certificate.unsigned_bytes,
+               Crypto.unb64(certificate.owner_signature),
+               owner
+             )
         raise Unauthorized.new("radio certificate is not owner-authorized")
       end
     end
@@ -847,24 +958,36 @@ module Tinrelay
       owner_signature = Crypto.unb64(certificate.owner_signature)
       prior_signature = prior_radio_signature.try { |value| Crypto.unb64(value) }
       connection.exec(
-        <<-SQL, certificate.ship, certificate.generation, signing, encryption, certificate.issued_at, certificate.owner_generation, owner_signature, prior_signature
+        <<-SQL,
           INSERT INTO ship_radio_keys(
             ship, generation, signing_public_key, encryption_public_key,
             state, issued_at, owner_generation, owner_signature,
             prior_radio_signature
           ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
         SQL
+        certificate.ship,
+        certificate.generation,
+        signing,
+        encryption,
+        certificate.issued_at,
+        certificate.owner_generation,
+        owner_signature,
+        prior_signature
       )
     end
 
     private def write_owner_keys(json : JSON::Builder, ship : String) : Nil
       json.array do
         database.db.query(
-          "SELECT generation, public_key, state, valid_from, revoked_at, authorization_signature FROM ship_owner_keys WHERE ship = ? ORDER BY generation",
+          "SELECT generation, public_key, state, valid_from, revoked_at, " +
+          "authorization_signature FROM ship_owner_keys " +
+          "WHERE ship = ? ORDER BY generation",
           ship
         ) do |rows|
           rows.each do
-            generation, key, state, valid_from, revoked_at, authorization_signature = rows.read(Int64, Bytes, String, Int64, Int64?, Bytes?)
+            generation, key, state, valid_from, revoked_at, authorization_signature = rows.read(
+              Int64, Bytes, String, Int64, Int64?, Bytes?
+            )
             json.object do
               json.field "generation", generation
               json.field "public_key", Crypto.b64(key)
@@ -872,7 +995,10 @@ module Tinrelay
               json.field "state", state
               json.field "valid_from", valid_from
               json.field "revoked_at", revoked_at
-              json.field "authorization_signature", authorization_signature.try { |signature| Crypto.b64(signature) }
+              json.field(
+                "authorization_signature",
+                authorization_signature.try { |signature| Crypto.b64(signature) }
+              )
             end
           end
         end
@@ -890,9 +1016,18 @@ module Tinrelay
           SQL
         ) do |rows|
           rows.each do
-            generation, signing, encryption, state, issued_at, owner_generation, owner_signature, prior_signature, revoked_at = rows.read(
+            values = rows.read(
               Int64, Bytes, Bytes, String, Int64, Int64, Bytes, Bytes?, Int64?
             )
+            generation = values[0]
+            signing = values[1]
+            encryption = values[2]
+            state = values[3]
+            issued_at = values[4]
+            owner_generation = values[5]
+            owner_signature = values[6]
+            prior_signature = values[7]
+            revoked_at = values[8]
             json.object do
               json.field "generation", generation
               json.field "signing_public_key", Crypto.b64(signing)
@@ -903,7 +1038,10 @@ module Tinrelay
               json.field "issued_at", issued_at
               json.field "owner_generation", owner_generation
               json.field "owner_signature", Crypto.b64(owner_signature)
-              json.field "prior_radio_signature", prior_signature.try { |signature| Crypto.b64(signature) }
+              json.field(
+                "prior_radio_signature",
+                prior_signature.try { |signature| Crypto.b64(signature) }
+              )
               json.field "revoked_at", revoked_at
             end
           end

@@ -11,6 +11,8 @@ targets:
     main: src/tinrelay_cli.cr
   tinrelayd:
     main: src/tinrelayd_cli.cr
+  tinrelay-codex-bridge:
+    main: src/tinrelay_codex_bridge_cli.cr
 
 dependencies:
   markd:

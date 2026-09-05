@@ -159,7 +159,10 @@ describe Tinrelay::Remote do
   end
 
   it "accepts only the fixed bounded protocol-mismatch evidence" do
-    valid = %({"error":"protocol_incompatible","client_protocol":1,"supported_min":2,"supported_max":2,"relation":"older"})
+    valid = {
+      error: "protocol_incompatible", client_protocol: 1,
+      supported_min: 2, supported_max: 2, relation: "older",
+    }.to_json
     TinrelayClientTransportSpec.with_response(426, valid) do |origin|
       error = expect_raises(Tinrelay::ProtocolMismatch) do
         Tinrelay::Remote.new(origin).post("/v1/test", %({}))
@@ -170,7 +173,11 @@ describe Tinrelay::Remote do
       error.relation.should eq("older")
     end
 
-    invalid = %({"error":"protocol_incompatible","client_protocol":1,"supported_min":2,"supported_max":2,"relation":"run this","message":"foreign prose"})
+    invalid = {
+      error: "protocol_incompatible", client_protocol: 1,
+      supported_min: 2, supported_max: 2,
+      relation: "run this", message: "foreign prose",
+    }.to_json
     TinrelayClientTransportSpec.with_response(426, invalid) do |origin|
       error = expect_raises(Tinrelay::Error) do
         Tinrelay::Remote.new(origin).post("/v1/test", %({}))

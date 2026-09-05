@@ -55,7 +55,8 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       alpha_spool.routed(event.local_id)
 
       # The sender sees only generic acceptance after internal payload erasure.
-      JSON.parse(beta.remote.post("/v1/transmissions", first.to_json))["state"].as_s.should eq("accepted")
+      response = beta.remote.post("/v1/transmissions", first.to_json)
+      JSON.parse(response)["state"].as_s.should eq("accepted")
 
       unresolved = beta.send("alerts@alpha", "Disk pressure")
       unresolved_event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
@@ -110,7 +111,8 @@ describe "the complete Tinrelay ship-to-ship vertical" do
     end
   end
 
-  it "enforces expiry, relationship visibility, blind invalid-destination handling, tamper checks, and freeze" do
+  it "enforces expiry, relationship visibility, blind invalid-destination handling, " +
+     "tamper checks, and freeze" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "failure case passphrase"
       alpha = Tinrelay::Client.join(
@@ -159,7 +161,12 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       end
 
       api.store.cleanup(valid.expires_at + 1)
-      api.database.db.query_one?("SELECT id FROM transmissions WHERE id = ?", valid.transmission_id, as: String).should be_nil
+      stored = api.database.db.query_one?(
+        "SELECT id FROM transmissions WHERE id = ?",
+        valid.transmission_id,
+        as: String
+      )
+      stored.should be_nil
     end
   end
 end

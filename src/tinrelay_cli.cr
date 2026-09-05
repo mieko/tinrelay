@@ -33,7 +33,8 @@ module Tinrelay
         puts({state: "claimed", ship: ship, radio_keyring: keyring_path,
               owner_key: joined.keyring.owner_path}.to_json)
       when "who"
-        target_ship = argv.shift? || raise Invalid.new("who requires a ship name or local@ship coordinate")
+        target_ship = argv.shift? ||
+                      raise Invalid.new("who requires a ship name or local@ship coordinate")
         no_extra!(argv)
         puts client(keyring_path, owner_path, ship, passphrase_file).who(target_ship)
       when "hail"
@@ -65,7 +66,9 @@ module Tinrelay
         puts({state: "rotated", owner_generation: generation}.to_json)
       when "ship"
         operation = argv.shift? || raise Invalid.new("ship requires freeze, activate, or revoke")
-        raise Invalid.new("invalid ship operation") unless operation.in?({"freeze", "activate", "revoke"})
+        unless operation.in?({"freeze", "activate", "revoke"})
+          raise Invalid.new("invalid ship operation")
+        end
         no_extra!(argv)
         client(keyring_path, owner_path, ship, passphrase_file).ship_change(operation)
         puts({state: operation}.to_json)
@@ -98,14 +101,14 @@ module Tinrelay
         client_protocol: PROTOCOL, build_label: BUILD_LABEL,
         server_supported_min: ex.supported_min,
         server_supported_max: ex.supported_max, relation: ex.relation,
-        message: "This source-built Tinrelay client is incompatible with the service. Inspect the retained checkout, the actual error, tests, local configuration, safe logs, and relevant upstream changes; explain and test any proposed repair before adoption.",
+        message: "This source-built Tinrelay client is incompatible with the service. " +
+                 "Inspect the retained checkout, the actual error, tests, local configuration, " +
+                 "safe logs, and relevant upstream changes; explain and test any proposed " +
+                 "repair before adoption.",
       }.to_json)
       exit 2
     rescue ex : TransportUnavailable
-      STDERR.puts({
-        error: "transport_unavailable", retryable: true,
-        message: ex.message,
-      }.to_json)
+      report_transport_unavailable(ex)
       exit 2
     rescue ex : Error
       STDERR.puts({error: ex.class.name.split("::").last.underscore, message: ex.message}.to_json)
@@ -116,12 +119,36 @@ module Tinrelay
     end
 
     private def self.radio(argv, ship, paths, keyring_path, owner_path, passphrase_file) : Nil
-      operation = argv.shift? || raise Invalid.new("radio requires wait, poll, status, or routed")
+      operation = argv.shift? ||
+                  raise Invalid.new("radio requires collect, wait, poll, status, or routed")
       case operation
-      when "wait"
+      when "collect"
         spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
-        puts client(keyring_path, owner_path, ship, passphrase_file).radio_wait(spool).to_json
+        receiver = client(keyring_path, owner_path, ship, passphrase_file)
+        retry_delay = 1
+        loop do
+          begin
+            event = receiver.radio_collect(spool)
+            retry_delay = 1
+            puts({state: "collected", local_id: event.local_id, kind: event.kind}.to_json)
+            STDOUT.flush
+          rescue ex : TransportUnavailable
+            report_transport_unavailable(ex)
+            sleep retry_delay.seconds
+            retry_delay = Math.min(retry_delay * 2, 30)
+          end
+        end
+      when "wait"
+        local = !!argv.delete("--local")
+        spool = Spool.new(extract(argv, "--spool") || paths.spool)
+        no_extra!(argv)
+        event = if local
+                  LocalRadio.wait(ship, spool)
+                else
+                  client(keyring_path, owner_path, ship, passphrase_file).radio_wait(spool)
+                end
+        puts event.to_json
       when "poll"
         spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
@@ -139,7 +166,7 @@ module Tinrelay
         no_extra!(argv)
         puts spool.status(id).to_json
       else
-        raise Invalid.new("radio requires wait, poll, status, or routed")
+        raise Invalid.new("radio requires collect, wait, poll, status, or routed")
       end
     end
 
@@ -199,12 +226,23 @@ module Tinrelay
       Client.new(Keyring.load(path, phrase, owner_path), phrase)
     end
 
+    private def self.report_transport_unavailable(ex : TransportUnavailable) : Nil
+      STDERR.puts({
+        error: "transport_unavailable", retryable: true,
+        message: ex.message,
+      }.to_json)
+      STDERR.flush
+    end
+
     private def self.passphrase(paths : LocalPaths, path : String?) : String
       return PrivateInput.read(path, "passphrase") if path
       default_path = paths.passphrase
       return PrivateInput.read(default_path, "passphrase") if File.file?(default_path)
       unless STDIN.tty?
-        raise Invalid.new("passphrase file not found at #{default_path}; create that owner-only file or use --passphrase-file PATH (no interactive terminal is available)")
+        raise Invalid.new(
+          "passphrase file not found at #{default_path}; create that owner-only file or use " +
+          "--passphrase-file PATH (no interactive terminal is available)"
+        )
       end
       STDERR.print "Tinrelay passphrase: "
       value = STDIN.noecho &.gets

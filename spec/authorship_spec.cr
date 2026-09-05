@@ -146,9 +146,15 @@ describe "protocol-1 ship authorship" do
       )
 
       {
-        "transmission id" => ->(inner : Tinrelay::SignedTransmission) { inner.transmission_id = Tinrelay::Ids.uuid },
-        "recipient"       => ->(inner : Tinrelay::SignedTransmission) { inner.recipient_ship = "other" },
-        "generation"      => ->(inner : Tinrelay::SignedTransmission) { inner.recipient_encryption_generation += 1 },
+        "transmission id" => ->(inner : Tinrelay::SignedTransmission) do
+          inner.transmission_id = Tinrelay::Ids.uuid
+        end,
+        "recipient" => ->(inner : Tinrelay::SignedTransmission) do
+          inner.recipient_ship = "other"
+        end,
+        "generation" => ->(inner : Tinrelay::SignedTransmission) do
+          inner.recipient_encryption_generation += 1
+        end,
       }.each do |label, mutate|
         envelope = TinrelayAuthorshipSpec.capture(beta, origin, "mismatch #{label}")
         inner = TinrelayAuthorshipSpec.open(envelope, alpha)

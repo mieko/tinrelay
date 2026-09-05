@@ -43,7 +43,11 @@ module Tinrelay
 
     def initialize(@transmission_id, @sender_ship, detail : String? = nil)
       suffix = detail ? ": #{detail}" : ""
-      super("relay acceptance is unknown for transmission #{transmission_id}; exact encrypted envelope retained; retry with: tinrelay outbox retry #{transmission_id} --ship #{sender_ship}#{suffix}")
+      super(
+        "relay acceptance is unknown for transmission #{transmission_id}; " +
+        "exact encrypted envelope retained; retry with: " +
+        "tinrelay outbox retry #{transmission_id} --ship #{sender_ship}#{suffix}"
+      )
     end
   end
 
@@ -53,7 +57,10 @@ module Tinrelay
 
     def initialize(@sender_ship, @recipient_ship, detail : String? = nil)
       suffix = detail ? ": #{detail}" : ""
-      super("relay acceptance is unknown for hail#{suffix}; run again with: tinrelay hail #{recipient_ship} --ship #{sender_ship}")
+      super(
+        "relay acceptance is unknown for hail#{suffix}; run again with: " +
+        "tinrelay hail #{recipient_ship} --ship #{sender_ship}"
+      )
     end
   end
 
@@ -64,7 +71,10 @@ module Tinrelay
     getter relation : String
 
     def initialize(@client_protocol, @supported_min, @supported_max, @relation)
-      super("client protocol #{client_protocol} is #{relation} than supported range #{supported_min}..#{supported_max}")
+      super(
+        "client protocol #{client_protocol} is #{relation} than supported range " +
+        "#{supported_min}..#{supported_max}"
+      )
     end
   end
 end

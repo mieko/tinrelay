@@ -94,7 +94,7 @@ limits are the service's abuse boundary.
 - `GET /healthz` proves the process answers.
 - `GET /readyz` proves SQLite is queryable.
 - SIGTERM and SIGINT close the listener and database cleanly.
-- Cleanup runs every 60 seconds; `tinrelayd cleanup --database PATH` is the
+- Cleanup runs every 60 seconds; `tinrelayd cleanup --database "$DATABASE_PATH"` is the
   idempotent manual equivalent.
 
 Logs are newline JSON containing request ID, method, normalized public path, HTTP
@@ -109,8 +109,8 @@ writes a transmission payload row. A stopped radio loses only its in-memory park
 wait. Valid destinations still receive bounded SQLite store-and-forward.
 
 Maintenance is a separate fixed public/client condition, not a radio event or
-relay-authored transmission. Until that surface is deployed, ordinary edge failure
-and client reconnect behavior remain the honest boundary.
+relay-authored transmission. An edge that does not provide that bounded response
+is ordinary unavailability, and clients use their normal reconnect behavior.
 
 ## Backup and restore
 
@@ -121,7 +121,7 @@ established encryption tool selected by the operator. For example, with `age`:
 umask 077
 sqlite3 /var/lib/tinrelay/tinrelay.db \
   ".backup '/protected-staging/tinrelay.db'"
-age -r AGE_RECIPIENT -o /secure-offhost/tinrelay-$(date +%F).db.age \
+age -r "$AGE_RECIPIENT" -o /secure-offhost/tinrelay-$(date +%F).db.age \
   /protected-staging/tinrelay.db
 rm /protected-staging/tinrelay.db
 ```
@@ -134,7 +134,7 @@ A backup is not proven until a separate restore drill decrypts a copy and checks
 it:
 
 ```sh
-age -d -o /protected-restore/tinrelay.db BACKUP.db.age
+age -d -o /protected-restore/tinrelay.db "$BACKUP"
 sqlite3 /protected-restore/tinrelay.db 'PRAGMA integrity_check;'
 sqlite3 /protected-restore/tinrelay.db \
   'SELECT version, applied_at FROM schema_migrations ORDER BY version;'

@@ -182,8 +182,15 @@ describe "trust and recovery transitions" do
                 json.field "generation", substituted.generation
                 json.field "signing_public_key", substituted.signing_public_key
                 json.field "encryption_public_key", substituted.encryption_public_key
-                json.field "signing_fingerprint", Tinrelay::Crypto.fingerprint(Tinrelay::Crypto.unb64(substituted.signing_public_key))
-                json.field "encryption_fingerprint", Tinrelay::Crypto.fingerprint(Tinrelay::Crypto.unb64(substituted.encryption_public_key))
+                signing_key = Tinrelay::Crypto.unb64(substituted.signing_public_key)
+                encryption_key = Tinrelay::Crypto.unb64(
+                  substituted.encryption_public_key
+                )
+                json.field "signing_fingerprint", Tinrelay::Crypto.fingerprint(signing_key)
+                json.field(
+                  "encryption_fingerprint",
+                  Tinrelay::Crypto.fingerprint(encryption_key)
+                )
                 json.field "state", "active"
                 json.field "issued_at", substituted.issued_at
                 json.field "owner_generation", 1

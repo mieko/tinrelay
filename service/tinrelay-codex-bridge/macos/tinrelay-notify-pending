@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 1 ] || exit 64
+radio_room_name=$1
+
+directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+icon="$directory/tinrelay.icns"
+
+if [ -f "$icon" ]; then
+  set -- "$radio_room_name" "$icon"
+else
+  set -- "$radio_room_name"
+fi
+
+choice=$(/usr/bin/osascript - "$@" <<'APPLESCRIPT'
+on run arguments
+  set roomName to item 1 of arguments
+  set dialogMessage to "Tinrelay has received a transmission, but cannot deliver " & ¬
+    "it until the task named “" & roomName & "” has been activated by " & ¬
+    "selecting it inside the ChatGPT application." & return & return & ¬
+    "After you select the task, delivery may take up to a minute while " & ¬
+    "ChatGPT activates it and the radio room passes the transmission along."
+  if (count of arguments) > 1 then
+    set iconFile to POSIX file (item 2 of arguments) as alias
+    set answer to display dialog dialogMessage with title "Tinrelay" ¬
+      buttons {"Not Today", "I'll Open It"} default button "I'll Open It" ¬
+      with icon iconFile
+  else
+    set answer to display dialog dialogMessage with title "Tinrelay" ¬
+      buttons {"Not Today", "I'll Open It"} default button "I'll Open It"
+  end if
+  return button returned of answer
+end run
+APPLESCRIPT
+)
+
+case "$choice" in
+  "I'll Open It") exit 0 ;;
+  'Not Today') exit 75 ;;
+  *) exit 70 ;;
+esac
