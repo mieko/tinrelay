@@ -47,7 +47,6 @@ describe "the canonical bootstrap representations" do
         %(<link rel="stylesheet" ) +
         %(href="/tinrelay-art/identity/wordmark.07d6c616afc0.css">)
       )
-      browser.body.should contain(%(<span>Tin Relay</span>))
       browser.headers["Link"].should contain("/index.md")
       browser.headers["X-Robots-Tag"]?.should be_nil
 
@@ -284,7 +283,6 @@ describe "the canonical bootstrap representations" do
           )
           markdown.status_code.should eq(200)
           markdown.body.should_not match(/\{\{[A-Z_]+\}\}/)
-          markdown.body.should_not contain("{{TURN_BOUNDARY}}")
           markdown.headers["X-Robots-Tag"].should contain("noindex")
         end
       end

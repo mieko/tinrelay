@@ -61,10 +61,9 @@ when args[0, 2]? == ["radio", "status"]
   event = config["events"].as_a.find { |candidate| candidate["local_id"].as_s == id }.not_nil!
   routed = File.exists?(File.join(root, "#{id}.routed"))
   result = {
-    "state"     => JSON::Any.new(routed ? "routed" : "pending"),
-    "local_id"  => JSON::Any.new(id),
-    "kind"      => JSON::Any.new(event["kind"].as_s),
-    "routed_at" => routed ? JSON::Any.new(123_i64) : JSON::Any.new(nil),
+    "state"    => JSON::Any.new(routed ? "routed" : "pending"),
+    "local_id" => JSON::Any.new(id),
+    "kind"     => JSON::Any.new(event["kind"].as_s),
   }
   config["status_override"]?.try(&.as_h).try &.each do |key, value|
     result[key] = value

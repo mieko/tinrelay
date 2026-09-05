@@ -20,6 +20,7 @@ Correspondence:
   tinrelay send LOCAL@REMOTE_SHIP|@REMOTE_SHIP [--as LOCAL] --body-file - --ship SHIP
   tinrelay inbox list --ship SHIP
   tinrelay inbox show ID --ship SHIP
+  tinrelay inbox migrate --ship SHIP
   tinrelay outbox list --ship SHIP
   tinrelay outbox retry TRANSMISSION --ship SHIP
 
@@ -87,9 +88,9 @@ another attempt. Like `radio collect` and non-local `radio wait`, it owns the
 ship's relay receiver lock when contacting the repeater. `radio wait --local` is
 spool-only and does not take that receiver lock.
 `radio status LOCAL_ID` reads only that local record and reports `pending` or
-`routed`. It does not contact the repeater, reveal a body, scan history, create
-spool directories, change permissions, or mutate evidence. Missing and corrupt
-records fail explicitly.
+`routed`. It does not contact the repeater, reveal a body, scan unrelated
+records, create spool directories, change permissions, or mutate evidence.
+Missing and corrupt records fail explicitly.
 After routing the pointer locally, confirm it with `radio routed LOCAL_ID`.
 If the repeater connection, DNS lookup, or network timeout fails, the CLI exits 2
 with `{"error":"transport_unavailable","retryable":true,"message":"relay transport is unavailable"}`.

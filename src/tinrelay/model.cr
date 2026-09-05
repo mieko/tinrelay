@@ -454,11 +454,11 @@ module Tinrelay
     getter kind : String
     getter local_id : String
     getter received_at : Int64
-    property routed_at : Int64?
 
-    protected def initialize(@kind, @local_id, @received_at,
-                             @routed_at = nil,
-                             @format = 1)
+    @[JSON::Field(ignore: true)]
+    property routed : Bool = false
+
+    protected def initialize(@kind, @local_id, @received_at, @format = 1)
     end
   end
 
@@ -479,9 +479,8 @@ module Tinrelay
                    @signed_transmission : SignedTransmission,
                    @sender_radio_certificate : ShipRadioCertificate,
                    @sender_owner_chain : Array(OwnerKeyLink),
-                   routed_at : Int64? = nil,
                    format : Int32 = 1)
-      super("transmission", local_id, received_at, routed_at, format)
+      super("transmission", local_id, received_at, format)
     end
   end
 
@@ -491,9 +490,8 @@ module Tinrelay
 
     def initialize(local_id : String, received_at : Int64,
                    @relay_transmission_id : String, @rejection_reason : String,
-                   routed_at : Int64? = nil,
                    format : Int32 = 1)
-      super("rejected_transmission", local_id, received_at, routed_at, format)
+      super("rejected_transmission", local_id, received_at, format)
     end
   end
 
@@ -508,9 +506,8 @@ module Tinrelay
                    @sender_owner_chain : Array(OwnerKeyLink),
                    @sender_radio_certificate : ShipRadioCertificate,
                    @hail_contact_state : String,
-                   routed_at : Int64? = nil,
                    format : Int32 = 1)
-      super("hail", local_id, received_at, routed_at, format)
+      super("hail", local_id, received_at, format)
     end
 
     def hail_id : String

@@ -124,7 +124,7 @@ describe "immediate radio polling" do
 
       second.local_id.should_not eq(first.local_id)
       spool.next_unrouted.not_nil!.local_id.should eq(first.local_id)
-      spool.list.count(&.routed_at.nil?).should eq(2)
+      spool.list.count { |record| !record.routed }.should eq(2)
     end
   end
 

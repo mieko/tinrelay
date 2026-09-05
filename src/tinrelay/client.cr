@@ -289,7 +289,7 @@ module Tinrelay
       if hail = response.hail
         record = receive_hail(hail, spool)
         record ? acknowledge_local_record(record) : acknowledge_hail(hail.hail.hail_id)
-        return unless record && !record.routed_at
+        return unless record && !record.routed
         return LocalRadio.event(keyring.data.ship, record)
       end
       if envelope = response.envelope
@@ -301,7 +301,7 @@ module Tinrelay
           spool.store_rejection(envelope, "unusable_envelope")
         end
         record ? acknowledge_local_record(record) : acknowledge(envelope.transmission_id)
-        return unless record && !record.routed_at
+        return unless record && !record.routed
         return LocalRadio.event(keyring.data.ship, record)
       end
     end

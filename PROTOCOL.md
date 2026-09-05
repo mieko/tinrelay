@@ -33,13 +33,13 @@ repeater returns sender acceptance without writing a transmission row or tombsto
 Without a waiter, or after an unacknowledged live offer, it writes one ciphertext
 copy to durable fallback. Collection then erases ciphertext and signature and
 retains a bounded non-content cleanup tombstone. The
-local append-only file is the only canonical received body copy. It also retains
+local immutable file is the only canonical received body copy. It also retains
 the complete signed plaintext object and public owner/radio evidence needed to
 verify authorship after relay erasure and receive-key retirement. The signed record
-bytes are immutable: routing moves the same file from the small pending directory
-to history, while routing records one separate one-write marker file.
-Normal radio waiting reads only pending records, so a
-damaged old history record cannot stop new pointers.
+bytes are immutable: routing atomically moves the same file from the small pending
+directory to the routed directory. Directory placement is the complete local
+routing state. Normal radio waiting reads only pending records, so a damaged old
+routed record cannot stop new pointers.
 
 ## Ships, labels, and authority
 
@@ -209,16 +209,22 @@ the oldest locally unrouted record. Each private spool file has one strict `kind
 discriminator and exactly one visible evidence shape: signed transmission, rejected
 transmission, or content-free hail. Fields from another kind are a
 corrupt record, not ignored nullable data. The radio task forwards the wrapper verbatim and
-uses its bootstrap-owned exact-name/`*` mapping and marks that ID routed only after
-native pointer delivery reports success. A crash after durable spooling but before
+uses its bootstrap-owned exact-name/`*` mapping and moves that ID to the routed
+directory only after native pointer delivery reports success. A crash after durable spooling but before
 relay cleanup leaves the local pointer available; the bounded relay copy may be
-deduplicated and acknowledged later. A crash after native delivery but before the local routed mark may
-repeat the same pointer. The routed mark is the local completion boundary; any later
-handling or reading belongs above Tinrelay. Process death naturally removes parked-wait
-availability.
+deduplicated and acknowledged later. A crash after native delivery but before the
+local move may repeat the same pointer. The routed directory is the local completion
+boundary; any later handling or reading belongs above Tinrelay. Process death
+naturally removes parked-wait availability.
+
+The first live local spool used immutable `history/*.json` records plus Int64
+routed-marker files. `tinrelay inbox migrate --ship "$SHIP"` moves that state once
+into the `pending/*.json` and `routed/*.json` layout while the collector and bridge
+are stopped. Ordinary spool operations reject the legacy layout and never migrate
+it implicitly.
 
 `tinrelay radio status "$LOCAL_ID" --ship "$SHIP"` is outside the wire protocol. It
-reads and verifies only that exact local spool record and its routed marker,
+reads and verifies only that exact local spool record in pending or routed,
 reports `pending` or `routed`, and neither contacts the repeater nor mutates the
 spool. Missing and corrupt local evidence are explicit failures.
 
@@ -251,9 +257,8 @@ Enforced defaults:
 - content-free fallback tombstones only through the signed envelope's expiry;
 - local encrypted outbox retention only while acceptance is unknown, never beyond
   the envelope's 96-hour expiry;
-- append-only private plaintext history; routed markers never delete its
-  signed transmission or public verification evidence, and never rewrite its record
-  bytes.
+- immutable private plaintext records retained after routing; routing atomically
+  moves a record from pending to routed and never rewrites its bytes.
 
 ## Edge maintenance
 

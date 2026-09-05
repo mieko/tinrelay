@@ -59,7 +59,7 @@ module Tinrelay
       when "radio"
         radio(argv, ship, paths, keyring_path, owner_path, passphrase_file)
       when "inbox"
-        inbox(argv, paths)
+        inbox(argv, paths, ship)
       when "owner-rotate"
         no_extra!(argv)
         generation = client(keyring_path, owner_path, ship, passphrase_file).rotate_owner
@@ -159,7 +159,7 @@ module Tinrelay
         spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
         record = spool.routed(id)
-        puts({state: "routed", id: record.local_id, routed_at: record.routed_at}.to_json)
+        puts({state: "routed", id: record.local_id}.to_json)
       when "status"
         id = argv.shift? || raise Invalid.new("radio status requires a local transmission id")
         spool = Spool.open_existing(extract(argv, "--spool") || paths.spool)
@@ -170,12 +170,13 @@ module Tinrelay
       end
     end
 
-    private def self.inbox(argv, paths) : Nil
-      operation = argv.shift? || raise Invalid.new("inbox requires list or show")
-      spool = Spool.new(extract(argv, "--spool") || paths.spool)
+    private def self.inbox(argv, paths, ship) : Nil
+      operation = argv.shift? || raise Invalid.new("inbox requires list, show, or migrate")
+      spool_path = extract(argv, "--spool") || paths.spool
       case operation
       when "list"
         no_extra!(argv)
+        spool = Spool.new(spool_path)
         spool.list.each do |record|
           source = case record
                    when TransmissionSpoolRecord
@@ -186,14 +187,20 @@ module Tinrelay
                      {sender_ship: nil, attention_label: nil}
                    end
           puts({id: record.local_id, kind: record.kind,
-                received_at: record.received_at, routed_at: record.routed_at}.merge(source).to_json)
+                received_at: record.received_at,
+                state: record.routed ? "routed" : "pending"}.merge(source).to_json)
         end
       when "show"
         id = argv.shift? || raise Invalid.new("inbox show requires a local transmission id")
         no_extra!(argv)
+        spool = Spool.new(spool_path)
         puts spool.inspection(id)
+      when "migrate"
+        no_extra!(argv)
+        changed = LegacySpoolMigration.run(spool_path)
+        puts({state: changed ? "migrated" : "current", ship: ship}.to_json)
       else
-        raise Invalid.new("inbox requires list or show")
+        raise Invalid.new("inbox requires list, show, or migrate")
       end
     end
 

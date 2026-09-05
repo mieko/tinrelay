@@ -102,7 +102,7 @@ describe "the complete Tinrelay ship-to-ship vertical" do
       replayed = alpha.radio_wait(spool, hold_seconds: 0)
       replayed.local_id.should eq(before_crash.local_id)
       routed = spool.routed(recovered.local_id)
-      routed.routed_at.should_not be_nil
+      routed.routed.should be_true
       spool.next_unrouted.should be_nil
       spool.list.count do |item|
         item.is_a?(Tinrelay::TransmissionSpoolRecord) &&

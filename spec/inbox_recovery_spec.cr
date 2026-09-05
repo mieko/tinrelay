@@ -79,31 +79,6 @@ module TinrelayInboxSpec
 end
 
 describe "inbox recovery transitions" do
-  it "treats a durable routed marker as authoritative after a crash before the pending move" do
-    root = TinrelaySpec.temporary_root
-    spool = Tinrelay::Spool.new(File.join(root, "inbox"))
-    record = Tinrelay::RejectedTransmissionSpoolRecord.new(
-      local_id: "tr_0123456789abcdef0123456789abcdef",
-      received_at: 10_i64,
-      relay_transmission_id: "11111111-1111-4111-8111-111111111111",
-      rejection_reason: "unusable_envelope"
-    )
-    Tinrelay::AtomicPrivateFile.write(
-      File.join(spool.pending, "#{record.local_id}.json"),
-      record.to_pretty_json + "\n"
-    )
-    routed = File.join(spool.root, "routed")
-    Tinrelay::AtomicPrivateFile.write(File.join(routed, record.local_id), "20\n")
-
-    restarted = Tinrelay::Spool.new(spool.root)
-    restarted.next_unrouted.should be_nil
-    restarted.get(record.local_id).routed_at.should eq(20_i64)
-    File.file?(File.join(restarted.history, "#{record.local_id}.json")).should be_true
-    File.exists?(File.join(restarted.pending, "#{record.local_id}.json")).should be_false
-  ensure
-    FileUtils.rm_r(root) if root && Dir.exists?(root)
-  end
-
   it "turns changed signed words under a directly delivered ID " +
      "into content-free conflict evidence" do
     TinrelaySpec.with_server do |root, origin, api|
@@ -173,7 +148,7 @@ describe "inbox recovery transitions" do
     end
   end
 
-  it "keeps signed record bytes immutable and surfaces new pending work past corrupt old history" do
+  it "keeps signed record bytes immutable and surfaces pending work past corrupt routed evidence" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "immutable local history passphrase"
       alpha = Tinrelay::Client.join(
@@ -184,7 +159,7 @@ describe "inbox recovery transitions" do
       )
       capture = InboxCaptureRemote.new(origin)
       composer = Tinrelay::Client.new(beta.keyring, passphrase, capture)
-      composer.send("steward@alpha", "old immutable history", "caller")
+      composer.send("steward@alpha", "old immutable evidence", "caller")
       composer.send("steward@alpha", "new pending work", "caller")
       receiver = Tinrelay::Client.new(
         alpha.keyring, passphrase,
@@ -198,7 +173,7 @@ describe "inbox recovery transitions" do
       spool.routed(old_event.local_id)
       routed_path = TinrelayInboxSpec.record_path(spool.root, old_event.local_id)
       File.read(routed_path).should eq(original_bytes)
-      File.write(routed_path, "corrupt old history")
+      File.write(routed_path, "corrupt routed evidence")
 
       new_event = receiver.radio_wait(spool, hold_seconds: 0)
       new_event.kind.should eq("transmission")

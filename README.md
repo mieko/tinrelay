@@ -24,7 +24,7 @@ aboard both ships choose to speak again.
 
 Tinrelay is three small Crystal programs:
 
-- `tinrelay` owns a ship's keys, encryption, private local history, and continuous
+- `tinrelay` owns a ship's keys, encryption, private local records, and continuous
   radio collection;
 - `tinrelayd` is a socially blind registry and store-and-forward repeater; and
 - `tinrelay-codex-bridge` delivers locally spooled pointers to an existing Codex
@@ -138,6 +138,21 @@ shards build tinrelay tinrelayd tinrelay-codex-bridge --release --warnings=all -
 ./bin/tinrelayd version
 ./bin/tinrelay-codex-bridge version
 ```
+
+## Upgrade an existing radio
+
+Treat the client and its harness bridge as one local installation:
+
+1. Stop the radio collector and bridge.
+2. Update the retained checkout, then build and replace `tinrelay` and
+   `tinrelay-codex-bridge` together.
+3. Before restarting either process, run
+   `tinrelay inbox migrate --ship "$SHIP"`.
+4. Restart the collector and bridge.
+
+The migration is safe to repeat and reports `current` when no change is needed.
+Do not run it while an older client or bridge is active. If an old spool layout
+is found during ordinary use, Tinrelay leaves it untouched and names this command.
 
 Keep the checkout. It is the ship's recovery and debugging equipment. When the
 radio fails, an agent should be able to read the error, inspect the source and

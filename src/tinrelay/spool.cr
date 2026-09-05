@@ -27,7 +27,7 @@ module Tinrelay
 
     getter root : String
     getter pending : String
-    getter history : String
+    getter routed : String
 
     def initialize(root)
       initialize(root, true)
@@ -35,9 +35,10 @@ module Tinrelay
 
     private def initialize(@root, create_directories : Bool)
       @pending = File.join(root, "pending")
-      @history = File.join(root, "history")
+      @routed = File.join(root, "routed")
+      LegacySpoolMigration.reject_if_present!(root)
       if create_directories
-        [root, pending, history, routed_markers].each do |directory|
+        [root, pending, routed].each do |directory|
           unless Dir.exists?(directory)
             Dir.mkdir_p(directory, mode: 0o700)
           end
@@ -143,11 +144,7 @@ module Tinrelay
     end
 
     def next_unrouted : SpoolRecord?
-      records = each_pending_record
-      records.each do |record|
-        reconcile_routed_pending!(record) if record.routed_at
-      end
-      records.reject(&.routed_at).min_by? do |record|
+      each_pending_record.min_by? do |record|
         path = File.join(pending, "#{record.local_id}.json")
         {record.received_at, File.info(path).modification_time, record.local_id}
       end
@@ -158,29 +155,30 @@ module Tinrelay
       find_record(id) || raise NotFound.new("inbox record not found")
     end
 
-    def status(id : String) : NamedTuple(state: String, local_id: String,
-      kind: String, routed_at: Int64?)
+    def status(id : String) : NamedTuple(state: String, local_id: String, kind: String)
       record = get(id)
       {
-        state:     record.routed_at ? "routed" : "pending",
-        local_id:  record.local_id,
-        kind:      record.kind,
-        routed_at: record.routed_at,
+        state:    record.routed ? "routed" : "pending",
+        local_id: record.local_id,
+        kind:     record.kind,
       }
     end
 
-    def routed(id : String, now : Int64 = Time.utc.to_unix) : SpoolRecord
-      record = get(id)
-      record.routed_at = mark_once(routed_markers, id, now)
+    def routed(id : String) : SpoolRecord
+      validate_id!(id)
       source = File.join(pending, "#{id}.json")
-      if File.file?(source)
-        destination = File.join(history, "#{id}.json")
-        if File.exists?(destination)
-          raise Conflict.new("inbox history already contains this local id")
+      destination = File.join(routed, "#{id}.json")
+      if File.file?(destination)
+        if File.file?(source)
+          move_record(source, destination, "inbox routed destination conflicts")
         end
-        File.rename(source, destination)
-        File.open(pending, "r", &.fsync)
-        File.open(history, "r", &.fsync)
+        return record_at(destination, id, routed)
+      end
+
+      record = get(id)
+      if File.file?(source)
+        move_record(source, destination, "inbox routed destination conflicts")
+        record.routed = true
       end
       record
     end
@@ -192,7 +190,7 @@ module Tinrelay
         kind:        record.kind,
         local_id:    record.local_id,
         received_at: record.received_at,
-        routed_at:   record.routed_at,
+        state:       record.routed ? "routed" : "pending",
       }
       case record
       when TransmissionSpoolRecord
@@ -247,7 +245,7 @@ module Tinrelay
     end
 
     private def each_record : Array(SpoolRecord)
-      each_record_in(pending) + each_record_in(history)
+      each_record_in(pending) + each_record_in(routed)
     end
 
     private def each_pending_record : Array(SpoolRecord)
@@ -260,7 +258,7 @@ module Tinrelay
         begin
           record = SpoolRecord.from_json(File.read(path))
           verify_record!(record)
-          hydrate_state!(record)
+          hydrate_state!(record, directory)
           records << record
         rescue ex : JSON::ParseException
           raise Error.new("inbox record is corrupt: #{File.basename(path)}")
@@ -270,54 +268,56 @@ module Tinrelay
     end
 
     private def find_record(id : String) : SpoolRecord?
-      [pending, history].each do |directory|
+      [pending, routed].each do |directory|
         path = File.join(directory, "#{id}.json")
         next unless File.file?(path)
-        record = SpoolRecord.from_json(File.read(path))
-        unless record.local_id == id
-          raise Error.new("inbox record id does not match requested id")
-        end
-        verify_record!(record)
-        hydrate_state!(record)
-        return record
+        return record_at(path, id, directory)
       end
       nil
     rescue ex : JSON::ParseException
       raise Error.new("inbox record is corrupt: #{id}.json")
     end
 
-    private def hydrate_state!(record : SpoolRecord) : Nil
-      record.routed_at = marker_time(routed_markers, record.local_id)
-    end
-
-    private def mark_once(directory : String, id : String, now : Int64) : Int64
-      if existing = marker_time(directory, id)
-        return existing
+    private def record_at(path : String, id : String, directory : String) : SpoolRecord
+      record = SpoolRecord.from_json(File.read(path))
+      unless record.local_id == id
+        raise Error.new("inbox record id does not match requested id")
       end
-      AtomicPrivateFile.write(File.join(directory, id), "#{now}\n")
-      now
+      verify_record!(record)
+      hydrate_state!(record, directory)
+      record
+    rescue ex : JSON::ParseException
+      raise Error.new("inbox record is corrupt: #{id}.json")
     end
 
-    private def marker_time(directory : String, id : String) : Int64?
-      path = File.join(directory, id)
-      return nil unless File.file?(path)
-      File.read(path).strip.to_i64? || raise Error.new("inbox marker is corrupt: #{id}")
+    private def hydrate_state!(record : SpoolRecord, directory : String) : Nil
+      record.routed = directory == routed
     end
 
-    private def routed_markers : String
-      File.join(root, "routed")
-    end
-
-    private def reconcile_routed_pending!(record : SpoolRecord) : Nil
-      source = File.join(pending, "#{record.local_id}.json")
-      return unless File.file?(source)
-      destination = File.join(history, "#{record.local_id}.json")
+    private def move_record(source : String, destination : String,
+                            conflict : String) : Nil
+      source_bytes = File.read(source)
       if File.exists?(destination)
-        raise Conflict.new("inbox history already contains this local id")
+        unless File.file?(destination) && File.read(destination) == source_bytes
+          raise Conflict.new(conflict)
+        end
+        delete_if_present(source, File.dirname(source))
+        return
       end
+
       File.rename(source, destination)
-      File.open(pending, "r", &.fsync)
-      File.open(history, "r", &.fsync)
+      File.open(File.dirname(source), "r", &.fsync)
+      File.open(File.dirname(destination), "r", &.fsync)
+    rescue ex : File::NotFoundError
+      unless File.file?(destination) && File.read(destination) == source_bytes
+        raise Error.new("inbox record disappeared while routing")
+      end
+    end
+
+    private def delete_if_present(path : String, directory : String) : Nil
+      File.delete(path)
+      File.open(directory, "r", &.fsync)
+    rescue File::NotFoundError
     end
 
     private def verify_record!(record : SpoolRecord) : Nil

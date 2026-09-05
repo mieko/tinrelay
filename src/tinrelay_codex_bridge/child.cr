@@ -87,10 +87,8 @@ module TinrelayCodexBridge
       raise Blocked.new("status_kind_mismatch") unless value.as_h["kind"].as_s == event.kind
       case value.as_h["state"].as_s
       when "routed"
-        value.as_h["routed_at"].as_i64
         true
       when "pending"
-        raise Blocked.new("invalid_pending_status") unless value.as_h["routed_at"].raw.nil?
         false
       else
         raise Blocked.new("invalid_radio_status")
