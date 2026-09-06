@@ -32,8 +32,22 @@ module Tinrelay
       end
     rescue Socket::Error | IO::TimeoutError
       raise TransportUnavailable.new
+    rescue error : IO::Error
+      raise TransportUnavailable.new if retryable_transport_error?(error)
+      raise error
     ensure
       client.try(&.close)
+    end
+
+    private def retryable_transport_error?(error : IO::Error) : Bool
+      case os_error = error.os_error
+      when Errno
+        os_error == Errno::ETIMEDOUT
+      when WinError
+        os_error == WinError::WSAETIMEDOUT
+      else
+        false
+      end
     end
 
     private def read_body(io : IO) : String

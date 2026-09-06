@@ -1,6 +1,12 @@
 require "./spec_helper"
 
 module TinrelayClientTransportSpec
+  class Remote < Tinrelay::Remote
+    def retryable_transport_error_for_spec?(error : IO::Error) : Bool
+      retryable_transport_error?(error)
+    end
+  end
+
   def self.with_response(status : Int32, body : String, &)
     server = HTTP::Server.new do |context|
       context.response.status_code = status
@@ -31,6 +37,16 @@ module TinrelayClientTransportSpec
 end
 
 describe Tinrelay::Remote do
+  it "classifies an OS socket timeout without classifying other IO failures" do
+    remote = TinrelayClientTransportSpec::Remote.new("https://relay.example")
+
+    timeout = IO::Error.from_os_error("read", Errno::ETIMEDOUT)
+    remote.retryable_transport_error_for_spec?(timeout).should be_true
+
+    framing = IO::Error.new("Invalid chunk size")
+    remote.retryable_transport_error_for_spec?(framing).should be_false
+  end
+
   it "classifies network transport failures for bounded caller retry" do
     server = TCPServer.new("127.0.0.1", 0)
     port = server.local_address.port

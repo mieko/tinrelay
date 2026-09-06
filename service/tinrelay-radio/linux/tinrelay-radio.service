@@ -6,7 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/tinrelay radio collect --ship SHIP
-Restart=no
+Restart=on-failure
+RestartSec=10s
 NoNewPrivileges=true
 PrivateTmp=true
 
