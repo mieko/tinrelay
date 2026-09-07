@@ -1,4 +1,12 @@
 module TinrelayCodexBridge
+  enum ClientMessageState
+    Absent
+    Provisional
+    Accepted
+  end
+
+  record ClientMessageMatch, state : ClientMessageState, turn_id : String? = nil
+
   # A sparse projection of the stock state. No task message/tool bodies are
   # retained. Enclosing replacement patches pass through the same projection.
   class Lifecycle
@@ -46,7 +54,13 @@ module TinrelayCodexBridge
       when "turns"
         "turn" if key.as_i?
       when "turn"
-        "leaf" if name == "turnId" || name == "status"
+        if name == "turnId" || name == "status"
+          "leaf"
+        elsif name == "params"
+          "turn_params"
+        end
+      when "turn_params"
+        "leaf" if name == "clientUserMessageId"
       when "history_container"
         name == "kind" ? "leaf" : name == "history" ? "history" : nil
       when "history"
@@ -110,17 +124,37 @@ module TinrelayCodexBridge
 
     def turn_status(id : String) : String?
       return if revision.nil?
-      history = @state.as_h["turnHistory"]?
-      turns = if history && history.as_h["kind"]?.try(&.as_s?) == "canonical"
-                history.as_h["history"]?.try do |value|
-                  value.as_h["entitiesByKey"]?.try(&.as_h.values)
-                end || [] of JSON::Any
-              else
-                @state.as_h["turns"]?.try(&.as_a) || [] of JSON::Any
-              end
       turns
         .find { |turn| turn.as_h["turnId"]?.try(&.as_s?) == id }
         .try { |turn| turn.as_h["status"]?.try(&.as_s?) }
+    end
+
+    def client_message_match(client_id : String) : ClientMessageMatch
+      return ClientMessageMatch.new(ClientMessageState::Absent) if revision.nil?
+      matches = turns.select do |turn|
+        params = turn.as_h["params"]?.try(&.as_h?)
+        params.try(&.["clientUserMessageId"]?).try(&.as_s?) == client_id
+      end
+      raise Blocked.new("duplicate_client_message_id") if matches.size > 1
+      turn = matches.first? || return ClientMessageMatch.new(ClientMessageState::Absent)
+      raw_id = turn.as_h["turnId"]?
+      if raw_id.nil? || raw_id.raw.nil?
+        return ClientMessageMatch.new(ClientMessageState::Provisional)
+      end
+      id = raw_id.as_s?
+      raise Blocked.new("invalid_client_message_turn_id") unless id && !id.empty?
+      ClientMessageMatch.new(ClientMessageState::Accepted, id)
+    end
+
+    private def turns : Array(JSON::Any)
+      history = @state.as_h["turnHistory"]?
+      if history && history.as_h["kind"]?.try(&.as_s?) == "canonical"
+        history.as_h["history"]?.try do |value|
+          value.as_h["entitiesByKey"]?.try(&.as_h.values)
+        end || [] of JSON::Any
+      else
+        @state.as_h["turns"]?.try(&.as_a) || [] of JSON::Any
+      end
     end
   end
 end

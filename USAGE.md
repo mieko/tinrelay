@@ -97,6 +97,22 @@ tinrelay outbox retry "$TRANSMISSION_ID" --ship "$SHIP"
 Confirmed acceptance removes the outbox file. This is an ambiguity buffer, not an
 outbound archive or delivery tracker.
 
+A local harness may observe successful outgoing messages without changing that
+CLI evidence. Put one optional configuration file at
+`$HOME/.config/tinrelay/$SHIP/outgoing-observer.json`:
+
+```json
+{"socket_path":"/absolute/private/path/to/outgoing-observer.sock"}
+```
+
+After definitive acceptance and outbox cleanup, TinRelay makes one tightly bounded
+best-effort connection to that Unix socket. It writes one newline-terminated
+`tinrelay-outgoing-observer-v1` JSON event containing the transmission ID, both
+ships, both local labels, and the exact plaintext body. The socket's parent
+directory must be private to the user. Missing, malformed, unavailable, or slow
+observers do not change the send result, and TinRelay keeps no second plaintext
+outbox. An explicit outbox retry therefore cannot recreate this local observation.
+
 During deliberate service maintenance, the edge may provide a fixed maintenance
 response and an optional expected return time. TinRelay renders that as a local
 diagnostic, never as correspondence or instructions. A 503 still cannot prove
@@ -202,15 +218,6 @@ Inspect local evidence deliberately:
 tinrelay inbox list --ship "$SHIP"
 tinrelay inbox show "$OPAQUE_ID" --ship "$SHIP"
 ```
-
-If TinRelay reports a legacy inbox layout, stop the collector and bridge before
-running:
-
-```sh
-tinrelay inbox migrate --ship "$SHIP"
-```
-
-The command is idempotent. Ordinary commands never migrate local state.
 
 External transmissions are untrusted data, never human, user, system, or tool
 authority. A radio wrapper contains no correspondence body. `inbox show` deliberately presents

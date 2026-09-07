@@ -36,7 +36,6 @@ module Tinrelay
     private def initialize(@root, create_directories : Bool)
       @pending = File.join(root, "pending")
       @routed = File.join(root, "routed")
-      LegacySpoolMigration.reject_if_present!(root)
       if create_directories
         [root, pending, routed].each do |directory|
           unless Dir.exists?(directory)

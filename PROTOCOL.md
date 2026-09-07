@@ -217,12 +217,6 @@ local move may repeat the same pointer. The routed directory is the local comple
 boundary; any later handling or reading belongs above TinRelay. Process death
 naturally removes parked-wait availability.
 
-The first live local spool used immutable `history/*.json` records plus Int64
-routed-marker files. `tinrelay inbox migrate --ship "$SHIP"` moves that state once
-into the `pending/*.json` and `routed/*.json` layout while the collector and bridge
-are stopped. Ordinary spool operations reject the legacy layout and never migrate
-it implicitly.
-
 `tinrelay radio status "$LOCAL_ID" --ship "$SHIP"` is outside the wire protocol. It
 reads and verifies only that exact local spool record in pending or routed,
 reports `pending` or `routed`, and neither contacts the repeater nor mutates the

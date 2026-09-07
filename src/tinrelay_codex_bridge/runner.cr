@@ -151,6 +151,55 @@ module TinrelayCodexBridge
       end
     end
 
+    private def reconcile_submission(event, client_user_message_id : String) : String?
+      started = Time.instant
+      next_reminder = started
+      @reporter.emit(
+        "waiting_for_submission_resolution",
+        "submission_outcome_unknown",
+        local_id: event.id
+      )
+      loop do
+        begin
+          ipc = connection
+          ipc.load_complete_history
+          match = ipc.lifecycle.client_message_match(client_user_message_id)
+          case match.state
+          when ClientMessageState::Accepted
+            turn_id = match.turn_id.not_nil!
+            @reporter.emit(
+              "accepted",
+              "accepted_after_reconnect",
+              local_id: event.id,
+              turn_id: turn_id
+            )
+            return turn_id
+          when ClientMessageState::Absent
+            @reporter.emit("submission_not_accepted", local_id: event.id)
+            return nil
+          when ClientMessageState::Provisional
+            @reporter.emit(
+              "waiting_for_submission_resolution",
+              "submission_provisional",
+              local_id: event.id
+            )
+          end
+        rescue ex : DeliveryUnavailable | Disconnected
+          disconnect
+          @reporter.emit("waiting_for_radio_room", ex.message, local_id: event.id)
+        end
+
+        now = Time.instant
+        if @notifier.configured? && now >= next_reminder
+          cooldown = @notifier.wait
+          seconds, reason = reminder_cooldown(cooldown)
+          @reporter.emit("radio_room_reminder_deferred", reason, local_id: event.id)
+          next_reminder = Time.instant + seconds.seconds
+        end
+        @control.pause(retry_seconds(Time.instant - started))
+      end
+    end
+
     private def retry_seconds(elapsed)
       seconds = elapsed.total_seconds
       return IMMEDIATE_RETRY_SECONDS if seconds < IMMEDIATE_RETRY_WINDOW
@@ -170,20 +219,32 @@ module TinrelayCodexBridge
         ipc = idle_connection
         return if @child.routed?(event)
         raise Blocked.new("recovery_exhausted") if attempts == 2
+        client_user_message_id = "tinrelay-turn:#{UUID.random}"
         begin
-          id = ipc.start(event)
+          id = ipc.start(event, client_user_message_id)
         rescue Busy
           # Refresh through idle_connection so a disconnect immediately after
           # the busy rejection follows the ordinary reconnect path.
           ipc.lifecycle.invalidate
           next
         rescue Disconnected
-          # No accepted turn ID: reacquire state and reconcile, but never guess
-          # which turn consumed the event or automatically submit it again.
-          @ipc = nil
-          idle_connection
+          # The per-attempt client message ID is persisted with an accepted
+          # user message. Complete history can therefore distinguish this
+          # exact attempt from one that never reached Codex without confusing
+          # it with an earlier recovery turn for the same TinRelay event or
+          # guessing from elapsed time.
+          disconnect
           return if @child.routed?(event)
-          raise Blocked.new("submission_outcome_unknown")
+          if recovered_id = reconcile_submission(event, client_user_message_id)
+            attempts += 1
+            @reporter.emit(
+              "waiting_for_routing",
+              local_id: event.id,
+              turn_id: recovered_id
+            )
+            observe(recovered_id)
+          end
+          next
         end
         attempts += 1
         @reporter.emit("accepted", local_id: event.id, turn_id: id)

@@ -166,15 +166,20 @@ module TinrelayCodexBridge
                   "mark routed only after native delivery is accepted, " +
                   "and finish this finite turn."
 
-    def operation(task : String, instruction : String = INSTRUCTION)
-      source_id = "tinrelay:#{id}"
+    def source_id
+      "tinrelay:#{id}"
+    end
+
+    def operation(task : String, client_user_message_id : String,
+                  instruction : String = INSTRUCTION)
+      attachment_id = source_id
       title = "TinRelay radio event"
       envelope = {
         version:                 1,
         modelContextAttachments: [
           {
             untrusted:        true,
-            id:               source_id,
+            id:               attachment_id,
             title:            title,
             text:             raw,
             imageAttachments: [] of String,
@@ -185,7 +190,7 @@ module TinrelayCodexBridge
       data = {
         kind:     "model_context",
         source:   "mcp_app",
-        sourceId: source_id,
+        sourceId: attachment_id,
         title:    title,
         text:     raw,
       }
@@ -193,8 +198,9 @@ module TinrelayCodexBridge
         conversationId: task,
         turnStart:      {
           request: {
-            threadId: task,
-            input:    [
+            threadId:            task,
+            clientUserMessageId: client_user_message_id,
+            input:               [
               {
                 type:          "text",
                 text:          instruction,

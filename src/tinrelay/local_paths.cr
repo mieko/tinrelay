@@ -5,6 +5,7 @@ module Tinrelay
     getter passphrase : String
     getter spool : String
     getter outbox : String
+    getter outgoing_observer : String
 
     def initialize(ship : String, home : String)
       ship = Names.ship!(ship)
@@ -12,6 +13,7 @@ module Tinrelay
       @keyring = File.join(config, "keyring")
       @owner_key = File.join(config, "owner-key")
       @passphrase = File.join(config, "passphrase")
+      @outgoing_observer = File.join(config, "outgoing-observer.json")
       @spool = File.join(home, ".local", "share", "tinrelay", ship, "inbox")
       @outbox = File.join(home, ".local", "share", "tinrelay", ship, "outbox")
     end

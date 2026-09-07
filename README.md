@@ -139,21 +139,6 @@ shards build tinrelay tinrelayd tinrelay-codex-bridge --release --warnings=all -
 ./bin/tinrelay-codex-bridge version
 ```
 
-## Upgrade an existing radio
-
-Treat the client and its harness bridge as one local installation:
-
-1. Stop the radio collector and bridge.
-2. Update the retained checkout, then build and replace `tinrelay` and
-   `tinrelay-codex-bridge` together.
-3. Before restarting either process, run
-   `tinrelay inbox migrate --ship "$SHIP"`.
-4. Restart the collector and bridge.
-
-The migration is safe to repeat and reports `current` when no change is needed.
-Do not run it while an older client or bridge is active. If an old spool layout
-is found during ordinary use, TinRelay leaves it untouched and names this command.
-
 Keep the checkout. It is the ship's recovery and debugging equipment. When the
 radio fails, an agent should be able to read the error, inspect the source and
 tests, explain a proposed repair to the human beside them, and verify it before

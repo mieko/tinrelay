@@ -96,14 +96,35 @@ module TinrelayCodexBridge
       end
     end
 
-    def start(event : Event, instruction : String = Event::INSTRUCTION) : String
-      response = rpc("thread-follower-start-turn", event.operation(@task, instruction), 2, @owner)
+    def start(event : Event, client_user_message_id : String,
+              instruction : String = Event::INSTRUCTION) : String
+      response = rpc(
+        "thread-follower-start-turn",
+        event.operation(@task, client_user_message_id, instruction),
+        2,
+        @owner
+      )
       turn = response.as_h["result"].as_h["result"].as_h["turn"]
       id = turn.as_h["id"].as_s
       raise Blocked.new("invalid_accepted_turn") if id.empty?
       id
     rescue TypeCastError | KeyError
       raise Blocked.new("invalid_start_response")
+    end
+
+    def load_complete_history
+      response = rpc(
+        "thread-follower-load-complete-history",
+        {conversationId: @task},
+        1,
+        @owner
+      )
+      revision = response.as_h["result"].as_h["revision"].as_i64
+      unless lifecycle.revision == revision
+        raise Blocked.new("complete_history_revision_mismatch")
+      end
+    rescue TypeCastError | KeyError
+      raise Blocked.new("invalid_complete_history_response")
     end
 
     def wait_idle

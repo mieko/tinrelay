@@ -147,7 +147,8 @@ module Tinrelay
 
     def send(recipient : String, body : String, from_label : String? = nil,
              expires_in : Int64 = FALLBACK_LIFETIME_SECONDS.to_i64,
-             outbox : Outbox? = nil) : SignedRelayEnvelope
+             outbox : Outbox? = nil,
+             observer : OutgoingObserver? = nil) : SignedRelayEnvelope
       reconcile_radio_if_pending!
       to_label, recipient_ship = Names.coordinate!(recipient)
       from_label.try { |label| Names.label!(label) }
@@ -192,6 +193,7 @@ module Tinrelay
         Crypto.sign(envelope.signing_bytes, Crypto.unb64(radio.signing.secret_key))
       )
       submit(envelope, outbox || Outbox.new("#{keyring.path}.outbox"))
+      observer.try(&.notify(transmission))
       envelope
     end
 

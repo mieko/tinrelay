@@ -51,7 +51,8 @@ module Tinrelay
         expires = (extract(argv, "--expires-in") || FALLBACK_LIFETIME_SECONDS.to_s).to_i64
         no_extra!(argv)
         envelope = client(keyring_path, owner_path, ship, passphrase_file).send(
-          recipient, body, from_label, expires_in: expires, outbox: outbox
+          recipient, body, from_label, expires_in: expires, outbox: outbox,
+          observer: OutgoingObserver.from_config(paths.outgoing_observer)
         )
         puts envelope.submission_evidence.to_json
       when "outbox"
@@ -59,7 +60,7 @@ module Tinrelay
       when "radio"
         radio(argv, ship, paths, keyring_path, owner_path, passphrase_file)
       when "inbox"
-        inbox(argv, paths, ship)
+        inbox(argv, paths)
       when "owner-rotate"
         no_extra!(argv)
         generation = client(keyring_path, owner_path, ship, passphrase_file).rotate_owner
@@ -170,8 +171,8 @@ module Tinrelay
       end
     end
 
-    private def self.inbox(argv, paths, ship) : Nil
-      operation = argv.shift? || raise Invalid.new("inbox requires list, show, or migrate")
+    private def self.inbox(argv, paths) : Nil
+      operation = argv.shift? || raise Invalid.new("inbox requires list or show")
       spool_path = extract(argv, "--spool") || paths.spool
       case operation
       when "list"
@@ -195,12 +196,8 @@ module Tinrelay
         no_extra!(argv)
         spool = Spool.new(spool_path)
         puts spool.inspection(id)
-      when "migrate"
-        no_extra!(argv)
-        changed = LegacySpoolMigration.run(spool_path)
-        puts({state: changed ? "migrated" : "current", ship: ship}.to_json)
       else
-        raise Invalid.new("inbox requires list, show, or migrate")
+        raise Invalid.new("inbox requires list or show")
       end
     end
 
