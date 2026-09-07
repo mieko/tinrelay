@@ -1,6 +1,7 @@
 require "io/console"
 
 require "./tinrelay/client_runtime"
+require "./tinrelay/body_input"
 require "./tinrelay/private_input"
 
 module Tinrelay
@@ -19,8 +20,6 @@ module Tinrelay
 
       ship = Names.ship!(selected_ship || raise Invalid.new("--ship SHIP is required"))
       paths = LocalPaths.new(ship, home)
-      keyring_path = extract(argv, "--keyring") || paths.keyring
-      owner_path = extract(argv, "--owner-key") || paths.owner_key
       passphrase_file = extract(argv, "--passphrase-file")
 
       case command
@@ -28,42 +27,45 @@ module Tinrelay
         server = required(argv, "--server")
         no_extra!(argv)
         joined = Client.join(
-          keyring_path, server, ship, passphrase(paths, passphrase_file), owner_path
+          paths.keyring, server, ship, passphrase(paths, passphrase_file), paths.owner_key
         )
-        puts({state: "claimed", ship: ship, radio_keyring: keyring_path,
+        puts({state: "claimed", ship: ship, radio_keyring: paths.keyring,
               owner_key: joined.keyring.owner_path}.to_json)
       when "who"
         target_ship = argv.shift? ||
                       raise Invalid.new("who requires a ship name or local@ship coordinate")
         no_extra!(argv)
-        puts client(keyring_path, owner_path, ship, passphrase_file).who(target_ship)
+        puts client(paths, passphrase_file).who(target_ship)
       when "hail"
         recipient_ship = argv.shift? || raise Invalid.new("hail requires a destination ship name")
         no_extra!(argv)
-        hail = client(keyring_path, owner_path, ship, passphrase_file)
-          .hail(recipient_ship)
+        hail = client(paths, passphrase_file).hail(recipient_ship)
         puts hail.submission_evidence.to_json
       when "send"
         recipient = argv.shift? || raise Invalid.new("send requires local@ship")
         from_label = extract(argv, "--as")
-        outbox = Outbox.new(extract(argv, "--outbox") || paths.outbox)
-        body = read_body(argv)
-        expires = (extract(argv, "--expires-in") || FALLBACK_LIFETIME_SECONDS.to_s).to_i64
+        Names.coordinate!(recipient)
+        from_label.try { |label| Names.label!(label) }
         no_extra!(argv)
-        envelope = client(keyring_path, owner_path, ship, passphrase_file).send(
-          recipient, body, from_label, expires_in: expires, outbox: outbox,
+        if passphrase_file == "-"
+          raise Invalid.new("transmission body and passphrase cannot both read stdin")
+        end
+        sender = client(paths, passphrase_file)
+        body = BodyInput.read
+        envelope = sender.send(
+          recipient, body, from_label, outbox: Outbox.new(paths.outbox),
           observer: OutgoingObserver.from_config(paths.outgoing_observer)
         )
         puts envelope.submission_evidence.to_json
       when "outbox"
-        outbox(argv, paths, keyring_path, owner_path, ship, passphrase_file)
+        outbox(argv, paths, passphrase_file)
       when "radio"
-        radio(argv, ship, paths, keyring_path, owner_path, passphrase_file)
+        radio(argv, ship, paths, passphrase_file)
       when "inbox"
         inbox(argv, paths)
       when "owner-rotate"
         no_extra!(argv)
-        generation = client(keyring_path, owner_path, ship, passphrase_file).rotate_owner
+        generation = client(paths, passphrase_file).rotate_owner
         puts({state: "rotated", owner_generation: generation}.to_json)
       when "ship"
         operation = argv.shift? || raise Invalid.new("ship requires freeze, activate, or revoke")
@@ -71,26 +73,24 @@ module Tinrelay
           raise Invalid.new("invalid ship operation")
         end
         no_extra!(argv)
-        client(keyring_path, owner_path, ship, passphrase_file).ship_change(operation)
+        client(paths, passphrase_file).ship_change(operation)
         puts({state: operation}.to_json)
       when "contact-close"
         peer = argv.shift? || raise Invalid.new("contact-close requires a peer ship")
         no_extra!(argv)
-        generation = client(keyring_path, owner_path, ship, passphrase_file).close_contact(peer)
+        generation = client(paths, passphrase_file).close_contact(peer)
         puts({state: "closed", ship: ship, peer_ship: peer,
               radio_generation: generation}.to_json)
       when "contact-unblock"
         peer = argv.shift? || raise Invalid.new("contact-unblock requires a peer ship")
         no_extra!(argv)
-        contact = client(keyring_path, owner_path, ship, passphrase_file).unblock_contact(peer)
+        contact = client(paths, passphrase_file).unblock_contact(peer)
         puts({state: "unblocked", ship: ship, peer_ship: contact.ship}.to_json)
       when "contact-allow"
         peer = argv.shift? || raise Invalid.new("contact-allow requires a peer ship")
         local_hail_id = required(argv, "--hail-id")
-        spool = Spool.new(extract(argv, "--spool") || paths.spool)
         no_extra!(argv)
-        client(keyring_path, owner_path, ship, passphrase_file)
-          .allow_contact(peer, local_hail_id, spool)
+        client(paths, passphrase_file).allow_contact(peer, local_hail_id, Spool.new(paths.spool))
         puts({state: "relationship_active", ship: ship, peer_ship: peer,
               local_hail_id: local_hail_id}.to_json)
       else
@@ -119,14 +119,14 @@ module Tinrelay
       exit 2
     end
 
-    private def self.radio(argv, ship, paths, keyring_path, owner_path, passphrase_file) : Nil
+    private def self.radio(argv, ship, paths, passphrase_file) : Nil
       operation = argv.shift? ||
                   raise Invalid.new("radio requires collect, wait, poll, status, or routed")
       case operation
       when "collect"
-        spool = Spool.new(extract(argv, "--spool") || paths.spool)
+        spool = Spool.new(paths.spool)
         no_extra!(argv)
-        receiver = client(keyring_path, owner_path, ship, passphrase_file)
+        receiver = client(paths, passphrase_file)
         retry_delay = 1
         loop do
           begin
@@ -142,28 +142,28 @@ module Tinrelay
         end
       when "wait"
         local = !!argv.delete("--local")
-        spool = Spool.new(extract(argv, "--spool") || paths.spool)
+        spool = Spool.new(paths.spool)
         no_extra!(argv)
         event = if local
                   LocalRadio.wait(ship, spool)
                 else
-                  client(keyring_path, owner_path, ship, passphrase_file).radio_wait(spool)
+                  client(paths, passphrase_file).radio_wait(spool)
                 end
         puts event.to_json
       when "poll"
-        spool = Spool.new(extract(argv, "--spool") || paths.spool)
+        spool = Spool.new(paths.spool)
         no_extra!(argv)
-        event = client(keyring_path, owner_path, ship, passphrase_file).radio_poll(spool)
+        event = client(paths, passphrase_file).radio_poll(spool)
         puts(event ? event.to_json : %({"state":"quiet"}))
       when "routed"
         id = argv.shift? || raise Invalid.new("radio routed requires a local transmission id")
-        spool = Spool.new(extract(argv, "--spool") || paths.spool)
+        spool = Spool.new(paths.spool)
         no_extra!(argv)
         record = spool.routed(id)
         puts({state: "routed", id: record.local_id}.to_json)
       when "status"
         id = argv.shift? || raise Invalid.new("radio status requires a local transmission id")
-        spool = Spool.open_existing(extract(argv, "--spool") || paths.spool)
+        spool = Spool.open_existing(paths.spool)
         no_extra!(argv)
         puts spool.status(id).to_json
       else
@@ -173,11 +173,10 @@ module Tinrelay
 
     private def self.inbox(argv, paths) : Nil
       operation = argv.shift? || raise Invalid.new("inbox requires list or show")
-      spool_path = extract(argv, "--spool") || paths.spool
       case operation
       when "list"
         no_extra!(argv)
-        spool = Spool.new(spool_path)
+        spool = Spool.new(paths.spool)
         spool.list.each do |record|
           source = case record
                    when TransmissionSpoolRecord
@@ -194,17 +193,16 @@ module Tinrelay
       when "show"
         id = argv.shift? || raise Invalid.new("inbox show requires a local transmission id")
         no_extra!(argv)
-        spool = Spool.new(spool_path)
+        spool = Spool.new(paths.spool)
         puts spool.inspection(id)
       else
         raise Invalid.new("inbox requires list or show")
       end
     end
 
-    private def self.outbox(argv, paths, keyring_path, owner_path, ship,
-                            passphrase_file) : Nil
+    private def self.outbox(argv, paths, passphrase_file) : Nil
       operation = argv.shift? || raise Invalid.new("outbox requires list or retry")
-      box = Outbox.new(extract(argv, "--outbox") || paths.outbox)
+      box = Outbox.new(paths.outbox)
       case operation
       when "list"
         no_extra!(argv)
@@ -218,16 +216,16 @@ module Tinrelay
       when "retry"
         id = argv.shift? || raise Invalid.new("outbox retry requires a transmission id")
         no_extra!(argv)
-        envelope = client(keyring_path, owner_path, ship, passphrase_file).retry(box, id)
+        envelope = client(paths, passphrase_file).retry(box, id)
         puts envelope.submission_evidence.to_json
       else
         raise Invalid.new("outbox requires list or retry")
       end
     end
 
-    private def self.client(path, owner_path, ship, passphrase_file) : Client
-      phrase = passphrase(LocalPaths.new(ship, home), passphrase_file)
-      Client.new(Keyring.load(path, phrase, owner_path), phrase)
+    private def self.client(paths, passphrase_file) : Client
+      phrase = passphrase(paths, passphrase_file)
+      Client.new(Keyring.load(paths.keyring, phrase, paths.owner_key), phrase)
     end
 
     private def self.report_transport_unavailable(ex : TransportUnavailable) : Nil
@@ -252,12 +250,6 @@ module Tinrelay
       value = STDIN.noecho &.gets
       STDERR.puts
       (value || raise Invalid.new("passphrase input ended unexpectedly")).chomp
-    end
-
-    private def self.read_body(argv) : String
-      body_file = extract(argv, "--body-file") ||
-                  raise Invalid.new("provide --body-file PATH (or - for protected stdin)")
-      body_file == "-" ? STDIN.gets_to_end : File.read(body_file)
     end
 
     private def self.extract(argv : Array(String), name : String) : String?
