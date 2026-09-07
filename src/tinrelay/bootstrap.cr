@@ -34,10 +34,11 @@ module Tinrelay
         notes-from-the-mechanic
       ),
     }
-    JOURNEYS         = JOURNEY_ACTIONS.keys
-    ACTIONS          = JOURNEY_ACTIONS.values.flatten.uniq
-    PAGE_KEYS        = (["home", "meet", "not-found"] + ACTIONS).uniq
-    FLIGHT_PLAN_PAGE = "flight-plan"
+    JOURNEYS          = JOURNEY_ACTIONS.keys
+    ACTIONS           = JOURNEY_ACTIONS.values.flatten.uniq
+    PAGE_KEYS         = (["home", "meet", "not-found"] + ACTIONS).uniq
+    FLIGHT_PLAN_PAGE  = "flight-plan"
+    SHOW_RADIO_STATUS = false
 
     getter common_path : String
     getter source_repository : String
@@ -172,7 +173,10 @@ module Tinrelay
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))
         .gsub("{{ART_STYLESHEET}}", page == FLIGHT_PLAN_PAGE ? "" : art_stylesheet(page))
-        .gsub("{{RADIO_STATUS}}", radio_status(listening_radios))
+        .gsub(
+          "{{RADIO_STATUS}}",
+          SHOW_RADIO_STATUS ? radio_status(listening_radios) : ""
+        )
         .gsub("{{BODY}}", rendered)
       html = html.gsub("{{PAGE_SCRIPT}}", page == "home" ? home_script_link : "")
       return html unless html.includes?("{{PLAIN_STYLESHEET}}")

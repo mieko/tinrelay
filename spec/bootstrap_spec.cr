@@ -79,12 +79,14 @@ describe "the canonical bootstrap representations" do
     end
   end
 
-  it "renders the number of radios currently parked and listening" do
+  it "keeps public HTML stable while live radio status is dormant" do
     TinrelaySpec.with_server do |_root, origin, api|
       response = HTTP::Client.get(
         origin, headers: HTTP::Headers{"Accept" => "text/html"}
       )
-      response.body.should contain(%(<span class="signal">Line quiet</span>))
+      response.body.should_not contain("Line quiet")
+      response.body.should_not contain("radio listening")
+      stable_body = response.body
 
       finished = Channel(Nil).new(2)
       spawn do
@@ -97,7 +99,7 @@ describe "the canonical bootstrap representations" do
       response = HTTP::Client.get(
         origin, headers: HTTP::Headers{"Accept" => "text/html"}
       )
-      response.body.should contain(%(<span class="signal">1 radio listening</span>))
+      response.body.should eq(stable_body)
 
       spawn do
         waiter = api.handoffs.park("beta", 1)
@@ -109,7 +111,7 @@ describe "the canonical bootstrap representations" do
       response = HTTP::Client.get(
         origin, headers: HTTP::Headers{"Accept" => "text/html"}
       )
-      response.body.should contain(%(<span class="signal">2 radios listening</span>))
+      response.body.should eq(stable_body)
 
       2.times { TinrelaySpec.receive(finished) }
     end
@@ -205,12 +207,12 @@ describe "the canonical bootstrap representations" do
       File.write(css_path, "body { color: white; }\n")
       first = Tinrelay::BootstrapPage.new(
         File.join(root, "common-bootstrap.md"), "https://example.test/tinrelay.git"
-      ).html("# One\n", false, "/index.md", "home")
+      ).html("# One\n", false, "/index.md", "meet")
 
       File.write(css_path, "body { color: amber; }\n")
       second = Tinrelay::BootstrapPage.new(
         File.join(root, "common-bootstrap.md"), "https://example.test/tinrelay.git"
-      ).html("# One\n", false, "/index.md", "home")
+      ).html("# One\n", false, "/index.md", "meet")
 
       first_path = first.match(%r{/assets/tinrelay/plain\.[0-9a-f]{64}\.css}).not_nil![0]
       second_path = second.match(%r{/assets/tinrelay/plain\.[0-9a-f]{64}\.css}).not_nil![0]
