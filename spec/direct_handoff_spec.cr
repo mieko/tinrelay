@@ -150,4 +150,61 @@ describe "direct radio handoff" do
       end
     end
   end
+
+  it "does not hand new-generation traffic to a parked old radio" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "direct handoff retune passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, "beta", passphrase, alpha
+      )
+      gamma = TinrelaySpec.admit_contact(
+        root, origin, "gamma", passphrase, alpha
+      )
+
+      old_request = TinrelaySpec.radio_wait_request(alpha, 5)
+      old_result = Channel(Symbol).new(1)
+      spawn do
+        begin
+          alpha.remote.post("/v1/radio/wait", old_request.to_json)
+          old_result.send(:returned)
+        rescue Tinrelay::Unavailable
+          old_result.send(:unavailable)
+        end
+      end
+      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
+
+      alpha.close_contact(beta.keyring.data.ship).should eq(2)
+      TinrelaySpec.receive(old_result).should eq(:unavailable)
+      TinrelaySpec.eventually { !api.handoffs.waiting?("alpha") }
+
+      gamma_spool = Tinrelay::Spool.new(File.join(root, "gamma-inbox"))
+      gamma_event = Channel(Tinrelay::RadioEvent).new(1)
+      spawn do
+        gamma_event.send(gamma.radio_wait(gamma_spool, hold_seconds: 5))
+      end
+      TinrelaySpec.eventually { api.handoffs.waiting?("gamma") }
+      alpha.send("steward@gamma", "retune checkpoint")
+      gamma_spool.routed(TinrelaySpec.receive(gamma_event).local_id)
+      gamma.keyring.data.contact!("alpha")
+        .radio_certificate.generation.should eq(2)
+
+      stale_waiter = api.handoffs.park("alpha", 1)
+      transmission = gamma.send("steward@alpha", "new generation fallback")
+      api.handoffs.wait(stale_waiter, 1.second).should eq(:changed)
+      api.handoffs.release("alpha", stale_waiter)
+
+      api.database.db.query_one(
+        "SELECT state FROM transmissions WHERE id = ?",
+        transmission.transmission_id, as: String
+      ).should eq("pending")
+      spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
+      received = alpha.radio_wait(spool, hold_seconds: 0)
+      received.kind.should eq("transmission")
+      spool.get(received.local_id).as(Tinrelay::TransmissionSpoolRecord)
+        .signed_transmission.body.should eq("new generation fallback")
+    end
+  end
 end

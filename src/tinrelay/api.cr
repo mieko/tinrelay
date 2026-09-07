@@ -22,7 +22,6 @@ module Tinrelay
   class API
     MAX_REQUEST_BYTES = 64 * 1024
     ACCEPTANCE_TARGET = 250.milliseconds
-    WAIT_SLICE        = 250.milliseconds
 
     getter config : ServerConfig
     getter database : Database
@@ -113,7 +112,11 @@ module Tinrelay
             if store.deliverable?(prepared)
               remaining = acceptance_at - Time.instant
               delivered = remaining > Time::Span.zero && handoffs.deliver(prepared, remaining)
-              store.persist(prepared) unless delivered
+              unless delivered
+                if store.persist(prepared)
+                  handoffs.notify(envelope.recipient_ship)
+                end
+              end
             end
           end
         end
@@ -124,7 +127,9 @@ module Tinrelay
         acceptance_at = Time.instant + ACCEPTANCE_TARGET
         hail = parse_body(context, Hail)
         if prepared = store.prepare_hail(hail)
-          store.persist_hail(prepared) if hail_window.allow?(hail.sender_ship)
+          if hail_window.allow?(hail.sender_ship) && store.persist_hail(prepared)
+            handoffs.notify(hail.recipient_ship)
+          end
         end
         remaining = acceptance_at - Time.instant
         sleep remaining if remaining > Time::Span.zero
@@ -147,7 +152,10 @@ module Tinrelay
         store.acknowledge_hail(parse_body(context, HailAck))
         json(context, 200, %({"state":"acknowledged"}))
       when {"POST", "/v1/relationships/close"}
-        store.close_relationship(parse_body(context, RelationshipClose))
+        closure = parse_body(context, RelationshipClose)
+        store.close_relationship(closure)
+        handoffs.notify(closure.auth.ship)
+        closure.retained_ships.each { |ship| handoffs.notify(ship) }
         json(context, 200, %({"state":"retuning"}))
       when {"POST", "/v1/relationships/retune/ack"}
         store.acknowledge_retune(parse_body(context, RetuneAck))
@@ -182,15 +190,28 @@ module Tinrelay
 
     private def wait(request : RadioWaitRequest) : RadioWaitResponse
       deadline = Time.instant + request.hold_seconds.seconds
-      loop do
-        response = store.wait_once(request)
-        return response unless response.empty?
-        remaining = deadline - Time.instant
-        return response if remaining <= Time::Span.zero
-        slice = remaining < WAIT_SLICE ? remaining : WAIT_SLICE
-        if envelope = handoffs.wait(request.auth.ship, slice)
-          return RadioWaitResponse.new(envelope: envelope)
+      response = store.wait_once(request)
+      return response unless response.empty? && request.hold_seconds > 0
+
+      waiter = handoffs.park(request.auth.ship, request.auth.radio_generation)
+      begin
+        loop do
+          # A second read after parking closes the race between the first read
+          # and waiter registration without periodically polling SQLite.
+          response = store.wait_once(request)
+          return response unless response.empty?
+          remaining = deadline - Time.instant
+          return response if remaining <= Time::Span.zero
+          case event = handoffs.wait(waiter, remaining)
+          when SignedRelayEnvelope
+            envelope = event
+            return RadioWaitResponse.new(envelope: envelope)
+          when :timeout
+            return response
+          end
         end
+      ensure
+        handoffs.release(request.auth.ship, waiter)
       end
     end
 

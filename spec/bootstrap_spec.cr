@@ -76,7 +76,9 @@ describe "the canonical bootstrap representations" do
 
       finished = Channel(Nil).new(2)
       spawn do
-        api.handoffs.wait("alpha", 1.second)
+        waiter = api.handoffs.park("alpha", 1)
+        api.handoffs.wait(waiter, 1.second)
+        api.handoffs.release("alpha", waiter)
         finished.send(nil)
       end
       TinrelaySpec.eventually { api.handoffs.waiting_count == 1 }
@@ -86,7 +88,9 @@ describe "the canonical bootstrap representations" do
       response.body.should contain(%(<span class="signal">1 radio listening</span>))
 
       spawn do
-        api.handoffs.wait("beta", 1.second)
+        waiter = api.handoffs.park("beta", 1)
+        api.handoffs.wait(waiter, 1.second)
+        api.handoffs.release("beta", waiter)
         finished.send(nil)
       end
       TinrelaySpec.eventually { api.handoffs.waiting_count == 2 }

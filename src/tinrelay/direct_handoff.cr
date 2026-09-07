@@ -28,7 +28,12 @@ module Tinrelay
   # acknowledgement or the caller persists the prepared envelope in SQLite.
   class DirectHandoff
     class Waiter
+      getter radio_generation : Int32
       getter envelope = Channel(SignedRelayEnvelope).new(1)
+      getter changed = Channel(Nil).new(1)
+
+      def initialize(@radio_generation)
+      end
     end
 
     class Attempt
@@ -43,23 +48,40 @@ module Tinrelay
     @waiters = {} of String => Waiter
     @attempts = {} of String => Attempt
 
-    def wait(ship : String, duration : Time::Span) : SignedRelayEnvelope?
-      waiter = Waiter.new
+    def park(ship : String, radio_generation : Int32) : Waiter
+      waiter = Waiter.new(radio_generation)
       @mutex.synchronize do
         if @waiters.has_key?(ship)
           raise Conflict.new("a radio wait is already parked for this ship")
         end
         @waiters[ship] = waiter
       end
+      waiter
+    end
+
+    def wait(waiter : Waiter, duration : Time::Span)
       select
       when envelope = waiter.envelope.receive
         envelope
+      when waiter.changed.receive
+        :changed
       when timeout(duration)
-        nil
+        :timeout
       end
-    ensure
+    end
+
+    def release(ship : String, waiter : Waiter) : Nil
       @mutex.synchronize do
         @waiters.delete(ship) if @waiters[ship]? == waiter
+      end
+    end
+
+    def notify(ship : String) : Nil
+      waiter = @mutex.synchronize { @waiters[ship]? }
+      return unless waiter
+      select
+      when waiter.changed.send(nil)
+      else
       end
     end
 
@@ -82,10 +104,14 @@ module Tinrelay
           existing_attempt = current
           next nil
         end
-        found = @waiters.delete(prepared.envelope.recipient_ship)
-        if found
+        found = @waiters[prepared.envelope.recipient_ship]?
+        if found &&
+           found.radio_generation == prepared.envelope.recipient_encryption_generation
+          @waiters.delete(prepared.envelope.recipient_ship)
           owned_attempt = Attempt.new(prepared)
           @attempts[prepared.envelope.transmission_id] = owned_attempt.not_nil!
+        else
+          found = nil
         end
         found
       end

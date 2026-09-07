@@ -18,6 +18,25 @@ class LostHailResponseRemote < Tinrelay::Remote
 end
 
 describe "contact trust and content-free hails" do
+  it "wakes a parked radio when a hail arrives" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "parked hail test passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = Tinrelay::Client.join(
+        File.join(root, "beta.keyring"), origin, "beta", passphrase
+      )
+      spool = Tinrelay::Spool.new(File.join(root, "alpha-inbox"))
+      event = Channel(Tinrelay::RadioEvent).new(1)
+      spawn { event.send(alpha.radio_wait(spool, hold_seconds: 5)) }
+      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
+
+      beta.hail("alpha")
+      TinrelaySpec.receive(event).kind.should eq("hail")
+    end
+  end
+
   it "establishes first contact from an explicitly allowed hail and pins each ship by TOFU" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "explicit hail trust passphrase"
