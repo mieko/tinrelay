@@ -174,6 +174,7 @@ module Tinrelay
         .gsub("{{ART_STYLESHEET}}", page == FLIGHT_PLAN_PAGE ? "" : art_stylesheet(page))
         .gsub("{{RADIO_STATUS}}", radio_status(listening_radios))
         .gsub("{{BODY}}", rendered)
+      html = html.gsub("{{PAGE_SCRIPT}}", page == "home" ? home_script_link : "")
       return html unless html.includes?("{{PLAIN_STYLESHEET}}")
       html.gsub("{{PLAIN_STYLESHEET}}", plain_stylesheet_link)
     rescue ex : File::NotFoundError
@@ -189,12 +190,16 @@ module Tinrelay
       File.read(File.join(File.dirname(common_path), name))
     end
 
-    def asset(name : String) : String
+    def asset(name : String) : NamedTuple(body: String, content_type: String)
       stylesheet = plain_stylesheet
-      unless name == plain_stylesheet_name(stylesheet)
-        raise NotFound.new("public asset does not exist")
-      end
-      stylesheet
+      return {
+        body: stylesheet, content_type: "text/css; charset=utf-8",
+      } if name == plain_stylesheet_name(stylesheet)
+      script = home_script
+      return {
+        body: script, content_type: "text/javascript; charset=utf-8",
+      } if name == home_script_name(script)
+      raise NotFound.new("public asset does not exist")
     rescue ex : File::NotFoundError
       raise NotFound.new("public asset does not exist")
     end
@@ -228,6 +233,21 @@ module Tinrelay
 
     private def plain_stylesheet_name(stylesheet : String) : String
       "plain.#{Digest::SHA256.hexdigest(stylesheet)}.css"
+    end
+
+    private def home_script_link : String
+      script = home_script
+      %(<script defer src="/assets/tinrelay/#{home_script_name(script)}"></script>)
+    end
+
+    private def home_script : String
+      File.read(
+        File.join(File.dirname(common_path), "assets", "tinrelay", "home-copy.js")
+      )
+    end
+
+    private def home_script_name(script : String) : String
+      "home-copy.#{Digest::SHA256.hexdigest(script)}.js"
     end
 
     private def radio_status(listening_radios : Int32) : String

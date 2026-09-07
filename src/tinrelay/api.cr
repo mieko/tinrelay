@@ -287,7 +287,7 @@ module Tinrelay
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
       context.response.headers["Referrer-Policy"] = "no-referrer"
-      context.response.headers["Content-Security-Policy"] = content_security_policy
+      context.response.headers["Content-Security-Policy"] = content_security_policy(true)
       context.response.headers["Link"] = alternate_link(alternate)
       write_body(
         context, 200,
@@ -350,10 +350,11 @@ module Tinrelay
     end
 
     private def public_asset(context : HTTP::Server::Context, name : String) : Int32
+      asset = bootstrap_page.asset(name)
       context.response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
       context.response.headers["X-Content-Type-Options"] = "nosniff"
       write_body(
-        context, 200, "text/css; charset=utf-8", bootstrap_page.asset(name)
+        context, 200, asset[:content_type], asset[:body]
       )
     end
 
@@ -461,11 +462,12 @@ module Tinrelay
       "#{path}/index.md"
     end
 
-    private def content_security_policy : String
+    private def content_security_policy(allow_script : Bool = false) : String
       "default-src 'none'; " +
         "style-src 'self'; " +
         "img-src 'self'; " +
         "font-src 'self'; " +
+        (allow_script ? "script-src 'self'; " : "") +
         "base-uri 'none'; " +
         "form-action 'none'"
     end

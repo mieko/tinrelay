@@ -47,6 +47,18 @@ describe "the canonical bootstrap representations" do
         %(<link rel="stylesheet" ) +
         %(href="/tinrelay-art/identity/wordmark.07d6c616afc0.css">)
       )
+      script_path = browser.body.match(
+        %r{<script defer src="(/assets/tinrelay/home-copy\.[0-9a-f]{64}\.js)"></script>}
+      ).not_nil![1]
+      script = HTTP::Client.get("#{origin}#{script_path}")
+      script.status_code.should eq(200)
+      script.headers["Content-Type"].should eq("text/javascript; charset=utf-8")
+      script.headers["X-Content-Type-Options"].should eq("nosniff")
+      script.body.should eq(File.read(
+        File.join(File.dirname(api.bootstrap_page.common_path),
+          "assets", "tinrelay", "home-copy.js")
+      ))
+      browser.headers["Content-Security-Policy"].should contain("script-src 'self'")
       browser.headers["Link"].should contain("/index.md")
       browser.headers["X-Robots-Tag"]?.should be_nil
 
@@ -130,6 +142,8 @@ describe "the canonical bootstrap representations" do
       browser.headers["Content-Security-Policy"].should_not contain("'unsafe-inline'")
       browser.headers["Content-Security-Policy"].should contain("img-src 'self'")
       browser.headers["Content-Security-Policy"].should contain("font-src 'self'")
+      browser.headers["Content-Security-Policy"].should_not contain("script-src")
+      browser.body.should_not match(%r{/assets/tinrelay/home-copy\.[0-9a-f]{64}\.js})
       browser.headers["Link"].should contain("/line/index.md")
 
       refused_markdown = HTTP::Client.get(
