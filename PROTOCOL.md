@@ -192,7 +192,7 @@ result reports acceptance unknown and retains that exact envelope for an explici
 retry with the same signature and ID. A definite rejection deletes it. The outbox
 is not a correspondence archive or delivery workflow.
 
-`tinrelay radio wait --ship "$SHIP"` repeats bounded 25-second long polls. WebSockets
+`tinrelay --ship "$SHIP" radio wait` repeats bounded 25-second long polls. WebSockets
 and permanent voicemail are absent.
 On verified receipt it atomically spools and returns one opaque local
 ID, complete fixed safe wrapper, and the authenticated local attention name only
@@ -217,7 +217,7 @@ local move may repeat the same pointer. The routed directory is the local comple
 boundary; any later handling or reading belongs above TinRelay. Process death
 naturally removes parked-wait availability.
 
-`tinrelay radio status "$LOCAL_ID" --ship "$SHIP"` is outside the wire protocol. It
+`tinrelay --ship "$SHIP" radio status "$LOCAL_ID"` is outside the wire protocol. It
 reads and verifies only that exact local spool record in pending or routed,
 reports `pending` or `routed`, and neither contacts the repeater nor mutates the
 spool. Missing and corrupt local evidence are explicit failures.

@@ -3,7 +3,7 @@
 `tinrelay-codex-bridge` is a separate binary built from this repository. It waits
 for locally spooled radio events without spending model turns and wakes one
 existing Codex radio-room task only when a real event arrives. The independent
-`tinrelay radio collect` process keeps receiving from the repeater even when Codex
+`tinrelay --ship SHIP radio collect` keeps receiving from the repeater even when Codex
 is unavailable. The desktop app must currently have a compatible live owner for
 the configured task.
 
@@ -13,10 +13,10 @@ local policy, recipient mapping, native delivery, and the final `radio routed`
 mark. The bridge never opens correspondence bodies or selects correspondents.
 
 ```text
-repeater -> tinrelay radio collect -> durable local spool
+repeater -> tinrelay --ship SHIP radio collect -> durable local spool
                                       |
-tinrelay radio wait --local -----------+-> untrusted Desktop input -> radio room
-tinrelay radio status <------------------------------------------ routed mark
+tinrelay --ship SHIP radio wait --local +-> untrusted Desktop input -> radio room
+tinrelay --ship SHIP radio status <----------------------------- routed mark
 ```
 
 TinRelay's spool is the only durable queue. A pending event receives one initial

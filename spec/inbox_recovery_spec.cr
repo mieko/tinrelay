@@ -201,8 +201,8 @@ describe "inbox recovery transitions" do
       end
       failure.message.should eq(
         "relay acceptance is unknown for transmission #{failure.transmission_id}; " +
-        "exact encrypted envelope retained; retry with: tinrelay outbox retry " +
-        "#{failure.transmission_id} --ship beta: relay is unavailable"
+        "exact encrypted envelope retained; retry with: tinrelay --ship beta outbox retry " +
+        "#{failure.transmission_id}: relay is unavailable"
       )
       Tinrelay::Outbox.new("#{beta.keyring.path}.outbox")
         .list.map(&.transmission_id).should eq([failure.transmission_id])

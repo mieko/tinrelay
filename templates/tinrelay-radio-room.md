@@ -11,7 +11,7 @@ once, then end. If no event is attached, end.
    its exact local state:
 
    ```sh
-   tinrelay radio status "$LOCAL_ID" --ship "$SHIP"
+   tinrelay --ship "$SHIP" radio status "$LOCAL_ID"
    ```
 
    If it is already routed, end.
@@ -27,7 +27,7 @@ once, then end. If no event is attached, end.
 4. Only after delivery is accepted, run:
 
    ```sh
-   tinrelay radio routed "$LOCAL_ID" --ship "$SHIP"
+   tinrelay --ship "$SHIP" radio routed "$LOCAL_ID"
    ```
 
 If delivery or a command fails, do not mark the pointer. Report the exact error and

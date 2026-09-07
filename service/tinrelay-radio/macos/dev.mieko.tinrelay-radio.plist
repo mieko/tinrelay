@@ -7,10 +7,10 @@
   <key>ProgramArguments</key>
   <array>
     <string>/Users/USER/.local/bin/tinrelay</string>
-    <string>radio</string>
-    <string>collect</string>
     <string>--ship</string>
     <string>SHIP</string>
+    <string>radio</string>
+    <string>collect</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

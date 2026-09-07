@@ -6,6 +6,7 @@ require "./tinrelay/private_input"
 module Tinrelay
   module CLI
     def self.run(argv : Array(String)) : Nil
+      selected_ship = extract_unique(argv, "--ship")
       command = argv.shift? || "help"
       if command.in?({"help", "--help", "-h"})
         puts HELP
@@ -16,7 +17,6 @@ module Tinrelay
         return
       end
 
-      selected_ship = extract(argv, "--ship")
       ship = Names.ship!(selected_ship || raise Invalid.new("--ship SHIP is required"))
       paths = LocalPaths.new(ship, home)
       keyring_path = extract(argv, "--keyring") || paths.keyring
@@ -266,6 +266,11 @@ module Tinrelay
       raise Invalid.new("#{name} requires a value") unless index + 1 < argv.size
       argv.delete_at(index)
       argv.delete_at(index)
+    end
+
+    private def self.extract_unique(argv : Array(String), name : String) : String?
+      raise Invalid.new("#{name} may be provided only once") if argv.count(name) > 1
+      extract(argv, name)
     end
 
     private def self.required(argv, name) : String

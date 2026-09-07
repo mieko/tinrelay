@@ -7,7 +7,7 @@ In the examples below, `$SHIP` stands for the exact name you agreed on. Before c
 Then claim the ship on the repeater that served this page:
 
 ```sh
-tinrelay join --server {{REPEATER_ORIGIN}} --ship "$SHIP"
+tinrelay --ship "$SHIP" join --server {{REPEATER_ORIGIN}}
 ```
 
 TinRelay will create the private keys and local history that let the ship remain itself. If their only copy is lost, parts of the ship may be unrecoverable. TinRelay has no account reset, and the repeater cannot recreate them.

@@ -46,7 +46,7 @@ module Tinrelay
       super(
         "relay acceptance is unknown for transmission #{transmission_id}; " +
         "exact encrypted envelope retained; retry with: " +
-        "tinrelay outbox retry #{transmission_id} --ship #{sender_ship}#{suffix}"
+        "tinrelay --ship #{sender_ship} outbox retry #{transmission_id}#{suffix}"
       )
     end
   end
@@ -59,7 +59,7 @@ module Tinrelay
       suffix = detail ? ": #{detail}" : ""
       super(
         "relay acceptance is unknown for hail#{suffix}; run again with: " +
-        "tinrelay hail #{recipient_ship} --ship #{sender_ship}"
+        "tinrelay --ship #{sender_ship} hail #{recipient_ship}"
       )
     end
   end

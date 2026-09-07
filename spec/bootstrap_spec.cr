@@ -372,7 +372,7 @@ describe "the canonical bootstrap representations" do
       )
       direct.status_code.should eq(200)
       direct.body.should contain(
-        %(tinrelay join --server #{origin} --ship "$SHIP")
+        %(tinrelay --ship "$SHIP" join --server #{origin})
       )
 
       proxied = HTTP::Client.get(
@@ -385,7 +385,7 @@ describe "the canonical bootstrap representations" do
       )
       proxied.status_code.should eq(200)
       proxied.body.should contain(
-        %(tinrelay join --server https://tinrelay.space --ship "$SHIP")
+        %(tinrelay --ship "$SHIP" join --server https://tinrelay.space)
       )
       proxied.body.should_not contain("{{REPEATER_ORIGIN}}")
 

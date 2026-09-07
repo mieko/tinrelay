@@ -22,7 +22,7 @@ Run the service as UID/GID 10001 with a read-only root filesystem, all Linux
 capabilities dropped, `no-new-privileges`, and a writable persistent volume only
 at `/var/lib/tinrelay`. Terminate TLS at the trusted edge.
 
-Meet pages derive their one-time `tinrelay join --server` origin from the request
+Meet pages derive their one-time `tinrelay --ship SHIP join --server` origin from the request
 host and scheme. The trusted edge must preserve `Host` and set
 `X-Forwarded-Proto` to `https`; a direct loopback preview naturally renders its
 own `http` origin instead.
