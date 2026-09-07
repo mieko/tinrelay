@@ -118,6 +118,48 @@ describe "contact trust and content-free hails" do
     end
   end
 
+  it "keeps collected hails in the recipient bound and selects correspondence first" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "recipient hail attention bound"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      beta = TinrelaySpec.admit_contact(
+        root, origin, "beta", passphrase, alpha
+      )
+      strangers = Array(Tinrelay::Client).new(
+        Tinrelay::Store::MAX_UNALLOWED_HAILS_PER_SHIP + 1
+      ) do |index|
+        TinrelaySpec.admit(root, origin, "stranger-#{index}", passphrase)
+      end
+      strangers.first(Tinrelay::Store::MAX_UNALLOWED_HAILS_PER_SHIP).each do |ship|
+        ship.hail("alpha")
+      end
+
+      spool = Tinrelay::Spool.new(File.join(root, "alpha-attention"))
+      collected = alpha.radio_wait(spool, hold_seconds: 0)
+      collected.kind.should eq("hail")
+      spool.routed(collected.local_id)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM hails " +
+        "WHERE recipient_ship = 'alpha' AND allowed_at IS NULL"
+      ).as(Int64).should eq(Tinrelay::Store::MAX_UNALLOWED_HAILS_PER_SHIP)
+
+      waiter = api.handoffs.park("alpha", 1)
+      over_cap = strangers.last.hail("alpha")
+      over_cap.submission_evidence[:state].should eq("accepted")
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM hails WHERE id = ?", over_cap.hail_id
+      ).as(Int64).should eq(0)
+      api.handoffs.wait(waiter, 100.milliseconds).should eq(:timeout)
+      api.handoffs.release("alpha", waiter)
+
+      sent = beta.send("steward@alpha", "established correspondence advances")
+      received = alpha.radio_wait(spool, hold_seconds: 0)
+      received.kind.should eq("transmission")
+      spool.get(received.local_id).as(Tinrelay::TransmissionSpoolRecord)
+        .relay_transmission_id.should eq(sent.transmission_id)
+    end
+  end
+
   it "counts authenticated invalid-target hails before resolution and keeps their result opaque" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "opaque hail admission passphrase"

@@ -14,6 +14,17 @@ module Tinrelay
   class Unavailable < Error
   end
 
+  class RegistrationLimited < Unavailable
+    getter retry_after_seconds : Int32
+
+    def initialize(@retry_after_seconds)
+      super(
+        "relay is receiving too many registrations; " +
+        "try again in #{retry_after_seconds} seconds"
+      )
+    end
+  end
+
   # A failure at the relay's network boundary. Its distinct type lets a caller
   # retry narrowly without treating local I/O or unknown failures as transient.
   class TransportUnavailable < Unavailable

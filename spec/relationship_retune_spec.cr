@@ -122,6 +122,8 @@ describe "relationship closure and finite radio retune" do
       delivered.kind.should eq("transmission")
       spool.get(delivered.local_id).as(Tinrelay::TransmissionSpoolRecord)
         .relay_transmission_id.should eq(valid.transmission_id)
+      spool.routed(delivered.local_id)
+      alpha.radio_poll(spool).should be_nil
       spool.list.any? do |record|
         record.is_a?(Tinrelay::HailSpoolRecord) &&
           record.hail_id == blocked_hail.hail_id
@@ -135,6 +137,63 @@ describe "relationship closure and finite radio retune" do
       alpha.keyring.data.radios.map(&.generation).should contain(1)
       alpha.keyring.prune_retired_radios!(deadline).should be_true
       alpha.keyring.data.radios.map(&.generation).should eq([2])
+    end
+  end
+
+  it "rejects an owner-authorized retune with a wrong-sized radio signing key" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "malformed radio key retune passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      TinrelaySpec.connect(root, alpha, beta)
+      now = Time.utc.to_unix
+      prior = alpha.keyring.data.radio!
+      owner = alpha.keyring.owner(passphrase)
+      encryption = Tinrelay::Crypto.box_keypair
+      certificate = Tinrelay::ShipRadioCertificate.new(
+        "alpha", 2,
+        Tinrelay::Crypto.b64(Bytes.new(Tinrelay::Crypto::SIGN_PUBLIC_BYTES - 1)),
+        Tinrelay::Crypto.b64(encryption.public_key), now, 1
+      )
+      certificate.owner_signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.sign(
+          certificate.unsigned_bytes,
+          Tinrelay::Crypto.unb64(owner.key.secret_key)
+        )
+      )
+      prior_signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.sign(
+          certificate.unsigned_bytes,
+          Tinrelay::Crypto.unb64(prior.signing.secret_key)
+        )
+      )
+      auth = Tinrelay::OwnerAuth.new("alpha", 1, 1_i64, now)
+      closure = Tinrelay::RelationshipClose.new(
+        "beta", [] of String, certificate, prior_signature, auth
+      )
+      auth.signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.sign(
+          auth.signing_bytes("relationship.close", closure.payload),
+          Tinrelay::Crypto.unb64(owner.key.secret_key)
+        )
+      )
+
+      expect_raises(Tinrelay::Invalid, /radio signing public key length/) do
+        api.store.close_relationship(closure, now)
+      end
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_radio_keys WHERE ship = 'alpha'"
+      ).should eq(1)
+      api.database.db.query_one(
+        "SELECT state FROM ship_radio_keys WHERE ship = 'alpha' AND generation = 1",
+        as: String
+      ).should eq("active")
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'beta'",
+        as: String
+      ).should eq("active")
     end
   end
 end

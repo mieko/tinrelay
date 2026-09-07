@@ -1,5 +1,30 @@
 require "./spec_helper"
 
+module TinrelayShipClaimSpec
+  HEADERS = HTTP::Headers{
+    "Content-Type"        => "application/json",
+    "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+  }
+
+  def self.claim(ship : String, owner, signing, encryption,
+                 now : Int64 = Time.utc.to_unix) : Tinrelay::ShipClaim
+    certificate = Tinrelay::ShipRadioCertificate.new(
+      ship, 1, Tinrelay::Crypto.b64(signing.public_key),
+      Tinrelay::Crypto.b64(encryption.public_key), now, 1
+    )
+    certificate.owner_signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
+    )
+    Tinrelay::ShipClaim.new(
+      ship, Tinrelay::Crypto.b64(owner.public_key), certificate
+    )
+  end
+
+  def self.submit(origin : String, claim : Tinrelay::ShipClaim) : HTTP::Client::Response
+    HTTP::Client.post("#{origin}/v1/join", HEADERS, claim.to_json)
+  end
+end
+
 describe "open ship claims" do
   it "claims an available chosen name without creating a contact" do
     TinrelaySpec.with_server do |root, origin, api|
@@ -73,6 +98,105 @@ describe "open ship claims" do
         "#{origin}/v1/join", headers, invalid_signature.to_json
       ).status_code.should eq(401)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0)
+    end
+  end
+
+  it "rejects an owner-authorized claim with a wrong-sized radio encryption key" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "malformed radio key claim passphrase"
+      keyring = Tinrelay::Keyring.create(
+        File.join(root, "oversized.keyring"), origin, "oversized", passphrase
+      )
+      certificate = keyring.data.radio!.certificate
+      certificate.encryption_public_key = Tinrelay::Crypto.b64(Bytes.new(40_000, 1_u8))
+      owner = keyring.owner(passphrase)
+      certificate.owner_signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.sign(
+          certificate.unsigned_bytes,
+          Tinrelay::Crypto.unb64(owner.key.secret_key)
+        )
+      )
+      claim = Tinrelay::ShipClaim.new(
+        keyring.data.ship, keyring.data.owner_public_key, certificate
+      )
+      headers = HTTP::Headers{
+        "Content-Type"        => "application/json",
+        "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+      }
+
+      response = HTTP::Client.post("#{origin}/v1/join", headers, claim.to_json)
+
+      response.status_code.should eq(400)
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0)
+      api.database.db.scalar("SELECT COUNT(*) FROM ship_radio_keys").should eq(0)
+    end
+  end
+
+  it "rejects a wrong-sized owner key before storing permanent identity" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "malformed owner key claim passphrase"
+      keyring = Tinrelay::Keyring.create(
+        File.join(root, "oversized-owner.keyring"), origin, "oversized-owner",
+        passphrase
+      )
+      claim = Tinrelay::ShipClaim.new(
+        keyring.data.ship,
+        Tinrelay::Crypto.b64(Bytes.new(Tinrelay::Crypto::SIGN_PUBLIC_BYTES + 1)),
+        keyring.data.radio!.certificate
+      )
+
+      response = HTTP::Client.post(
+        "#{origin}/v1/join", TinrelayShipClaimSpec::HEADERS, claim.to_json
+      )
+
+      response.status_code.should eq(400)
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0)
+      api.database.db.scalar("SELECT COUNT(*) FROM ship_owner_keys").should eq(0)
+    end
+  end
+
+  it "charges only valid claims to the global registration window" do
+    TinrelaySpec.with_server do |_root, origin, api|
+      owner = Tinrelay::Crypto.signing_keypair
+      signing = Tinrelay::Crypto.signing_keypair
+      encryption = Tinrelay::Crypto.box_keypair
+
+      malformed_name = TinrelayShipClaimSpec.claim(
+        "Invalid!", owner, signing, encryption
+      )
+      TinrelayShipClaimSpec.submit(origin, malformed_name).status_code.should eq(400)
+
+      malformed_key = TinrelayShipClaimSpec.claim(
+        "malformed-key", owner, signing, encryption
+      )
+      malformed_key.owner_public_key = Tinrelay::Crypto.b64(
+        Bytes.new(Tinrelay::Crypto::SIGN_PUBLIC_BYTES - 1)
+      )
+      TinrelayShipClaimSpec.submit(origin, malformed_key).status_code.should eq(400)
+
+      invalid = TinrelayShipClaimSpec.claim(
+        "invalid", owner, signing, encryption
+      )
+      invalid.radio_certificate.owner_signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.random(Tinrelay::Crypto::SIGNATURE_BYTES)
+      )
+      TinrelayShipClaimSpec.submit(origin, invalid).status_code.should eq(401)
+
+      Tinrelay::MAX_SHIP_REGISTRATIONS_PER_HOUR.times do |index|
+        claim = TinrelayShipClaimSpec.claim(
+          "ship-#{index}", owner, signing, encryption
+        )
+        TinrelayShipClaimSpec.submit(origin, claim).status_code.should eq(201)
+      end
+
+      limited = TinrelayShipClaimSpec.submit(
+        origin,
+        TinrelayShipClaimSpec.claim("one-too-many", owner, signing, encryption)
+      )
+      limited.status_code.should eq(429)
+      limited.headers["Retry-After"].to_i.should be > 0
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").as(Int64)
+        .should eq(Tinrelay::MAX_SHIP_REGISTRATIONS_PER_HOUR)
     end
   end
 end

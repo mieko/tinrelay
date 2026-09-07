@@ -1,5 +1,11 @@
 require "./spec_helper"
 
+class Tinrelay::SubmissionWindow
+  def retained_ship_count_for_spec : Int32
+    @mutex.synchronize { @attempts.size }
+  end
+end
+
 describe Tinrelay::ServerRuntime do
   it "uses detected processors by default and bounds an explicit thread count" do
     Tinrelay::ServerRuntime.thread_count(nil).should eq(System.cpu_count)
@@ -22,5 +28,28 @@ describe Tinrelay::SubmissionWindow do
     end
     window.allow?("alpha", now).should be_false
     window.allow?("alpha", now + 3601).should be_true
+  end
+
+  it "expires inactive identities without resetting active transmission or hail quotas" do
+    configurations = [
+      {Tinrelay::Store::MAX_TRANSMISSIONS_PER_HOUR, 3600_i64},
+      {Tinrelay::Store::MAX_HAILS_PER_DAY, 24_i64 * 60 * 60},
+    ]
+
+    configurations.each do |limit, period|
+      window = Tinrelay::SubmissionWindow.new(limit, period)
+      1_000.times do |index|
+        window.allow?("expired-#{index}", 0_i64).should be_true
+      end
+      window.allow?("active", period).should be_true
+
+      window.allow?("trigger", period + 1).should be_true
+
+      window.retained_ship_count_for_spec.should eq(2)
+      (limit - 1).times do
+        window.allow?("active", period + 1).should be_true
+      end
+      window.allow?("active", period + 1).should be_false
+    end
   end
 end

@@ -4,20 +4,23 @@ require "../src/tinrelay/client_runtime"
 require "../src/tinrelay/server"
 
 module TinrelaySpec
+  DEFAULT_METADATA_LIMIT = Tinrelay::DEFAULT_PERMANENT_METADATA_LIMIT
+
   def self.temporary_root : String
     root = File.join(Dir.tempdir, "tinrelay-spec-#{Process.pid}-#{Tinrelay::Ids.uuid}")
     Dir.mkdir_p(root)
     root
   end
 
-  def self.with_server(art_manifest_path : String? = nil, &)
+  def self.with_server(art_manifest_path : String? = nil,
+                       permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT, &)
     root = temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     config = Tinrelay::ServerConfig.new(
       "127.0.0.1", 0, File.join(root, "service.db"),
       template,
       "https://example.test/tinrelay.git", System.cpu_count,
-      art_manifest_path
+      art_manifest_path, permanent_metadata_limit
     )
     api = Tinrelay::API.new(config)
     server = HTTP::Server.new(api.handler)

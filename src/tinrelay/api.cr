@@ -9,19 +9,22 @@ module Tinrelay
     getter source_repository : String
     getter database_connections : Int32
     getter art_manifest_path : String?
+    getter permanent_metadata_limit : Int64
 
     def initialize(@bind = "127.0.0.1", @port = 8787,
                    @database_path = "tinrelay.db",
                    @bootstrap_template = "templates/common-bootstrap.md",
                    @source_repository = "https://github.com/mieko/tinrelay",
                    @database_connections = System.cpu_count,
-                   @art_manifest_path = nil)
+                   @art_manifest_path = nil,
+                   @permanent_metadata_limit = DEFAULT_PERMANENT_METADATA_LIMIT)
     end
   end
 
   class API
-    MAX_REQUEST_BYTES = 64 * 1024
-    ACCEPTANCE_TARGET = 250.milliseconds
+    MAX_REQUEST_BYTES       = 64 * 1024
+    ACCEPTANCE_TARGET       = 250.milliseconds
+    REGISTRATION_WINDOW_KEY = "all"
 
     getter config : ServerConfig
     getter database : Database
@@ -33,10 +36,13 @@ module Tinrelay
 
     def initialize(@config)
       @database = Database.new(config.database_path, config.database_connections)
-      @store = Store.new(database)
+      @store = Store.new(database, config.permanent_metadata_limit)
       @handoffs = DirectHandoff.new
       @submission_window = SubmissionWindow.new
       @hail_window = SubmissionWindow.new(Store::MAX_HAILS_PER_DAY, 24 * 60 * 60)
+      @registration_window = SubmissionWindow.new(
+        MAX_SHIP_REGISTRATIONS_PER_HOUR, 60 * 60
+      )
       art_manifest = ArtManifest.load(
         config.art_manifest_path, BootstrapPage::PAGE_KEYS
       )
@@ -99,8 +105,15 @@ module Tinrelay
         database.db.scalar("SELECT 1")
         json(context, 200, %({"status":"ready"}))
       when {"POST", "/v1/join"}
-        claim = parse_body(context, ShipClaim)
-        store.claim(claim)
+        prepared = store.prepare_claim(parse_body(context, ShipClaim))
+        if retry_after = @registration_window.admit(REGISTRATION_WINDOW_KEY)
+          context.response.headers["Retry-After"] = retry_after.to_s
+          return error(
+            context, 429, "registration_limited",
+            "relay is receiving too many registrations"
+          )
+        end
+        store.claim(prepared)
         json(context, 201, %({"state":"claimed"}))
       when {"POST", "/v1/ships/inspect"}
         json(context, 200, store.inspect_ship(parse_body(context, ShipInspection)))

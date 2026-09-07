@@ -1,4 +1,13 @@
 module Tinrelay
+  class PreparedShipClaim
+    getter ship : String
+    getter owner_key : Bytes
+    getter certificate : ShipRadioCertificate
+
+    def initialize(@ship, @owner_key, @certificate)
+    end
+  end
+
   class PreparedRelayEnvelope
     getter envelope : SignedRelayEnvelope
     getter ciphertext : Bytes
@@ -11,31 +20,42 @@ module Tinrelay
   end
 
   class Store
-    MAX_PENDING_PER_SHIP       = 100
-    MAX_TRANSMISSIONS_PER_HOUR =  60
-    MAX_HAILS_PER_DAY          =  12
-    MAX_CIPHERTEXT_BYTES       = 17 * 1024
-    MAX_PENDING_SECONDS        = FALLBACK_LIFETIME_SECONDS
-    AUTH_SKEW_SECONDS          = 5 * 60
-    UUID                       = /\A
+    MAX_PENDING_PER_SHIP         = 100
+    MAX_TRANSMISSIONS_PER_HOUR   =  60
+    MAX_HAILS_PER_DAY            =  12
+    MAX_UNALLOWED_HAILS_PER_SHIP =  12
+    MAX_CIPHERTEXT_BYTES         = 17 * 1024
+    MAX_PENDING_SECONDS          = FALLBACK_LIFETIME_SECONDS
+    AUTH_SKEW_SECONDS            = 5 * 60
+    UUID                         = /\A
       [0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-
       [89ab][0-9a-f]{3}-[0-9a-f]{12}
     \z/x
 
     getter database : Database
+    getter permanent_metadata_limit : Int64
 
-    def initialize(@database)
-      @fallback_write_mutex = Mutex.new
+    def initialize(@database,
+                   @permanent_metadata_limit = DEFAULT_PERMANENT_METADATA_LIMIT)
+      unless permanent_metadata_limit.in?(1_i64..MAX_PERMANENT_METADATA_LIMIT)
+        raise Invalid.new(
+          "permanent metadata limit must be between 1 and " +
+          MAX_PERMANENT_METADATA_LIMIT.to_s
+        )
+      end
+      @pending_write_mutex = Mutex.new
+      @permanent_write_mutex = Mutex.new
     end
 
-    def claim(claim : ShipClaim, now : Int64 = Time.utc.to_unix) : Nil
+    def prepare_claim(claim : ShipClaim) : PreparedShipClaim
       ship = Names.ship!(claim.ship)
       certificate = claim.radio_certificate
       raise Invalid.new("claim ship and radio certificate differ") unless certificate.ship == ship
       unless certificate.generation == 1 && certificate.owner_generation == 1
         raise Invalid.new("initial key generations must be 1")
       end
-      owner_key = Crypto.unb64(claim.owner_public_key, "owner public key")
+      owner_key = decode_owner_public_key(claim.owner_public_key)
+      decode_radio_public_keys(certificate)
       unless Crypto.verify(
                certificate.unsigned_bytes,
                Crypto.unb64(certificate.owner_signature),
@@ -43,25 +63,38 @@ module Tinrelay
              )
         raise Unauthorized.new("initial radio certificate is not signed by the ship owner")
       end
+      PreparedShipClaim.new(ship, owner_key, certificate)
+    end
 
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        inserted = connection.exec(
-          <<-SQL, ship, now
-            INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')
-            ON CONFLICT(name) DO NOTHING
-          SQL
-        ).rows_affected
-        raise Conflict.new("ship name is already claimed") unless inserted == 1
-        connection.exec(
-          <<-SQL, ship, owner_key, now
-            INSERT INTO ship_owner_keys(
-              ship, generation, public_key, state, valid_from
-            ) VALUES (?, 1, ?, 'active', ?)
-          SQL
-        )
-        insert_radio_key(connection, certificate)
+    def claim(prepared : PreparedShipClaim,
+              now : Int64 = Time.utc.to_unix) : Nil
+      @permanent_write_mutex.synchronize do
+        database.db.transaction do |transaction|
+          connection = transaction.connection
+          if connection.query_one?(
+               "SELECT 1 FROM ships WHERE name = ?", prepared.ship, as: Int64
+             )
+            raise Conflict.new("ship name is already claimed")
+          end
+          ensure_permanent_capacity!(connection, 3)
+          connection.exec(
+            "INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')",
+            prepared.ship, now
+          )
+          connection.exec(
+            <<-SQL, prepared.ship, prepared.owner_key, now
+              INSERT INTO ship_owner_keys(
+                ship, generation, public_key, state, valid_from
+              ) VALUES (?, 1, ?, 'active', ?)
+            SQL
+          )
+          insert_radio_key(connection, prepared.certificate)
+        end
       end
+    end
+
+    def permanent_metadata_usage : Int64
+      permanent_metadata_usage(database.db)
     end
 
     def inspect_ship(request : ShipInspection,
@@ -160,42 +193,51 @@ module Tinrelay
       hail
     end
 
-    def persist_hail(hail : Hail) : Bool
+    def persist_hail(hail : Hail,
+                     now : Int64 = Time.utc.to_unix) : Bool
       signature = Crypto.unb64(hail.signature, "hail signature")
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        active = connection.query_one?(
-          "SELECT 1 FROM ships WHERE name = ? AND state = 'active'",
-          hail.recipient_ship, as: Int64
-        )
-        next false unless active
-        ship_a, ship_b = relationship_pair(hail.sender_ship, hail.recipient_ship)
-        relationship = connection.query_one?(
-          <<-SQL, ship_a, ship_b, hail.sender_ship, hail.recipient_ship, hail.created_at,
-            SELECT 1
-              FROM relationships
-             WHERE ship_a = ? AND ship_b = ? AND state = 'active'
-               AND EXISTS (
-                 SELECT 1 FROM hails
-                  WHERE sender_ship = ? AND recipient_ship = ?
-                    AND allowed_at IS NOT NULL
-                    AND expires_at > ?
-               )
-          SQL
-          as: Int64
-        )
-        next false if relationship
-        sql = <<-SQL
-            INSERT OR IGNORE INTO hails(
-              id, sender_ship, sender_signing_generation, recipient_ship,
-              created_at, expires_at, signature
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-          SQL
-        connection.exec(
-          sql, hail.hail_id, hail.sender_ship,
-          hail.sender_signing_generation, hail.recipient_ship,
-          hail.created_at, hail.expires_at, signature
-        ).rows_affected == 1
+      @pending_write_mutex.synchronize do
+        database.db.transaction do |transaction|
+          connection = transaction.connection
+          active = connection.query_one?(
+            "SELECT 1 FROM ships WHERE name = ? AND state = 'active'",
+            hail.recipient_ship, as: Int64
+          )
+          next false unless active
+          ship_a, ship_b = relationship_pair(hail.sender_ship, hail.recipient_ship)
+          relationship = connection.query_one?(
+            <<-SQL, ship_a, ship_b, hail.sender_ship, hail.recipient_ship, hail.created_at,
+              SELECT 1
+                FROM relationships
+               WHERE ship_a = ? AND ship_b = ? AND state = 'active'
+                 AND EXISTS (
+                   SELECT 1 FROM hails
+                    WHERE sender_ship = ? AND recipient_ship = ?
+                      AND allowed_at IS NOT NULL
+                      AND expires_at > ?
+                 )
+            SQL
+            as: Int64
+          )
+          next false if relationship
+          pending = connection.scalar(
+            "SELECT COUNT(*) FROM hails " +
+            "WHERE recipient_ship = ? AND allowed_at IS NULL AND expires_at > ?",
+            hail.recipient_ship, now
+          ).as(Int64)
+          next false if pending >= MAX_UNALLOWED_HAILS_PER_SHIP
+          sql = <<-SQL
+              INSERT OR IGNORE INTO hails(
+                id, sender_ship, sender_signing_generation, recipient_ship,
+                created_at, expires_at, signature
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            SQL
+          connection.exec(
+            sql, hail.hail_id, hail.sender_ship,
+            hail.sender_signing_generation, hail.recipient_ship,
+            hail.created_at, hail.expires_at, signature
+          ).rows_affected == 1
+        end
       end.not_nil!
     end
 
@@ -213,9 +255,9 @@ module Tinrelay
 
     def persist(prepared : PreparedRelayEnvelope) : Bool
       # SQLite cannot reliably upgrade several concurrent read transactions into
-      # writers. Serialize only the final durable-fallback transaction; public
-      # rendering, verification, reads, and direct in-memory handoff stay concurrent.
-      @fallback_write_mutex.synchronize do
+      # writers. Serialize only pending-record transactions; public rendering,
+      # verification, reads, and direct in-memory handoff stay concurrent.
+      @pending_write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
           if stored_digest = connection.query_one?(
@@ -246,12 +288,12 @@ module Tinrelay
           connection, request.auth.ship, request.known_contact_generations, now
         )
         next RadioWaitResponse.new(contact_updates: updates) unless updates.empty?
+        envelope = pending_envelope(connection, request.auth.ship, now)
+        next RadioWaitResponse.new(envelope: envelope) if envelope
         hail = pending_hail(
           connection, request.auth.ship, request.known_contact_generations, now
         )
-        next RadioWaitResponse.new(hail: hail) if hail
-        envelope = pending_envelope(connection, request.auth.ship, now)
-        RadioWaitResponse.new(envelope: envelope)
+        RadioWaitResponse.new(hail: hail)
       end.not_nil!
     end
 
@@ -330,79 +372,83 @@ module Tinrelay
       end
       raise Invalid.new("closed peer cannot be retained") if retained.includes?(peer)
       certificate = request.certificate
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        verify_owner_action(
-          connection, request.auth, "relationship.close", request.payload, now
-        )
-        unless certificate.ship == request.auth.ship
-          raise Invalid.new("radio certificate belongs to another ship")
-        end
-        prior_generation = connection.scalar(
-          "SELECT MAX(generation) FROM ship_radio_keys WHERE ship = ?",
-          certificate.ship
-        ).as(Int64).to_i
-        unless certificate.generation == prior_generation + 1
-          raise Invalid.new("radio generation must advance by one")
-        end
-        verify_radio_certificate(connection, certificate)
-        prior_key = radio_key(connection, certificate.ship, prior_generation)
-        unless Crypto.verify(
-                 certificate.unsigned_bytes,
-                 Crypto.unb64(request.prior_radio_signature), prior_key[0]
-               )
-          raise Unauthorized.new("radio retune lacks the prior radio signature")
-        end
-        connection.exec(
-          "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
-          "WHERE ship = ? AND state = 'active'",
-          now, certificate.ship
-        )
-        insert_radio_key(connection, certificate, request.prior_radio_signature)
-        target_a, target_b = relationship_pair(request.auth.ship, peer)
-        unless connection.query_one?(
-                 "SELECT 1 FROM relationships WHERE ship_a = ? AND ship_b = ? AND state = 'active'",
-                 target_a, target_b, as: Int64
-               )
-          raise NotFound.new("active relationship not found")
-        end
-        deadline = now + MAX_PENDING_SECONDS
-        active_peers = [] of String
-        connection.query(
-          "SELECT ship_a, ship_b FROM relationships " +
-          "WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
-          request.auth.ship, request.auth.ship
-        ) do |rows|
-          rows.each do
-            ship_a, ship_b = rows.read(String, String)
-            active_peers << (ship_a == request.auth.ship ? ship_b : ship_a)
-          end
-        end
-        connection.exec(
-          "UPDATE relationships SET state = 'transitioning', transition_until = ? " +
-          "WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
-          deadline, request.auth.ship, request.auth.ship
-        )
-        retained.each do |retained_ship|
-          next unless active_peers.includes?(retained_ship)
-          connection.exec(
-            <<-SQL,
-              INSERT INTO relationship_transitions(
-                owner_ship, peer_ship, from_generation, to_generation, expires_at
-              ) VALUES (?, ?, ?, ?, ?)
-              ON CONFLICT(owner_ship, peer_ship) DO UPDATE SET
-                from_generation = excluded.from_generation,
-                to_generation = excluded.to_generation,
-                expires_at = excluded.expires_at
-            SQL
-            request.auth.ship,
-            retained_ship,
-            prior_generation,
-            certificate.generation,
-            deadline
+      @permanent_write_mutex.synchronize do
+        database.db.transaction do |transaction|
+          connection = transaction.connection
+          verify_owner_action(
+            connection, request.auth, "relationship.close", request.payload, now
           )
+          unless certificate.ship == request.auth.ship
+            raise Invalid.new("radio certificate belongs to another ship")
+          end
+          prior_generation = connection.scalar(
+            "SELECT MAX(generation) FROM ship_radio_keys WHERE ship = ?",
+            certificate.ship
+          ).as(Int64).to_i
+          unless certificate.generation == prior_generation + 1
+            raise Invalid.new("radio generation must advance by one")
+          end
+          verify_radio_certificate(connection, certificate)
+          prior_key = radio_key(connection, certificate.ship, prior_generation)
+          unless Crypto.verify(
+                   certificate.unsigned_bytes,
+                   Crypto.unb64(request.prior_radio_signature), prior_key[0]
+                 )
+            raise Unauthorized.new("radio retune lacks the prior radio signature")
+          end
+          target_a, target_b = relationship_pair(request.auth.ship, peer)
+          unless connection.query_one?(
+                   "SELECT 1 FROM relationships " +
+                   "WHERE ship_a = ? AND ship_b = ? AND state = 'active'",
+                   target_a, target_b, as: Int64
+                 )
+            raise NotFound.new("active relationship not found")
+          end
+          ensure_permanent_capacity!(connection, 1)
+          connection.exec(
+            "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
+            "WHERE ship = ? AND state = 'active'",
+            now, certificate.ship
+          )
+          insert_radio_key(connection, certificate, request.prior_radio_signature)
+          deadline = now + MAX_PENDING_SECONDS
+          active_peers = [] of String
+          connection.query(
+            "SELECT ship_a, ship_b FROM relationships " +
+            "WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
+            request.auth.ship, request.auth.ship
+          ) do |rows|
+            rows.each do
+              ship_a, ship_b = rows.read(String, String)
+              active_peers << (ship_a == request.auth.ship ? ship_b : ship_a)
+            end
+          end
+          connection.exec(
+            "UPDATE relationships SET state = 'transitioning', transition_until = ? " +
+            "WHERE state = 'active' AND (ship_a = ? OR ship_b = ?)",
+            deadline, request.auth.ship, request.auth.ship
+          )
+          retained.each do |retained_ship|
+            next unless active_peers.includes?(retained_ship)
+            connection.exec(
+              <<-SQL,
+                INSERT INTO relationship_transitions(
+                  owner_ship, peer_ship, from_generation, to_generation, expires_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(owner_ship, peer_ship) DO UPDATE SET
+                  from_generation = excluded.from_generation,
+                  to_generation = excluded.to_generation,
+                  expires_at = excluded.expires_at
+              SQL
+              request.auth.ship,
+              retained_ship,
+              prior_generation,
+              certificate.generation,
+              deadline
+            )
+          end
+          advance_admin(connection, request.auth)
         end
-        advance_admin(connection, request.auth)
       end
     end
 
@@ -443,68 +489,84 @@ module Tinrelay
                            now : Int64 = Time.utc.to_unix) : Nil
       peer = Names.ship!(request.peer_ship)
       require_uuid!(request.hail_id, "hail id")
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        verify_radio_action(connection, request.auth, "relationship.allow", request.payload, now)
-        connection.query_one?(
-          <<-SQL, request.hail_id, peer, request.auth.ship, now,
-            SELECT 1 FROM hails
-             WHERE id = ? AND sender_ship = ? AND recipient_ship = ?
-               AND collected_at IS NOT NULL AND expires_at > ?
-          SQL
-          as: Int64
-        ) || raise NotFound.new("authenticated hail is unavailable")
-        ship_a, ship_b = relationship_pair(request.auth.ship, peer)
-        connection.exec(
-          <<-SQL, ship_a, ship_b
-              INSERT INTO relationships(ship_a, ship_b, state)
-              VALUES (?, ?, 'active')
-            ON CONFLICT(ship_a, ship_b) DO UPDATE SET
-              state = 'active', transition_until = NULL
-          SQL
-        )
-        connection.exec(
-          "UPDATE hails SET allowed_at = COALESCE(allowed_at, ?) WHERE id = ?",
-          now, request.hail_id
-        )
+      @permanent_write_mutex.synchronize do
+        database.db.transaction do |transaction|
+          connection = transaction.connection
+          verify_radio_action(
+            connection, request.auth, "relationship.allow", request.payload, now
+          )
+          connection.query_one?(
+            <<-SQL, request.hail_id, peer, request.auth.ship, now,
+              SELECT 1 FROM hails
+               WHERE id = ? AND sender_ship = ? AND recipient_ship = ?
+                 AND collected_at IS NOT NULL AND expires_at > ?
+            SQL
+            as: Int64
+          ) || raise NotFound.new("authenticated hail is unavailable")
+          ship_a, ship_b = relationship_pair(request.auth.ship, peer)
+          existing = connection.query_one?(
+            "SELECT 1 FROM relationships WHERE ship_a = ? AND ship_b = ?",
+            ship_a, ship_b, as: Int64
+          )
+          ensure_permanent_capacity!(connection, 1) unless existing
+          connection.exec(
+            <<-SQL, ship_a, ship_b
+                INSERT INTO relationships(ship_a, ship_b, state)
+                VALUES (?, ?, 'active')
+              ON CONFLICT(ship_a, ship_b) DO UPDATE SET
+                state = 'active', transition_until = NULL
+            SQL
+          )
+          connection.exec(
+            "UPDATE hails SET allowed_at = COALESCE(allowed_at, ?) WHERE id = ?",
+            now, request.hail_id
+          )
+        end
       end
     end
 
     def rotate_owner(rotation : OwnerRotation,
                      now : Int64 = Time.utc.to_unix) : Nil
-      database.db.transaction do |transaction|
-        connection = transaction.connection
-        verify_owner_action(connection, rotation.auth, "owner.rotate", rotation.payload, now)
-        unless rotation.new_generation == rotation.auth.owner_generation + 1
-          raise Invalid.new("owner generation must advance by one")
+      @permanent_write_mutex.synchronize do
+        database.db.transaction do |transaction|
+          connection = transaction.connection
+          verify_owner_action(
+            connection, rotation.auth, "owner.rotate", rotation.payload, now
+          )
+          unless rotation.new_generation == rotation.auth.owner_generation + 1
+            raise Invalid.new("owner generation must advance by one")
+          end
+          new_key = decode_owner_public_key(rotation.new_public_key)
+          old_key = owner_key(
+            connection, rotation.auth.ship, rotation.auth.owner_generation
+          )
+          bytes = Canonical.fields(
+            "tinrelay-owner-rotation-v1",
+            rotation.auth.ship,
+            rotation.new_generation.to_s,
+            rotation.new_public_key
+          )
+          unless Crypto.verify(bytes, Crypto.unb64(rotation.prior_signature), old_key)
+            raise Unauthorized.new("owner rotation lacks the prior owner signature")
+          end
+          prior_signature = Crypto.unb64(rotation.prior_signature)
+          ensure_permanent_capacity!(connection, 1)
+          connection.exec(
+            "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
+            "WHERE ship = ? AND state = 'active'",
+            now,
+            rotation.auth.ship
+          )
+          connection.exec(
+            <<-SQL, rotation.auth.ship, rotation.new_generation, new_key, now, prior_signature
+              INSERT INTO ship_owner_keys(
+                ship, generation, public_key, state, valid_from,
+                authorization_signature
+              ) VALUES (?, ?, ?, 'active', ?, ?)
+            SQL
+          )
+          advance_admin(connection, rotation.auth)
         end
-        new_key = Crypto.unb64(rotation.new_public_key, "new owner public key")
-        old_key = owner_key(connection, rotation.auth.ship, rotation.auth.owner_generation)
-        bytes = Canonical.fields(
-          "tinrelay-owner-rotation-v1",
-          rotation.auth.ship,
-          rotation.new_generation.to_s,
-          rotation.new_public_key
-        )
-        unless Crypto.verify(bytes, Crypto.unb64(rotation.prior_signature), old_key)
-          raise Unauthorized.new("owner rotation lacks the prior owner signature")
-        end
-        prior_signature = Crypto.unb64(rotation.prior_signature)
-        connection.exec(
-          "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
-          "WHERE ship = ? AND state = 'active'",
-          now,
-          rotation.auth.ship
-        )
-        connection.exec(
-          <<-SQL, rotation.auth.ship, rotation.new_generation, new_key, now, prior_signature
-            INSERT INTO ship_owner_keys(
-              ship, generation, public_key, state, valid_from,
-              authorization_signature
-            ) VALUES (?, ?, ?, 'active', ?, ?)
-          SQL
-        )
-        advance_admin(connection, rotation.auth)
       end
     end
 
@@ -950,11 +1012,34 @@ module Tinrelay
       end
     end
 
+    private def decode_owner_public_key(encoded : String) : Bytes
+      key = Crypto.unb64(encoded, "owner public key")
+      unless key.size == Crypto::SIGN_PUBLIC_BYTES
+        raise Invalid.new("invalid owner public key length")
+      end
+      key
+    end
+
+    private def decode_radio_public_keys(
+      certificate : ShipRadioCertificate,
+    ) : Tuple(Bytes, Bytes)
+      signing = Crypto.unb64(certificate.signing_public_key, "radio signing public key")
+      encryption = Crypto.unb64(
+        certificate.encryption_public_key, "radio encryption public key"
+      )
+      unless signing.size == Crypto::SIGN_PUBLIC_BYTES
+        raise Invalid.new("invalid radio signing public key length")
+      end
+      unless encryption.size == Crypto::BOX_PUBLIC_BYTES
+        raise Invalid.new("invalid radio encryption public key length")
+      end
+      {signing, encryption}
+    end
+
     private def insert_radio_key(connection : DB::Connection,
                                  certificate : ShipRadioCertificate,
                                  prior_radio_signature : String? = nil) : Nil
-      signing = Crypto.unb64(certificate.signing_public_key, "radio signing public key")
-      encryption = Crypto.unb64(certificate.encryption_public_key, "radio encryption public key")
+      signing, encryption = decode_radio_public_keys(certificate)
       owner_signature = Crypto.unb64(certificate.owner_signature)
       prior_signature = prior_radio_signature.try { |value| Crypto.unb64(value) }
       connection.exec(
@@ -974,6 +1059,25 @@ module Tinrelay
         owner_signature,
         prior_signature
       )
+    end
+
+    private def permanent_metadata_usage(connection) : Int64
+      connection.scalar(
+        <<-SQL
+          SELECT (SELECT COUNT(*) FROM ships) +
+                 (SELECT COUNT(*) FROM ship_owner_keys) +
+                 (SELECT COUNT(*) FROM ship_radio_keys) +
+                 (SELECT COUNT(*) FROM relationships)
+        SQL
+      ).as(Int64)
+    end
+
+    private def ensure_permanent_capacity!(connection : DB::Connection,
+                                           growth : Int32) : Nil
+      used = permanent_metadata_usage(connection)
+      if used > permanent_metadata_limit - growth
+        raise Unavailable.new("permanent metadata capacity is exhausted")
+      end
     end
 
     private def write_owner_keys(json : JSON::Builder, ship : String) : Nil

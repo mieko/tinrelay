@@ -39,11 +39,17 @@ module Tinrelay
                           "https://github.com/mieko/tinrelay"
       art_manifest_path = ENV["TINRELAY_ART_MANIFEST"]?
       threads = ServerRuntime.thread_count(extract(argv, "--threads"))
+      permanent_metadata_limit = numeric(
+        extract(argv, "--permanent-metadata-limit"),
+        "--permanent-metadata-limit",
+        DEFAULT_PERMANENT_METADATA_LIMIT
+      )
       no_extra!(argv)
       ServerRuntime.enable_multicore(threads)
       config = ServerConfig.new(
         bind, port, database_path, template,
-        source_repository, threads, art_manifest_path
+        source_repository, threads, art_manifest_path,
+        permanent_metadata_limit
       )
       api = API.new(config)
       server = HTTP::Server.new(api.handler)
@@ -74,8 +80,12 @@ module Tinrelay
           STDERR.puts({event: "cleanup_failed", error: ex.class.name}.to_json)
         end
       end
-      STDERR.puts({event: "ready", bind: bind, port: port, protocol: PROTOCOL,
-                   threads: threads}.to_json)
+      STDERR.puts({
+        event: "ready", bind: bind, port: port, protocol: PROTOCOL,
+        threads: threads,
+        permanent_metadata_used: api.store.permanent_metadata_usage,
+        permanent_metadata_limit: permanent_metadata_limit,
+      }.to_json)
       server.listen
     ensure
       api.try(&.close)
@@ -92,6 +102,12 @@ module Tinrelay
 
     private def self.required(argv, name) : String
       extract(argv, name) || raise Invalid.new("#{name} is required")
+    end
+
+    private def self.numeric(value : String?, name : String,
+                             default : Int64) : Int64
+      return default unless value
+      value.to_i64? || raise Invalid.new("#{name} must be an integer")
     end
 
     private def self.no_extra!(argv) : Nil

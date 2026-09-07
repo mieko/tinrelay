@@ -7,10 +7,12 @@ module TinrelayClientTransportSpec
     end
   end
 
-  def self.with_response(status : Int32, body : String, &)
+  def self.with_response(status : Int32, body : String,
+                         headers = HTTP::Headers.new, &)
     server = HTTP::Server.new do |context|
       context.response.status_code = status
       context.response.content_type = "application/json"
+      headers.each { |key, values| context.response.headers[key] = values }
       context.response.print(body)
     end
     address = server.bind_tcp("127.0.0.1", 0)
@@ -84,6 +86,42 @@ describe Tinrelay::Remote do
       expect_raises(Tinrelay::Error, /response exceeds/) do
         Tinrelay::Remote.new(origin).post("/v1/test", %({}))
       end
+    end
+  end
+
+  it "uses the separate bounded identity-response path only where histories travel" do
+    identity = %({"padding":"#{"x" * (Tinrelay::Remote::MAX_RESPONSE_BYTES + 1)}"})
+    %w(/v1/ships/inspect /v1/radio/wait).each do |path|
+      TinrelayClientTransportSpec.with_response(200, identity) do |origin|
+        Tinrelay::Remote.new(origin).post(path, %({})).should eq(identity)
+      end
+    end
+
+    TinrelayClientTransportSpec.with_response(200, identity) do |origin|
+      expect_raises(Tinrelay::Error, /response exceeds/) do
+        Tinrelay::Remote.new(origin).post("/v1/transmissions", %({}))
+      end
+    end
+  end
+
+  it "surfaces bounded registration admission with the relay retry time" do
+    headers = HTTP::Headers{"Retry-After" => "37"}
+    TinrelayClientTransportSpec.with_response(429, %({"error":"busy"}), headers) do |origin|
+      error = expect_raises(Tinrelay::RegistrationLimited) do
+        Tinrelay::Remote.new(origin).post("/v1/join", %({}))
+      end
+      error.retry_after_seconds.should eq(37)
+      error.message.should eq(
+        "relay is receiving too many registrations; try again in 37 seconds"
+      )
+    end
+
+    TinrelayClientTransportSpec.with_response(429, %({"error":"busy"}), headers) do |origin|
+      error = expect_raises(Tinrelay::Unavailable) do
+        Tinrelay::Remote.new(origin).post("/v1/transmissions", %({}))
+      end
+      error.should_not be_a(Tinrelay::RegistrationLimited)
+      error.message.should eq("relay rate limit reached")
     end
   end
 

@@ -1,28 +1,4 @@
 module Tinrelay
-  class SubmissionWindow
-    @mutex = Mutex.new
-    @attempts = {} of String => Array(Int64)
-
-    def initialize(@limit : Int32 = Store::MAX_TRANSMISSIONS_PER_HOUR,
-                   @period_seconds : Int64 = 3600)
-    end
-
-    def allow?(ship : String, now : Int64 = Time.utc.to_unix) : Bool
-      @mutex.synchronize do
-        cutoff = now - @period_seconds
-        timestamps = @attempts[ship]?
-        if timestamps
-          timestamps.reject! { |timestamp| timestamp < cutoff }
-          @attempts.delete(ship) if timestamps.empty?
-        end
-        timestamps = @attempts[ship] ||= [] of Int64
-        return false if timestamps.size >= @limit
-        timestamps << now
-        true
-      end
-    end
-  end
-
   # One-process rendezvous between a parked radio wait and a sender request.
   # It never owns durable state: a handoff either reaches the destination spool
   # acknowledgement or the caller persists the prepared envelope in SQLite.

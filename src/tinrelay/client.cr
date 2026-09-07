@@ -1,8 +1,10 @@
 module Tinrelay
   class Remote
-    # A radio response can contain the service's 64 KiB maximum request envelope,
-    # plus the small JSON wrapper. No client endpoint has a larger valid response.
-    MAX_RESPONSE_BYTES = 72 * 1024
+    # Ordinary responses fit the largest transmission plus its JSON wrapper.
+    # Identity responses are separately bounded from protocol 1's maximum accepted
+    # permanent-history allowance.
+    MAX_RESPONSE_BYTES      = MAX_ORDINARY_RESPONSE_BYTES.to_i
+    IDENTITY_RESPONSE_PATHS = {"/v1/ships/inspect", "/v1/radio/wait"}
 
     getter origin : String
 
@@ -28,7 +30,10 @@ module Tinrelay
       }
       headers["Content-Type"] = "application/json" if body
       client.exec(method, uri.request_target, headers: headers, body: body) do |response|
-        response_body(response.status_code, response.success?, read_body(response.body_io))
+        response_body(
+          response.status_code, response.success?,
+          read_body(response.body_io, response_limit(path)), response.headers, path
+        )
       end
     rescue Socket::Error | IO::TimeoutError
       raise TransportUnavailable.new
@@ -50,17 +55,23 @@ module Tinrelay
       end
     end
 
-    private def read_body(io : IO) : String
+    private def response_limit(path : String) : Int64
+      return MAX_IDENTITY_RESPONSE_BYTES if IDENTITY_RESPONSE_PATHS.includes?(path)
+      MAX_RESPONSE_BYTES.to_i64
+    end
+
+    private def read_body(io : IO, limit : Int64) : String
       buffer = IO::Memory.new
-      count = IO.copy(io, buffer, MAX_RESPONSE_BYTES + 1)
-      if count > MAX_RESPONSE_BYTES
-        raise Error.new("relay response exceeds #{MAX_RESPONSE_BYTES} bytes")
+      count = IO.copy(io, buffer, limit + 1)
+      if count > limit
+        raise Error.new("relay response exceeds #{limit} bytes")
       end
       buffer.to_s
     end
 
     private def response_body(status_code : Int32, success : Bool,
-                              body : String) : String
+                              body : String, headers : HTTP::Headers,
+                              path : String) : String
       return body if success
       if status_code == 426
         evidence = protocol_mismatch_evidence(body)
@@ -73,12 +84,19 @@ module Tinrelay
         valid, back_at = maintenance_evidence(body)
         raise Maintenance.new(back_at) if valid
       end
+      if status_code == 429 && path == "/v1/join"
+        retry_after = headers["Retry-After"]?.try(&.to_i?)
+        if retry_after && retry_after > 0
+          raise RegistrationLimited.new(retry_after)
+        end
+      end
       case status_code
       when 400      then raise Invalid.new("relay rejected an invalid request")
       when 401, 403 then raise Unauthorized.new("relay authentication failed")
       when 404      then raise NotFound.new("relay object is unavailable")
       when 409      then raise Conflict.new("relay reported a state conflict")
       when 410      then raise Expired.new("relay object has expired")
+      when 429      then raise Unavailable.new("relay rate limit reached")
       when 503      then raise Unavailable.new("relay is unavailable")
       else               raise Error.new("relay returned HTTP #{status_code}")
       end
