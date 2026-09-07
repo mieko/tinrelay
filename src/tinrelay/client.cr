@@ -436,15 +436,13 @@ module Tinrelay
       identity.generation
     end
 
-    def allow_contact(peer_ship : String, local_hail_id : String,
-                      spool : Spool) : ShipContact
-      peer = Names.ship!(peer_ship)
+    def allow_contact(local_hail_id : String, spool : Spool) : ShipContact
       record = spool.get(local_hail_id).as?(HailSpoolRecord) ||
                raise Invalid.new("local inbox item is not a hail")
-      raise Invalid.new("hail belongs to another sender") unless record.sender_ship == peer
       unless record.recipient_ship == keyring.data.ship
         raise Invalid.new("hail belongs to another recipient")
       end
+      peer = Names.ship!(record.sender_ship)
       prior = keyring.data.contacts.find { |contact| contact.ship == peer }
       raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
       verify_hail_record!(record, prior)
@@ -468,7 +466,7 @@ module Tinrelay
       reconcile_radio_if_pending!
       if keyring.data.pending_radio
         raise Conflict.new(
-          "finish the pending contact-close radio retune before rotating the owner key"
+          "finish the pending contact close radio retune before rotating the owner key"
         )
       end
       sync_owner!
@@ -1137,9 +1135,9 @@ module Tinrelay
 
     private def promote_pending_radio!(identity : ShipRadioIdentity) : Nil
       pending = keyring.data.pending_radio ||
-                raise Conflict.new("no pending contact-close radio identity")
+                raise Conflict.new("no pending contact close radio identity")
       unless pending.to_json == identity.to_json
-        raise Conflict.new("pending contact-close radio identity changed")
+        raise Conflict.new("pending contact close radio identity changed")
       end
       prior = keyring.data.radio!
       prior.retire_after = Time.utc.to_unix + FALLBACK_LIFETIME_SECONDS

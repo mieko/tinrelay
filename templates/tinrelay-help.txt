@@ -1,42 +1,46 @@
 TinRelay — small encrypted ship-to-ship correspondence
 
 Usage:
-  tinrelay COMMAND [ARGUMENTS] --ship SHIP
+  tinrelay --ship SHIP COMMAND [ARGUMENTS]
   tinrelay help
   tinrelay version
 
 SHIP always selects your local ship. It chooses the identity, keys, configuration,
-inbox, and outbox used by the command. It never names the destination.
+inbox, and outbox used by the command. It never names the destination. The global
+`--ship SHIP` pair may appear before or after the command.
 
 Start here:
-  tinrelay join --server URL --ship SHIP
-  tinrelay radio wait --ship SHIP
+  tinrelay --ship SHIP join --server URL
+  tinrelay --ship SHIP radio wait
 
 First contact:
-  tinrelay hail REMOTE_SHIP --ship SHIP
-  tinrelay contact-allow REMOTE_SHIP --hail-id LOCAL_HAIL_ID --ship SHIP
+  tinrelay --ship SHIP hail REMOTE_SHIP
+  tinrelay --ship SHIP contact allow LOCAL_HAIL_ID
 
 Correspondence:
-  tinrelay send LOCAL@REMOTE_SHIP|@REMOTE_SHIP [--as LOCAL] --body-file - --ship SHIP
-  tinrelay inbox list --ship SHIP
-  tinrelay inbox show ID --ship SHIP
-  tinrelay outbox list --ship SHIP
-  tinrelay outbox retry TRANSMISSION --ship SHIP
+  tinrelay --ship SHIP send LOCAL@REMOTE_SHIP|@REMOTE_SHIP [--as LOCAL] < TRANSMISSION
+  tinrelay --ship SHIP inbox list
+  tinrelay --ship SHIP inbox show ID
+  tinrelay --ship SHIP outbox list
+  tinrelay --ship SHIP outbox retry TRANSMISSION
+
+`send` reads the complete transmission from stdin through EOF. At an interactive
+terminal, Control-D completes the body.
 
 Radio room:
-  tinrelay radio collect --ship SHIP
-  tinrelay radio wait --ship SHIP
-  tinrelay radio wait --local --ship SHIP
-  tinrelay radio poll --ship SHIP
-  tinrelay radio status LOCAL_ID --ship SHIP
-  tinrelay radio routed LOCAL_ID --ship SHIP
+  tinrelay --ship SHIP radio collect
+  tinrelay --ship SHIP radio wait
+  tinrelay --ship SHIP radio wait --local
+  tinrelay --ship SHIP radio poll
+  tinrelay --ship SHIP radio status LOCAL_ID
+  tinrelay --ship SHIP radio routed LOCAL_ID
 
 Contacts and identity:
-  tinrelay who REMOTE_SHIP|LOCAL@REMOTE_SHIP --ship SHIP
-  tinrelay contact-close REMOTE_SHIP --ship SHIP
-  tinrelay contact-unblock REMOTE_SHIP --ship SHIP
-  tinrelay owner-rotate --ship SHIP
-  tinrelay ship freeze|activate|revoke --ship SHIP
+  tinrelay --ship SHIP who REMOTE_SHIP|LOCAL@REMOTE_SHIP
+  tinrelay --ship SHIP contact close REMOTE_SHIP
+  tinrelay --ship SHIP contact unblock REMOTE_SHIP
+  tinrelay --ship SHIP owner rotate
+  tinrelay --ship SHIP ship freeze|activate|revoke
 
 FIRST CONTACT
 
@@ -44,10 +48,11 @@ FIRST CONTACT
 private attention name. Acceptance is deliberately opaque: it does not reveal
 whether the ship exists or anyone saw the hail.
 
-After receiving a hail, a local correspondent may use `contact-allow` with the
-opaque local hail ID shown by the radio room. This pins the observed ship identity
-and lets this ship send to the hailing ship. The other ship must receive and allow
-a return hail before it can send back.
+After receiving a hail, a local correspondent may use `contact allow` with the
+opaque local hail ID shown by the radio room. TinRelay derives the hailing ship
+from that authenticated local record, pins the observed ship identity, and lets
+this ship send to it. The other ship must receive and allow a return hail before
+it can send back.
 
 First contact is trust on first use. The repeater could substitute an identity
 before the first local pin. Later silent substitution fails continuity checks.
@@ -107,12 +112,12 @@ is interactive. Otherwise it names the missing file and the optional
 `--passphrase-file` override. Secret files must have no group or other permission
 bits.
 
-`--keyring`, `--owner-key`, `--passphrase-file`, `--spool`, and `--outbox` are
-explicit operator and test overrides. There is no implicit current-ship state.
+`--passphrase-file` is an explicit protected-secret override. There is no implicit
+current-ship state.
 
 CLOSING A CONTACT
 
-`contact-close` blocks the pinned contact locally, closes the relay relationship,
+`contact close` blocks the pinned contact locally, closes the relay relationship,
 and retunes this ship's radio for its remaining peers. Those peers have 96 hours to
-acknowledge the owner-signed transition. `contact-unblock` removes the local block
-but does not restore the relationship; a new hail and `contact-allow` are required.
+acknowledge the owner-signed transition. `contact unblock` removes the local block
+but does not restore the relationship; a new hail and `contact allow` are required.

@@ -63,10 +63,10 @@ module Tinrelay
         radio(argv, ship, paths, passphrase_file)
       when "inbox"
         inbox(argv, paths)
-      when "owner-rotate"
-        no_extra!(argv)
-        generation = client(paths, passphrase_file).rotate_owner
-        puts({state: "rotated", owner_generation: generation}.to_json)
+      when "owner"
+        owner(argv, paths, passphrase_file)
+      when "contact"
+        contact(argv, ship, paths, passphrase_file)
       when "ship"
         operation = argv.shift? || raise Invalid.new("ship requires freeze, activate, or revoke")
         unless operation.in?({"freeze", "activate", "revoke"})
@@ -75,24 +75,6 @@ module Tinrelay
         no_extra!(argv)
         client(paths, passphrase_file).ship_change(operation)
         puts({state: operation}.to_json)
-      when "contact-close"
-        peer = argv.shift? || raise Invalid.new("contact-close requires a peer ship")
-        no_extra!(argv)
-        generation = client(paths, passphrase_file).close_contact(peer)
-        puts({state: "closed", ship: ship, peer_ship: peer,
-              radio_generation: generation}.to_json)
-      when "contact-unblock"
-        peer = argv.shift? || raise Invalid.new("contact-unblock requires a peer ship")
-        no_extra!(argv)
-        contact = client(paths, passphrase_file).unblock_contact(peer)
-        puts({state: "unblocked", ship: ship, peer_ship: contact.ship}.to_json)
-      when "contact-allow"
-        peer = argv.shift? || raise Invalid.new("contact-allow requires a peer ship")
-        local_hail_id = required(argv, "--hail-id")
-        no_extra!(argv)
-        client(paths, passphrase_file).allow_contact(peer, local_hail_id, Spool.new(paths.spool))
-        puts({state: "relationship_active", ship: ship, peer_ship: peer,
-              local_hail_id: local_hail_id}.to_json)
       else
         raise Invalid.new("unknown command: #{command}")
       end
@@ -117,6 +99,40 @@ module Tinrelay
     rescue ex : ArgumentError
       STDERR.puts({error: "invalid_argument", message: ex.message}.to_json)
       exit 2
+    end
+
+    private def self.owner(argv, paths, passphrase_file) : Nil
+      operation = argv.shift? || raise Invalid.new("owner requires rotate")
+      raise Invalid.new("invalid owner operation") unless operation == "rotate"
+      no_extra!(argv)
+      generation = client(paths, passphrase_file).rotate_owner
+      puts({state: "rotated", owner_generation: generation}.to_json)
+    end
+
+    private def self.contact(argv, ship, paths, passphrase_file) : Nil
+      operation = argv.shift? || raise Invalid.new("contact requires allow, close, or unblock")
+      case operation
+      when "allow"
+        local_hail_id = argv.shift? || raise Invalid.new("contact allow requires a local hail ID")
+        no_extra!(argv)
+        allowed = client(paths, passphrase_file)
+          .allow_contact(local_hail_id, Spool.new(paths.spool))
+        puts({state: "relationship_active", ship: ship, peer_ship: allowed.ship,
+              local_hail_id: local_hail_id}.to_json)
+      when "close"
+        peer = argv.shift? || raise Invalid.new("contact close requires a peer ship")
+        no_extra!(argv)
+        generation = client(paths, passphrase_file).close_contact(peer)
+        puts({state: "closed", ship: ship, peer_ship: peer,
+              radio_generation: generation}.to_json)
+      when "unblock"
+        peer = argv.shift? || raise Invalid.new("contact unblock requires a peer ship")
+        no_extra!(argv)
+        unblocked = client(paths, passphrase_file).unblock_contact(peer)
+        puts({state: "unblocked", ship: ship, peer_ship: unblocked.ship}.to_json)
+      else
+        raise Invalid.new("invalid contact operation")
+      end
     end
 
     private def self.radio(argv, ship, paths, passphrase_file) : Nil

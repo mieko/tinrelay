@@ -108,9 +108,7 @@ describe "relationship closure and finite radio retune" do
       relay_hail_id = delta_spool.get(delta_event.local_id)
         .as(Tinrelay::HailSpoolRecord).hail_id
       relay_hail_id.should eq(hail.hail_id)
-      peers["delta"].allow_contact(
-        "alpha", delta_event.local_id, delta_spool
-      )
+      peers["delta"].allow_contact(delta_event.local_id, delta_spool)
       api.database.db.query_one(
         "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'delta'",
         as: String

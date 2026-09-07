@@ -48,7 +48,7 @@ describe "contact trust and content-free hails" do
       beta.keyring.data.contacts.should be_empty
       alpha.keyring.data.contacts.should be_empty
 
-      beta.allow_contact("alpha", event.local_id, beta_spool)
+      beta.allow_contact(event.local_id, beta_spool)
       beta.keyring.data.contact!("alpha").radio_certificate.to_json.should eq(
         alpha.keyring.data.radio!.certificate.to_json
       )
@@ -62,7 +62,7 @@ describe "contact trust and content-free hails" do
       return_event = alpha.radio_wait(alpha_spool, hold_seconds: 0)
       return_event.kind.should eq("hail")
       alpha_spool.routed(return_event.local_id)
-      alpha.allow_contact("beta", return_event.local_id, alpha_spool)
+      alpha.allow_contact(return_event.local_id, alpha_spool)
       alpha.keyring.data.contact!("beta").radio_certificate.to_json.should eq(
         beta.keyring.data.radio!.certificate.to_json
       )
@@ -140,7 +140,7 @@ describe "contact trust and content-free hails" do
       end
       event = alpha.radio_wait(spool, hold_seconds: 0)
       spool.routed(event.local_id)
-      alpha.allow_contact("beta", event.local_id, spool)
+      alpha.allow_contact(event.local_id, spool)
 
       beta.hail("alpha")
       api.database.db.scalar(

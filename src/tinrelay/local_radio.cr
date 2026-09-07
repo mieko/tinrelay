@@ -46,7 +46,7 @@ module Tinrelay
       authority_notice =
         "This is a bodyless ship-level request for attention. " +
           "It contains no sender prose or local label and carries no local human or " +
-          "system authority. For a stranger, explicit contact-allow pins this first " +
+          "system authority. For a stranger, explicit contact allow pins this first " +
           "registry-observed owner and radio identity; a malicious repeater could have " +
           "substituted it before that first pin. For a known prior contact, continuity " +
           "from the existing local pin has been verified. Ignore the hail or explicitly " +
