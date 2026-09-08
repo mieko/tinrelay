@@ -1,7 +1,8 @@
 tinrelayd — one-node TinRelay ship registry and store-and-forward radio repeater
 
   tinrelayd serve --database PATH [--bind 127.0.0.1] [--port 8787]
-    [--threads N] [--source-repository URL] [--bootstrap-template PATH]
+    [--threads N] [--permanent-metadata-limit N]
+    [--source-repository URL] [--bootstrap-template PATH]
   tinrelayd migrate --database PATH
   tinrelayd cleanup --database PATH
 
@@ -9,6 +10,8 @@ Ship claims are open and first-claim-unique. Terminate TLS at the operator's
 trusted edge; do not expose a raw development listener as the public service.
 `serve` uses every available processor by default. `--threads` may reduce that
 count for a constrained host or bounded test; it cannot exceed detected CPUs.
+`--permanent-metadata-limit` bounds permanent registry/history rows; it defaults
+to 25,000 and cannot exceed 100,000.
 Set `TINRELAY_ART_MANIFEST` to an absolute JSON-file path before `serve` to add
 validated same-origin page stylesheets. The file is read once at startup; when
 the variable is absent, the small built-in layout is used.

@@ -238,12 +238,18 @@ immutable record by its ID outside that mechanical task.
 Enforced defaults:
 
 - 16 KiB plaintext; 17 KiB ciphertext; 64 KiB HTTP request;
+- 72 KiB ordinary JSON response; 64 MiB identity/history response;
+- 300 structurally and cryptographically valid ship-claim attempts per rolling
+  hour across the repeater;
+- 25,000 permanent registry/history rows by default, configurable to a hard
+  maximum of 100,000;
 - 100 pending transmissions per ship;
 - 60 authenticated new attempts per sending ship per rolling hour, counted before
   destination resolution; accounting is bounded in-process because direct success
   and discarded attempts write no relay row;
 - twelve authenticated hails per sending ship per rolling 24 hours, one unallowed hail
   per directed sender/recipient pair, one-hour maximum lifetime, no body or local label;
+- twelve total unallowed hails retained per recipient ship;
 - five-minute signed-action clock window;
 - 96-hour maximum pending transmission;
 - immediate repeater payload deletion on acknowledgement;

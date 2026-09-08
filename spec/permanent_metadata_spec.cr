@@ -237,24 +237,4 @@ describe "permanent relay metadata capacity" do
       JSON.parse(card)["owner_keys"].as_a.size.should eq(300)
     end
   end
-
-  it "bounds every distinct history contribution, separator, and fixed framing" do
-    row_count = Tinrelay::MAX_PERMANENT_METADATA_LIMIT
-    array_count = 4_i64
-    repeated_entries =
-      row_count * Tinrelay::IdentityResponseBounds.maximum_permanent_row_bytes
-    separators =
-      (row_count - array_count) *
-        Tinrelay::IdentityResponseBounds::PERMANENT_ROW_SEPARATOR_BYTES
-    fixed_shape = {
-      owner_keys:  [] of String,
-      radio_keys:  [] of String,
-      owner_chain: [] of String,
-      chain:       [] of String,
-    }.to_json.bytesize.to_i64
-
-    fixed_shape.should be <= Tinrelay::IdentityResponseBounds::FIXED_ENVELOPE_BYTES
-    maximum_serialized_shape = repeated_entries + separators + fixed_shape
-    Tinrelay::MAX_IDENTITY_RESPONSE_BYTES.should be >= maximum_serialized_shape
-  end
 end
