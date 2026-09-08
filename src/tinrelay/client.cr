@@ -148,19 +148,83 @@ module Tinrelay
 
     def self.join(keyring_path : String, server : String, ship : String,
                   passphrase : String, owner_path : String? = nil) : Client
-      keyring = Keyring.create(keyring_path, server, ship, passphrase, owner_path)
+      owner_file = owner_path || "#{keyring_path}.owner"
+      existing = File.exists?(keyring_path) || File.exists?(owner_file)
+      created = false
       begin
+        keyring = if existing
+                    loaded = Keyring.load(keyring_path, passphrase, owner_file)
+                    unless loaded.data.server == server && loaded.data.ship == ship
+                      raise Unauthorized.new(
+                        "existing provisional keyring does not match this claim"
+                      )
+                    end
+                    loaded.owner(passphrase)
+                    loaded
+                  else
+                    fresh = Keyring.create(
+                      keyring_path, server, ship, passphrase, owner_file
+                    )
+                    created = true
+                    fresh
+                  end
         client = new(keyring, passphrase)
+        return client if existing && claim_committed?(client, keyring)
         claim = ShipClaim.new(
           ship, keyring.data.owner_public_key, keyring.data.radio!.certificate
         )
-        client.remote.post("/v1/join", claim.to_json)
+        begin
+          client.remote.post("/v1/join", claim.to_json)
+        rescue ex : Conflict
+          return client if existing && claim_committed?(client, keyring)
+          raise ex
+        end
         client
-      rescue ex
-        File.delete(keyring_path) if File.exists?(keyring_path)
-        File.delete(keyring.owner_path) if File.exists?(keyring.owner_path)
+      rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired
+        remove_provisional_claim(keyring_path, owner_file) if created
+        raise ex
+      rescue ex : ProtocolMismatch | RegistrationLimited
+        remove_provisional_claim(keyring_path, owner_file) if created
         raise ex
       end
+    end
+
+    private def self.remove_provisional_claim(keyring_path : String,
+                                              owner_path : String) : Nil
+      File.delete(keyring_path) if File.exists?(keyring_path)
+      File.delete(owner_path) if File.exists?(owner_path)
+    end
+
+    private def self.claim_committed?(client : Client, keyring : Keyring) : Bool
+      document = JSON.parse(client.who(keyring.data.ship))
+      return false unless document["ship"].as_s == keyring.data.ship
+      return false unless document["state"].as_s == "active"
+      owner = document["owner_keys"].as_a.find do |item|
+        item["generation"].as_i == 1 && item["state"].as_s == "active"
+      end
+      radio = document["radio_keys"].as_a.find do |item|
+        item["generation"].as_i == 1 && item["state"].as_s == "active"
+      end
+      return false unless owner && radio
+      certificate = ShipRadioCertificate.new(
+        document["ship"].as_s, radio["generation"].as_i.to_i,
+        radio["signing_public_key"].as_s, radio["encryption_public_key"].as_s,
+        radio["issued_at"].as_i64, radio["owner_generation"].as_i.to_i,
+        radio["owner_signature"].as_s
+      )
+      expected = keyring.data.radio!(1).certificate
+      unless owner["public_key"].as_s == keyring.data.owner_public_key &&
+             certificate.to_json == expected.to_json &&
+             Crypto.verify(
+               certificate.unsigned_bytes,
+               Crypto.unb64(certificate.owner_signature),
+               Crypto.unb64(keyring.data.owner_public_key)
+             )
+        raise Unauthorized.new("remote claim does not match the provisional ship identity")
+      end
+      true
+    rescue Unauthorized | NotFound | Unavailable
+      false
     end
 
     def send(recipient : String, body : String, from_label : String? = nil,
