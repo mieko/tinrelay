@@ -101,6 +101,7 @@ module Tinrelay
       database.db.transaction do |transaction|
         connection = transaction.connection
         ships = %w[active frozen revoked].to_h { |state| {state, 0_i64} }
+        metadata_used = permanent_metadata_usage(connection)
         connection.query("SELECT state, COUNT(*) FROM ships GROUP BY state") do |rows|
           rows.each do
             state, count = rows.read(String, Int64)
@@ -129,6 +130,9 @@ module Tinrelay
             "SELECT COALESCE(SUM(LENGTH(ciphertext)), 0) FROM transmissions " +
             "WHERE state = 'pending'"
           ).as(Int64),
+          metadata_used:     metadata_used,
+          metadata_limit:    permanent_metadata_limit,
+          metadata_headroom: Math.max(permanent_metadata_limit - metadata_used, 0_i64),
         }
       end.not_nil!
     end
@@ -334,20 +338,22 @@ module Tinrelay
     end
 
     def acknowledge(request : TransmissionAck,
-                    now : Int64 = Time.utc.to_unix) : Nil
+                    now : Int64 = Time.utc.to_unix) : Int64?
       require_uuid!(request.transmission_id, "transmission id")
       database.db.transaction do |transaction|
         connection = transaction.connection
         verify_radio_action(connection, request.auth, "transmission.ack", request.payload, now)
         row = connection.query_one?(
-          "SELECT recipient_ship, state FROM transmissions WHERE id = ?",
-          request.transmission_id, as: {String, String}
+          "SELECT recipient_ship, state, accepted_at FROM transmissions WHERE id = ?",
+          request.transmission_id, as: {String, String, Int64}
         )
         # A successful direct handoff has no relay row. Treat its later ack retry,
         # an already-cleaned fallback, and an unrelated opaque ID identically.
         if row && row[0] == request.auth.ship && row[1] == "pending"
           erase_payload(connection, request.transmission_id, now)
+          next Math.max(now - row[2], 0_i64)
         end
+        nil
       end
     end
 

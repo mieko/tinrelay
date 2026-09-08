@@ -130,6 +130,11 @@ gauges survive restart; process counters and the process start timestamp reset
 with `tinrelayd`. Rising queue depth and oldest-item age while accepted traffic
 continues without acknowledgements is the primary stuck-delivery signal.
 
+The fixed registration outcomes include `cidr_denied` and `closed` so the
+operator dashboard can reserve their final bounded slots. Those two series are
+currently placeholders: the registration-policy implementation must wire real
+events before either zero can be interpreted as observed production truth.
+
 Logs are newline JSON containing request ID, method, normalized public path, HTTP
 status, duration, cleanup counts, and exception class. They omit bodies,
 ciphertexts, signatures, and key material. Monitor readiness,

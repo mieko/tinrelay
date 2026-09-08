@@ -128,15 +128,17 @@ module Tinrelay
         radio_wait(context)
       when {"POST", "/v1/transmissions/ack"}
         acknowledgement = parse_body(context, TransmissionAck)
-        if prepared = handoffs.prepared_for_ack(
-             acknowledgement.transmission_id, acknowledgement.auth.ship
-           )
-          store.verify_ack(acknowledgement)
-          handoffs.complete(acknowledgement.transmission_id)
-        else
-          store.acknowledge(acknowledgement)
-        end
+        latency = if prepared = handoffs.prepared_for_ack(
+                       acknowledgement.transmission_id, acknowledgement.auth.ship
+                     )
+                    store.verify_ack(acknowledgement)
+                    handoffs.complete(acknowledgement.transmission_id)
+                    Math.max(Time.utc.to_unix - prepared.accepted_at, 0_i64)
+                  else
+                    store.acknowledge(acknowledgement)
+                  end
         metrics.transmission("acknowledged")
+        latency.try { |seconds| metrics.acknowledgement_latency(seconds) }
         json(context, 200, %({"state":"acknowledged"}))
       when {"POST", "/v1/hails/ack"}
         store.acknowledge_hail(parse_body(context, HailAck))
@@ -213,6 +215,9 @@ module Tinrelay
       remaining = acceptance_at - Time.instant
       sleep remaining if remaining > Time::Span.zero
       metrics.transmission(outcome)
+      if outcome != "rejected"
+        metrics.transmission_bytes(outcome, prepared.not_nil!.ciphertext.size.to_i64)
+      end
       counted = true
       json(context, 202, %({"state":"accepted"}))
     rescue ex

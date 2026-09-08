@@ -11,7 +11,7 @@ describe "repeater metrics" do
 
       alpha = TinrelaySpec.admit(root, origin, "alpha", "alpha metrics passphrase")
       beta = TinrelaySpec.admit(root, origin, "beta", "beta metrics passphrase")
-      alpha.send("crew@alpha", "queued self transmission")
+      envelope = alpha.send("crew@alpha", "queued self transmission")
       alpha.hail("beta")
       waiter = api.handoffs.park("alpha", 1)
       invalid_headers = HTTP::Headers{
@@ -30,19 +30,35 @@ describe "repeater metrics" do
       response.body.should contain("tinrelay_queued_transmissions 1")
       response.body.should contain("tinrelay_queued_hails 1")
       response.body.should contain("tinrelay_registrations_total{outcome=\"accepted\"} 2")
+      response.body.should contain("tinrelay_registrations_total{outcome=\"cidr_denied\"} 0")
+      response.body.should contain("tinrelay_registrations_total{outcome=\"closed\"} 0")
       response.body.should contain("tinrelay_transmissions_total{outcome=\"queued\"} 1")
       response.body.should contain("tinrelay_transmissions_total{outcome=\"rejected\"} 1")
       response.body.should contain("tinrelay_hails_total{outcome=\"accepted\"} 1")
-      response.body.should contain("tinrelay_registrations_total{outcome=\"cidr_denied\"} 0")
       response.body.should contain("tinrelay_radio_waits_total{outcome=\"disconnect\"} 0")
       response.body.should contain("tinrelay_retained_ciphertext_bytes ")
+      response.body.should contain("tinrelay_permanent_metadata_items{state=\"used\"} 6")
+      response.body.should contain("tinrelay_permanent_metadata_items{state=\"limit\"} 25000")
+      response.body.should contain("tinrelay_configuration_generation 1")
+      response.body.should contain("tinrelay_build_info{build=\"")
+      response.body.should match(
+        /tinrelay_transmission_ciphertext_bytes_total\{outcome="queued"\} [1-9][0-9]*/
+      )
       response.body.should_not contain("alpha")
       response.body.should_not contain("beta")
+
+      alpha.acknowledge(envelope.transmission_id)
+      api.reload_site_configuration
+      api.metrics.configuration_reload("accepted")
+      updated = HTTP::Client.get("#{origin}/metrics")
+      updated.body.should contain("tinrelay_transmissions_total{outcome=\"acknowledged\"} 1")
+      updated.body.should contain("tinrelay_acknowledgement_latency_seconds_count 1")
+      updated.body.should contain("tinrelay_configuration_generation 2")
 
       head = HTTP::Client.head("#{origin}/metrics")
       head.status_code.should eq(200)
       head.body.should be_empty
-      head.headers["Content-Length"].to_i.should eq(response.body.bytesize)
+      head.headers["Content-Length"].to_i.should eq(updated.body.bytesize)
     end
   end
 end
