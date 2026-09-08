@@ -272,7 +272,7 @@ module Tinrelay
       if path == "/sitemap.xml"
         return public_text(
           context,
-          bootstrap_page.static("sitemap.xml"),
+          bootstrap_page.sitemap,
           "application/xml; charset=utf-8"
         )
       end
@@ -291,7 +291,7 @@ module Tinrelay
 
     private def homepage(context : HTTP::Server::Context,
                          explicit_markdown : Bool) : Int32
-      markdown = bootstrap_page.static("home.md")
+      markdown = bootstrap_page.homepage
       alternate = "/index.md"
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
       body = wants_markdown ? markdown : bootstrap_page.html(
@@ -339,7 +339,7 @@ module Tinrelay
     end
 
     private def public_not_found(context : HTTP::Server::Context) : Int32
-      markdown = bootstrap_page.static("not-found.md")
+      markdown = bootstrap_page.not_found
       wants_markdown = markdown_requested?(context.request)
       body = wants_markdown ? markdown : bootstrap_page.html(
         markdown, true, "/line/index.md", "not-found", handoffs.waiting_count
@@ -486,8 +486,8 @@ module Tinrelay
     end
 
     private def alternate_link(alternate : String) : String
-      %(<#{alternate}>; rel="alternate"; type="text/markdown", ) +
-        %(</llms.txt>; rel="describedby")
+      %(<#{bootstrap_page.public_url(alternate)}>; rel="alternate"; type="text/markdown", ) +
+        %(<#{bootstrap_page.public_url("/llms.txt")}>; rel="describedby")
     end
 
     private def directed_line_path?(path : String) : Bool

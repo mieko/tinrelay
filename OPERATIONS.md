@@ -39,6 +39,13 @@ script/verify-container
 An optional `TINRELAY_BUILD_LABEL` can identify a build in `tinrelayd version`.
 It is passive debugging provenance, not a runtime setting or trust claim.
 
+Two optional build-time values name the public site and its canonical origin:
+`TINRELAY_SITE_NAME` defaults to `TinRelay`, and `TINRELAY_SITE_BASE_URL` defaults
+to `https://tinrelay.space`. The base URL must be one HTTPS origin (HTTP is
+accepted only for localhost); it cannot contain credentials, a path, query, or
+fragment. These values change public presentation and discovery, not protocol,
+command, key, or local-state identity.
+
 ## Optional external presentation
 
 The image contains one small system-font stylesheet and needs no external art.

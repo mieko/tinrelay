@@ -3,6 +3,9 @@ require "digest/sha256"
 
 module Tinrelay
   class BootstrapPage
+    SITE_NAME     = {{ env("TINRELAY_SITE_NAME") || "TinRelay" }}
+    SITE_BASE_URL = {{ env("TINRELAY_SITE_BASE_URL") || "https://tinrelay.space" }}
+
     JOURNEY_ACTIONS = {
       "already-aboard" => %w(
         already-aboard
@@ -42,9 +45,15 @@ module Tinrelay
 
     getter common_path : String
     getter source_repository : String
+    @site_name : String
+    @site_base_url : String
 
     def initialize(@common_path, @source_repository,
-                   @art_manifest = ArtManifest.empty)
+                   @art_manifest = ArtManifest.empty,
+                   site_name : String = SITE_NAME,
+                   site_base_url : String = SITE_BASE_URL)
+      @site_name = validate_site_name(site_name)
+      @site_base_url = normalize_site_base_url(site_base_url)
       validate_source!
     end
 
@@ -117,7 +126,7 @@ module Tinrelay
         boundary = File.read(File.join(directory, "continue-together.md"))
         source = replace_all(source, "{{TURN_BOUNDARY}}", boundary.rstrip)
       end
-      source
+      site_markdown(source)
     rescue ex : File::NotFoundError
       raise NotFound.new("bootstrap content is not configured")
     end
@@ -127,7 +136,8 @@ module Tinrelay
       directory = File.dirname(common_path)
       source = File.read(File.join(directory, "flight-plan.md"))
       source = replace_once(
-        source, "{{MEET_TITLE}}", markdown_link_text(source_title(File.read(common_path)))
+        source, "{{MEET_TITLE}}",
+        markdown_link_text(source_title(site_markdown(File.read(common_path))))
       )
       source = replace_once(source, "{{MEET_ROOT}}", line_root(coordinate, nil))
       JOURNEY_ACTIONS.each do |journey, actions|
@@ -154,21 +164,24 @@ module Tinrelay
       document = Markd::Parser.parse(markdown, options)
       rendered = Markd::HTMLRenderer.new(options).render(document, nil)
       markdown_title = markdown_title(document)
-      title = markdown_title.try { |value| "#{value} - TinRelay" } || "TinRelay"
+      title = markdown_title.try { |value| "#{value} - #{@site_name}" } || @site_name
       home = page == "home"
       description = if home
-                      markdown_description(document) || "TinRelay"
+                      markdown_description(document) || @site_name
                     else
-                      "Inspect and set up a TinRelay radio."
+                      "Inspect and set up a #{@site_name} radio."
                     end
-      social_title = home ? markdown_title || "TinRelay" : "Open a TinRelay line"
-      canonical_url = home ? "https://tinrelay.space/" : "https://tinrelay.space/line"
+      social_title = home ? markdown_title || @site_name : "Open a #{@site_name} line"
+      canonical_url = public_url(home ? "/" : "/line")
+      alternate_url = public_url(alternate_path)
       html = shell
         .gsub("{{ROBOTS}}", noindex ? "noindex,nofollow,noarchive" : "index,follow")
         .gsub("{{DESCRIPTION}}", HTML.escape(description))
         .gsub("{{SOCIAL_TITLE}}", HTML.escape(social_title))
         .gsub("{{CANONICAL_URL}}", HTML.escape(canonical_url))
-        .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_path))
+        .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_url))
+        .gsub("{{SITE_BASE_URL}}", HTML.escape(@site_base_url))
+        .gsub("{{SITE_NAME}}", HTML.escape(@site_name))
         .gsub("{{SOURCE_REPOSITORY}}", HTML.escape(source_repository))
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))
@@ -186,12 +199,34 @@ module Tinrelay
     end
 
     def agent_map : String
-      File.read(File.join(File.dirname(common_path), "llms.txt"))
+      source = File.read(File.join(File.dirname(common_path), "llms.txt"))
         .gsub("{{SOURCE_REPOSITORY}}", source_repository)
+      site_markdown(source)
+    end
+
+    def homepage : String
+      site_markdown(File.read(File.join(File.dirname(common_path), "home.md")))
+    end
+
+    def not_found : String
+      site_markdown(File.read(File.join(File.dirname(common_path), "not-found.md")))
+    end
+
+    def sitemap : String
+      File.read(File.join(File.dirname(common_path), "sitemap.xml"))
+        .gsub("{{SITE_BASE_URL}}", @site_base_url)
     end
 
     def static(name : String) : String
       File.read(File.join(File.dirname(common_path), name))
+    end
+
+    def public_url(path : String) : String
+      unless path.starts_with?('/') && !path.starts_with?("//") &&
+             !path.includes?('\n') && !path.includes?('\r')
+        raise Invalid.new("public site path is invalid")
+      end
+      "#{@site_base_url}#{path}"
     end
 
     def asset(name : String) : NamedTuple(body: String, content_type: String)
@@ -216,6 +251,29 @@ module Tinrelay
       end
     rescue URI::Error
       raise Invalid.new("bootstrap source repository is invalid")
+    end
+
+    private def validate_site_name(value : String) : String
+      if value.empty? || value != value.strip ||
+         value.each_char.any? { |character| character.ord < 0x20 || character.ord == 0x7f }
+        raise Invalid.new("public site name is invalid")
+      end
+      value
+    end
+
+    private def normalize_site_base_url(value : String) : String
+      uri = URI.parse(value)
+      local = uri.host.in?({"127.0.0.1", "localhost", "::1"})
+      unless uri.scheme == "https" || (uri.scheme == "http" && local)
+        raise Invalid.new("public site base URL must use https outside localhost")
+      end
+      unless uri.host && (uri.path.empty? || uri.path == "/") &&
+             uri.user.nil? && uri.password.nil? && uri.query.nil? && uri.fragment.nil?
+        raise Invalid.new("public site base URL must be an origin")
+      end
+      "#{uri.scheme}://#{uri.authority}"
+    rescue URI::Error
+      raise Invalid.new("public site base URL is invalid")
     end
 
     private def art_stylesheet(page : String) : String
@@ -323,6 +381,22 @@ module Tinrelay
 
     private def markdown_link_text(value : String) : String
       value.gsub('\\', "\\\\").gsub('[', "\\[").gsub(']', "\\]")
+    end
+
+    private def markdown_site_name : String
+      punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+      String.build do |io|
+        @site_name.each_char do |character|
+          io << '\\' if punctuation.includes?(character)
+          io << character
+        end
+      end
+    end
+
+    private def site_markdown(source : String) : String
+      source
+        .gsub("{{SITE_NAME}}", markdown_site_name)
+        .gsub("{{SITE_BASE_URL}}", @site_base_url)
     end
 
     private def markdown_shell_token(value : String) : String

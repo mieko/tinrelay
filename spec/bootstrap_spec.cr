@@ -1,9 +1,48 @@
 require "./spec_helper"
 
 describe "the canonical bootstrap representations" do
+  it "renders public site identity from one validated presentation boundary" do
+    TinrelaySpec.with_server do |_root, _origin, api|
+      page = Tinrelay::BootstrapPage.new(
+        api.bootstrap_page.common_path,
+        api.bootstrap_page.source_repository,
+        site_name: "Harbor & Signal",
+        site_base_url: "https://radio.example/"
+      )
+
+      home = page.homepage
+      markdown_name = "Harbor \\& Signal"
+      home.should contain(markdown_name)
+      home.should contain("https://radio.example/")
+      page.markdown.should contain(markdown_name)
+      page.not_found.should contain(markdown_name)
+
+      html = page.html(home, false, "/index.md", "home")
+      html.should contain("<title>Harbor &amp; Signal - Harbor &amp; Signal</title>")
+      html.should contain(%(href="https://radio.example/" aria-label="Harbor &amp; Signal home"))
+      html.should contain(%(href="https://radio.example/index.md"))
+
+      agent_map = page.agent_map
+      agent_map.should contain(markdown_name)
+      agent_map.should contain("https://radio.example/index.md")
+      agent_map.should contain("https://radio.example/line/index.md")
+      page.sitemap.should contain("<loc>https://radio.example/</loc>")
+      page.sitemap.should contain("<loc>https://radio.example/line</loc>")
+
+      expect_raises(Tinrelay::Invalid) do
+        Tinrelay::BootstrapPage.new(
+          api.bootstrap_page.common_path,
+          api.bootstrap_page.source_repository,
+          site_name: "Harbor",
+          site_base_url: "https://radio.example/nested"
+        )
+      end
+    end
+  end
+
   it "serves one canonical public homepage as Markdown and HTML" do
     TinrelaySpec.with_server do |_root, origin, api|
-      expected = api.bootstrap_page.static("home.md")
+      expected = api.bootstrap_page.homepage
       markdown = HTTP::Client.get(
         origin, headers: HTTP::Headers{"Accept" => "text/markdown"}
       )
@@ -25,7 +64,10 @@ describe "the canonical bootstrap representations" do
       )
       browser.body.should contain(%(data-page="home"))
       browser.body.should contain(%(<link rel="canonical" href="https://tinrelay.space/">))
-      browser.body.should contain(%(<link rel="alternate" type="text/markdown" href="/index.md">))
+      browser.body.should contain(
+        %(<link rel="alternate" type="text/markdown" ) +
+        %(href="https://tinrelay.space/index.md">)
+      )
       browser.body.should contain(
         %(<link rel="icon" href="/tinrelay-art/identity/favicon.cf4c5f39348a.ico" ) +
         %(sizes="16x16 32x32 48x48">)

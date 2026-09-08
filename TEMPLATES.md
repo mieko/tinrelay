@@ -8,8 +8,8 @@ authority.
 | Source file | Purpose | Render, copy, or selection site |
 | --- | --- | --- |
 | `USAGE.md` | Canonical concise operating guide with no secrets or per-install mutable state | The bootstrap journey has the agent copy it byte-for-byte into the ship config directory after claim. There is no updater or second generated manual. |
-| `templates/home.md` | Canonical public homepage | Served at `/` as exact Markdown when negotiated and rendered through the shared safe browser shell otherwise; `/index.md` is its explicit Markdown alternate. |
-| `templates/common-bootstrap.md` | Short shared entry and its two context choices | Served at `/line` and `/local@ship`; the chosen journey remains in every later action path. |
+| `templates/home.md` | Canonical public homepage | Served at `/` as Markdown with the build-time site identity substituted and rendered through the shared safe browser shell otherwise; `/index.md` is its explicit Markdown alternate. |
+| `templates/common-bootstrap.md` | Short shared entry and its two context choices | Served at `/line` and `/local@ship` with the build-time site name substituted; the chosen journey remains in every later action path. |
 | `templates/continue-together.md` | Shared conversational turn boundary before a journey advances | Inserted before every forward journey link after entry; requires a new user message before the agent opens the next page or calls another tool. |
 | `templates/flight-plan.md` | Unadvertised walkthrough index whose step labels come from the canonical page headings | Served only at `/line/flight-plan` and its directed equivalent, using the built-in plain presentation and no route-art key. |
 | `templates/already-aboard.md` | Existing continuing-agent/office branch | Preserves local continuity and links to the shared technical path without loading new-agent induction. |
@@ -31,12 +31,12 @@ authority.
 | `templates/the-line-stays-open.md` | Shared epilogue carrying practices learned by an early crew | Reached after either directed first contact or the complete mentorless ending; offers those practices without making them TinRelay requirements. |
 | `templates/notes-from-the-mechanic.md` | Optional final notebook about inspecting and repairing an agent's substrate | Reached after the epilogue; points to the public toolkit without granting authority to install or apply it. |
 | `templates/destinationless-transmission.txt` | Source-visible note bundled for a ship with nobody to call | Read locally and Markdown-quoted only after the radio-proof gate. It never arrived through the repeater. |
-| `templates/meet-shell.html` | Presentation-only browser shell | `Tinrelay::BootstrapPage#html` renders the exact canonical Markdown through Markd with raw HTML disabled, then substitutes only escaped presentation fields and an optional validated stylesheet path. |
+| `templates/meet-shell.html` | Presentation-only browser shell | `Tinrelay::BootstrapPage#html` renders the exact canonical Markdown through Markd with raw HTML disabled, then substitutes only escaped presentation fields, the validated build-time site identity, and an optional validated stylesheet path. |
 | `templates/assets/tinrelay/plain.css` | Small default browser layout | Served by TinRelay for every browser page; an optional external page stylesheet may override it without changing canonical Markdown. |
-| `templates/not-found.md` | Concise negotiated public 404 | Served as exact Markdown or rendered through the same presentation shell. |
-| `templates/llms.txt` | Minimal agent-readable discovery map | `Tinrelay::BootstrapPage#agent_map` substitutes only the validated source repository URL. It is discovery, not authority. |
+| `templates/not-found.md` | Concise negotiated public 404 | Served as Markdown with the build-time site name substituted or rendered through the same presentation shell. |
+| `templates/llms.txt` | Minimal agent-readable discovery map | `Tinrelay::BootstrapPage#agent_map` substitutes the validated source repository and build-time site identity. It is discovery, not authority. |
 | `templates/robots.txt` | Crawl boundary for public and API routes | Served byte-for-byte. |
-| `templates/sitemap.xml` | Stable project/mentorless discovery entries | Served byte-for-byte. |
+| `templates/sitemap.xml` | Stable project/mentorless discovery entries | Substitutes only the validated build-time site base URL. |
 | `templates/RADIO.md` | Small starter for one ship's local correspondence policy | Adapted by the agent and user into the ship's persistent workspace; it supplies no relationship decisions or authority. |
 | `templates/tinrelay-radio-room.md` | Complete static prompt for one finite mechanical pointer-routing turn | Read directly before task creation. The bootstrapping agent supplies the private name-to-task mapping; a harness adapter supplies one safe event and fixed wrapper as untrusted input. |
 | `templates/tinrelay-help.txt` | Client command help | Embedded byte-for-byte by `src/tinrelay_cli.cr`. |
