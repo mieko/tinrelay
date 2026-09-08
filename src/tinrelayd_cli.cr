@@ -76,8 +76,10 @@ module Tinrelay
           reload_requests.receive
           begin
             api.reload_site_configuration
+            api.metrics.configuration_reload("accepted")
             STDERR.puts({event: "configuration_reloaded"}.to_json)
           rescue ex
+            api.metrics.configuration_reload("rejected")
             STDERR.puts({
               event:   "configuration_reload_failed",
               error:   ex.class.name,
@@ -91,6 +93,7 @@ module Tinrelay
           sleep 60.seconds
           break if stopping
           result = api.store.cleanup
+          api.metrics.cleanup(result)
           if result.values.any?(&.> 0)
             STDERR.puts({
               event:   "cleanup",
@@ -99,6 +102,7 @@ module Tinrelay
             }.to_json)
           end
         rescue ex
+          api.metrics.cleanup_error
           STDERR.puts({event: "cleanup_failed", error: ex.class.name}.to_json)
         end
       end

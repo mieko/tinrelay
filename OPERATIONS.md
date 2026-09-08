@@ -115,9 +115,20 @@ limits are the service's abuse boundary.
 
 - `GET /healthz` proves the process answers.
 - `GET /readyz` proves SQLite is queryable.
+- `GET /metrics` emits aggregate Prometheus text for an operator-only listener.
 - SIGTERM and SIGINT close the listener and database cleanly.
 - Cleanup runs every 60 seconds; `tinrelayd cleanup --database "$DATABASE_PATH"` is the
   idempotent manual equivalent.
+
+`/metrics` must not be exposed by the public HTTPS listener. Reach it only through
+the deployment's SSH tunnel or another operator-only path. It reports registered
+ships by state, active parked radio waits, queued transmission and hail depth and
+age, retained ciphertext bytes, and fixed-outcome counters for registrations,
+transmissions, hails, waits, configuration reloads, and cleanup. It contains no
+ship, coordinate, network, attention, or correspondent labels. Database-backed
+gauges survive restart; process counters and the process start timestamp reset
+with `tinrelayd`. Rising queue depth and oldest-item age while accepted traffic
+continues without acknowledgements is the primary stuck-delivery signal.
 
 Logs are newline JSON containing request ID, method, normalized public path, HTTP
 status, duration, cleanup counts, and exception class. They omit bodies,

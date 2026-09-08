@@ -97,6 +97,42 @@ module Tinrelay
       permanent_metadata_usage(database.db)
     end
 
+    def metrics_snapshot(now : Int64 = Time.utc.to_unix)
+      database.db.transaction do |transaction|
+        connection = transaction.connection
+        ships = %w[active frozen revoked].to_h { |state| {state, 0_i64} }
+        connection.query("SELECT state, COUNT(*) FROM ships GROUP BY state") do |rows|
+          rows.each do
+            state, count = rows.read(String, Int64)
+            ships[state] = count
+          end
+        end
+        {
+          ships:                ships,
+          queued_transmissions: connection.scalar(
+            "SELECT COUNT(*) FROM transmissions WHERE state = 'pending' AND expires_at > ?",
+            now
+          ).as(Int64),
+          queued_hails: connection.scalar(
+            "SELECT COUNT(*) FROM hails WHERE collected_at IS NULL " +
+            "AND allowed_at IS NULL AND expires_at > ?", now
+          ).as(Int64),
+          oldest_transmission_age: connection.scalar(
+            "SELECT MAX(0, COALESCE(? - MIN(accepted_at), 0)) FROM transmissions " +
+            "WHERE state = 'pending' AND expires_at > ?", now, now
+          ).as(Int64),
+          oldest_hail_age: connection.scalar(
+            "SELECT MAX(0, COALESCE(? - MIN(created_at), 0)) FROM hails " +
+            "WHERE collected_at IS NULL AND allowed_at IS NULL AND expires_at > ?", now, now
+          ).as(Int64),
+          ciphertext_bytes: connection.scalar(
+            "SELECT COALESCE(SUM(LENGTH(ciphertext)), 0) FROM transmissions " +
+            "WHERE state = 'pending'"
+          ).as(Int64),
+        }
+      end.not_nil!
+    end
+
     def inspect_ship(request : ShipInspection,
                      now : Int64 = Time.utc.to_unix) : String
       target = Names.ship!(request.target_ship)

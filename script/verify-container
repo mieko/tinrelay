@@ -74,6 +74,15 @@ until curl --fail --silent --show-error "http://127.0.0.1:$port/readyz" \
 done
 
 curl --fail --silent --show-error \
+  --dump-header "$scratch/metrics.headers" \
+  --output "$scratch/metrics.body" \
+  "http://127.0.0.1:$port/metrics"
+grep -F 'Content-Type: text/plain; version=0.0.4; charset=utf-8' \
+  "$scratch/metrics.headers" >/dev/null
+grep -F 'Cache-Control: no-store' "$scratch/metrics.headers" >/dev/null
+grep -F 'tinrelay_registered_ships{state="active"} 0' "$scratch/metrics.body" >/dev/null
+
+curl --fail --silent --show-error \
   --header 'Accept: text/html' \
   "http://127.0.0.1:$port/" \
   | grep -Eq '/assets/tinrelay/home-copy\.[0-9a-f]{64}\.js'

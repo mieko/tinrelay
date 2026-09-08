@@ -1,0 +1,48 @@
+require "./spec_helper"
+
+describe "repeater metrics" do
+  it "serves aggregate no-store metrics without protocol negotiation" do
+    TinrelaySpec.with_server do |root, origin, api|
+      initial = HTTP::Client.get("#{origin}/metrics")
+      initial.status_code.should eq(200)
+      initial.headers["Content-Type"].should eq("text/plain; version=0.0.4; charset=utf-8")
+      initial.headers["Cache-Control"].should eq("no-store")
+      initial.body.should contain("tinrelay_registered_ships{state=\"active\"} 0")
+
+      alpha = TinrelaySpec.admit(root, origin, "alpha", "alpha metrics passphrase")
+      beta = TinrelaySpec.admit(root, origin, "beta", "beta metrics passphrase")
+      alpha.send("crew@alpha", "queued self transmission")
+      alpha.hail("beta")
+      waiter = api.handoffs.park("alpha", 1)
+      invalid_headers = HTTP::Headers{
+        "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+      }
+      invalid = HTTP::Client.post(
+        "#{origin}/v1/transmissions", headers: invalid_headers, body: "{"
+      )
+      invalid.status_code.should eq(400)
+
+      response = HTTP::Client.get("#{origin}/metrics")
+      api.handoffs.release("alpha", waiter)
+
+      response.body.should contain("tinrelay_registered_ships{state=\"active\"} 2")
+      response.body.should contain("tinrelay_radio_waits_active 1")
+      response.body.should contain("tinrelay_queued_transmissions 1")
+      response.body.should contain("tinrelay_queued_hails 1")
+      response.body.should contain("tinrelay_registrations_total{outcome=\"accepted\"} 2")
+      response.body.should contain("tinrelay_transmissions_total{outcome=\"queued\"} 1")
+      response.body.should contain("tinrelay_transmissions_total{outcome=\"rejected\"} 1")
+      response.body.should contain("tinrelay_hails_total{outcome=\"accepted\"} 1")
+      response.body.should contain("tinrelay_registrations_total{outcome=\"cidr_denied\"} 0")
+      response.body.should contain("tinrelay_radio_waits_total{outcome=\"disconnect\"} 0")
+      response.body.should contain("tinrelay_retained_ciphertext_bytes ")
+      response.body.should_not contain("alpha")
+      response.body.should_not contain("beta")
+
+      head = HTTP::Client.head("#{origin}/metrics")
+      head.status_code.should eq(200)
+      head.body.should be_empty
+      head.headers["Content-Length"].to_i.should eq(response.body.bytesize)
+    end
+  end
+end

@@ -30,6 +30,7 @@ module Tinrelay
     getter database : Database
     getter store : Store
     getter handoffs : DirectHandoff
+    getter metrics : Metrics
     getter submission_window : SubmissionWindow
     getter hail_window : SubmissionWindow
     @bootstrap_page : Atomic(BootstrapPage)
@@ -39,6 +40,7 @@ module Tinrelay
       @database = Database.new(config.database_path, config.database_connections)
       @store = Store.new(database, config.permanent_metadata_limit)
       @handoffs = DirectHandoff.new
+      @metrics = Metrics.new
       @submission_window = SubmissionWindow.new
       @hail_window = SubmissionWindow.new(Store::MAX_HAILS_PER_DAY, 24 * 60 * 60)
       @registration_window = SubmissionWindow.new(
@@ -108,52 +110,22 @@ module Tinrelay
       when {"GET", "/readyz"}, {"HEAD", "/readyz"}
         database.db.scalar("SELECT 1")
         json(context, 200, %({"status":"ready"}))
+      when {"GET", "/metrics"}, {"HEAD", "/metrics"}
+        context.response.headers["Cache-Control"] = "no-store"
+        write_body(
+          context, 200, "text/plain; version=0.0.4; charset=utf-8",
+          metrics.render(store, handoffs)
+        )
       when {"POST", "/v1/join"}
-        prepared = store.prepare_claim(parse_body(context, ShipClaim))
-        if retry_after = @registration_window.admit(REGISTRATION_WINDOW_KEY)
-          context.response.headers["Retry-After"] = retry_after.to_s
-          return error(
-            context, 429, "registration_limited",
-            "relay is receiving too many registrations"
-          )
-        end
-        store.claim(prepared)
-        json(context, 201, %({"state":"claimed"}))
+        claim_ship(context)
       when {"POST", "/v1/ships/inspect"}
         json(context, 200, store.inspect_ship(parse_body(context, ShipInspection)))
       when {"POST", "/v1/transmissions"}
-        acceptance_at = Time.instant + ACCEPTANCE_TARGET
-        envelope = parse_body(context, SignedRelayEnvelope)
-        if prepared = store.prepare(envelope)
-          if submission_window.allow?(envelope.sender_ship)
-            if store.deliverable?(prepared)
-              remaining = acceptance_at - Time.instant
-              delivered = remaining > Time::Span.zero && handoffs.deliver(prepared, remaining)
-              unless delivered
-                if store.persist(prepared)
-                  handoffs.notify(envelope.recipient_ship)
-                end
-              end
-            end
-          end
-        end
-        remaining = acceptance_at - Time.instant
-        sleep remaining if remaining > Time::Span.zero
-        json(context, 202, %({"state":"accepted"}))
+        accept_transmission(context)
       when {"POST", "/v1/hails"}
-        acceptance_at = Time.instant + ACCEPTANCE_TARGET
-        hail = parse_body(context, Hail)
-        if prepared = store.prepare_hail(hail)
-          if hail_window.allow?(hail.sender_ship) && store.persist_hail(prepared)
-            handoffs.notify(hail.recipient_ship)
-          end
-        end
-        remaining = acceptance_at - Time.instant
-        sleep remaining if remaining > Time::Span.zero
-        json(context, 202, %({"state":"accepted"}))
+        accept_hail(context)
       when {"POST", "/v1/radio/wait"}
-        request = parse_body(context, RadioWaitRequest)
-        json(context, 200, wait(request).to_json)
+        radio_wait(context)
       when {"POST", "/v1/transmissions/ack"}
         acknowledgement = parse_body(context, TransmissionAck)
         if prepared = handoffs.prepared_for_ack(
@@ -164,9 +136,11 @@ module Tinrelay
         else
           store.acknowledge(acknowledgement)
         end
+        metrics.transmission("acknowledged")
         json(context, 200, %({"state":"acknowledged"}))
       when {"POST", "/v1/hails/ack"}
         store.acknowledge_hail(parse_body(context, HailAck))
+        metrics.hail("collected")
         json(context, 200, %({"state":"acknowledged"}))
       when {"POST", "/v1/relationships/close"}
         closure = parse_body(context, RelationshipClose)
@@ -179,6 +153,7 @@ module Tinrelay
         json(context, 200, %({"state":"acknowledged"}))
       when {"POST", "/v1/relationships/allow"}
         store.allow_relationship(parse_body(context, RelationshipAllow))
+        metrics.hail("allowed")
         json(context, 200, %({"state":"active"}))
       when {"POST", "/v1/owners/rotate"}
         store.rotate_owner(parse_body(context, OwnerRotation))
@@ -190,6 +165,103 @@ module Tinrelay
         return error(context, 404, "not_found", "API route not found") if path.starts_with?("/v1/")
         public_route(context)
       end
+    end
+
+    private def claim_ship(context : HTTP::Server::Context) : Int32
+      counted = false
+      prepared = store.prepare_claim(parse_body(context, ShipClaim))
+      if retry_after = @registration_window.admit(REGISTRATION_WINDOW_KEY)
+        metrics.registration("rate_limited")
+        counted = true
+        context.response.headers["Retry-After"] = retry_after.to_s
+        return error(
+          context, 429, "registration_limited",
+          "relay is receiving too many registrations"
+        )
+      end
+      store.claim(prepared)
+      metrics.registration("accepted")
+      counted = true
+      json(context, 201, %({"state":"claimed"}))
+    rescue ex : Conflict
+      metrics.registration("conflict") unless counted
+      raise ex
+    rescue ex : Unavailable
+      metrics.registration("capacity") unless counted
+      raise ex
+    rescue ex : JSON::ParseException | JSON::SerializableError | Invalid | Unauthorized
+      metrics.registration("invalid") unless counted
+      raise ex
+    end
+
+    private def accept_transmission(context : HTTP::Server::Context) : Int32
+      acceptance_at = Time.instant + ACCEPTANCE_TARGET
+      outcome = "rejected"
+      counted = false
+      envelope = parse_body(context, SignedRelayEnvelope)
+      if prepared = store.prepare(envelope)
+        if submission_window.allow?(envelope.sender_ship) && store.deliverable?(prepared)
+          remaining = acceptance_at - Time.instant
+          if remaining > Time::Span.zero && handoffs.deliver(prepared, remaining)
+            outcome = "direct"
+          elsif store.persist(prepared)
+            handoffs.notify(envelope.recipient_ship)
+            outcome = "queued"
+          end
+        end
+      end
+      remaining = acceptance_at - Time.instant
+      sleep remaining if remaining > Time::Span.zero
+      metrics.transmission(outcome)
+      counted = true
+      json(context, 202, %({"state":"accepted"}))
+    rescue ex
+      metrics.transmission("rejected") unless counted
+      raise ex
+    end
+
+    private def accept_hail(context : HTTP::Server::Context) : Int32
+      acceptance_at = Time.instant + ACCEPTANCE_TARGET
+      outcome = "rejected"
+      counted = false
+      hail = parse_body(context, Hail)
+      if prepared = store.prepare_hail(hail)
+        if hail_window.allow?(hail.sender_ship) && store.persist_hail(prepared)
+          handoffs.notify(hail.recipient_ship)
+          outcome = "accepted"
+        end
+      end
+      remaining = acceptance_at - Time.instant
+      sleep remaining if remaining > Time::Span.zero
+      metrics.hail(outcome)
+      counted = true
+      json(context, 202, %({"state":"accepted"}))
+    rescue ex
+      metrics.hail("rejected") unless counted
+      raise ex
+    end
+
+    private def radio_wait(context : HTTP::Server::Context) : Int32
+      request = parse_body(context, RadioWaitRequest)
+      response = wait(request)
+      outcome = if response.envelope
+                  "transmission"
+                elsif response.hail
+                  "hail"
+                elsif !response.contact_updates.empty?
+                  "contact_update"
+                else
+                  "timeout"
+                end
+      status = json(context, 200, response.to_json)
+      metrics.radio_wait(outcome)
+      status
+    rescue ex : IO::Error
+      metrics.radio_wait("disconnect")
+      raise ex
+    rescue ex
+      metrics.radio_wait("error")
+      raise ex
     end
 
     private def compatible_protocol?(request : HTTP::Request) : Bool
