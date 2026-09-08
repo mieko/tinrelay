@@ -37,7 +37,7 @@ module Tinrelay
       template = extract(argv, "--bootstrap-template") || "templates/common-bootstrap.md"
       source_repository = extract(argv, "--source-repository") ||
                           "https://github.com/mieko/tinrelay"
-      art_manifest_path = ENV["TINRELAY_ART_MANIFEST"]?
+      configuration_path = extract(argv, "--config") || extract(argv, "-c")
       threads = ServerRuntime.thread_count(extract(argv, "--threads"))
       permanent_metadata_limit = numeric(
         extract(argv, "--permanent-metadata-limit"),
@@ -48,8 +48,8 @@ module Tinrelay
       ServerRuntime.enable_multicore(threads)
       config = ServerConfig.new(
         bind, port, database_path, template,
-        source_repository, threads, art_manifest_path,
-        permanent_metadata_limit
+        source_repository, threads, permanent_metadata_limit,
+        configuration_path
       )
       api = API.new(config)
       server = HTTP::Server.new(api.handler)
@@ -64,6 +64,28 @@ module Tinrelay
       }
       Signal::INT.trap { stop.call }
       Signal::TERM.trap { stop.call }
+      reload_requests = Channel(Nil).new(1)
+      Signal::HUP.trap do
+        select
+        when reload_requests.send(nil)
+        else
+        end
+      end
+      spawn do
+        loop do
+          reload_requests.receive
+          begin
+            api.reload_site_configuration
+            STDERR.puts({event: "configuration_reloaded"}.to_json)
+          rescue ex
+            STDERR.puts({
+              event:   "configuration_reload_failed",
+              error:   ex.class.name,
+              message: bounded_message(ex),
+            }.to_json)
+          end
+        end
+      end
       spawn do
         loop do
           sleep 60.seconds
@@ -108,6 +130,11 @@ module Tinrelay
                              default : Int64) : Int64
       return default unless value
       value.to_i64? || raise Invalid.new("#{name} must be an integer")
+    end
+
+    private def self.bounded_message(error : Exception) : String
+      message = error.message || "configuration reload failed"
+      message.size > 240 ? "#{message[0, 240]}…" : message
     end
 
     private def self.no_extra!(argv) : Nil

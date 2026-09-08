@@ -8,16 +8,16 @@ module Tinrelay
     getter bootstrap_template : String
     getter source_repository : String
     getter database_connections : Int32
-    getter art_manifest_path : String?
     getter permanent_metadata_limit : Int64
+    getter configuration_path : String?
 
     def initialize(@bind = "127.0.0.1", @port = 8787,
                    @database_path = "tinrelay.db",
                    @bootstrap_template = "templates/common-bootstrap.md",
                    @source_repository = "https://github.com/mieko/tinrelay",
                    @database_connections = System.cpu_count,
-                   @art_manifest_path = nil,
-                   @permanent_metadata_limit = DEFAULT_PERMANENT_METADATA_LIMIT)
+                   @permanent_metadata_limit = DEFAULT_PERMANENT_METADATA_LIMIT,
+                   @configuration_path = nil)
     end
   end
 
@@ -32,9 +32,10 @@ module Tinrelay
     getter handoffs : DirectHandoff
     getter submission_window : SubmissionWindow
     getter hail_window : SubmissionWindow
-    getter bootstrap_page : BootstrapPage
+    @bootstrap_page : Atomic(BootstrapPage)
 
     def initialize(@config)
+      @bootstrap_page = Atomic(BootstrapPage).new(load_bootstrap_page)
       @database = Database.new(config.database_path, config.database_connections)
       @store = Store.new(database, config.permanent_metadata_limit)
       @handoffs = DirectHandoff.new
@@ -43,12 +44,15 @@ module Tinrelay
       @registration_window = SubmissionWindow.new(
         MAX_SHIP_REGISTRATIONS_PER_HOUR, 60 * 60
       )
-      art_manifest = ArtManifest.load(
-        config.art_manifest_path, BootstrapPage::PAGE_KEYS
-      )
-      @bootstrap_page = BootstrapPage.new(
-        config.bootstrap_template, config.source_repository, art_manifest
-      )
+    end
+
+    def bootstrap_page : BootstrapPage
+      @bootstrap_page.get(:acquire)
+    end
+
+    def reload_site_configuration : Nil
+      candidate = load_bootstrap_page
+      @bootstrap_page.set(candidate, :release)
     end
 
     def handler
@@ -256,52 +260,54 @@ module Tinrelay
 
     private def public_route(context : HTTP::Server::Context) : Int32
       request = context.request
-      return public_not_found(context) unless request.method.in?({"GET", "HEAD"})
+      page = bootstrap_page
+      return public_not_found(context, page) unless request.method.in?({"GET", "HEAD"})
       path = request.path
-      return homepage(context, path == "/index.md") if path.in?({"/", "/index.md"})
+      return homepage(context, page, path == "/index.md") if path.in?({"/", "/index.md"})
       if path == "/llms.txt"
-        return public_text(context, bootstrap_page.agent_map, "text/plain; charset=utf-8")
+        return public_text(context, page.agent_map, "text/plain; charset=utf-8")
       end
       if path == "/robots.txt"
         return public_text(
           context,
-          bootstrap_page.static("robots.txt"),
+          page.static("robots.txt"),
           "text/plain; charset=utf-8"
         )
       end
       if path == "/sitemap.xml"
         return public_text(
           context,
-          bootstrap_page.sitemap,
+          page.sitemap,
           "application/xml; charset=utf-8"
         )
       end
       if name = public_asset_name(path)
-        return public_asset(context, name)
+        return public_asset(context, page, name)
       end
 
       if line = line_route(path)
         return bootstrap(
-          context, line[:coordinate], line[:journey], line[:action],
+          context, page, line[:coordinate], line[:journey], line[:action],
           explicit_markdown: line[:explicit_markdown]
         )
       end
-      public_not_found(context)
+      public_not_found(context, page)
     end
 
     private def homepage(context : HTTP::Server::Context,
+                         page : BootstrapPage,
                          explicit_markdown : Bool) : Int32
-      markdown = bootstrap_page.homepage
+      markdown = page.homepage
       alternate = "/index.md"
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
-      body = wants_markdown ? markdown : bootstrap_page.html(
+      body = wants_markdown ? markdown : page.html(
         markdown, false, alternate, "home", handoffs.waiting_count
       )
       context.response.headers["Cache-Control"] = "no-store"
       context.response.headers["Vary"] = "Accept"
       context.response.headers["Referrer-Policy"] = "no-referrer"
       context.response.headers["Content-Security-Policy"] = content_security_policy(true)
-      context.response.headers["Link"] = alternate_link(alternate)
+      context.response.headers["Link"] = alternate_link(page, alternate)
       write_body(
         context, 200,
         wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8",
@@ -309,13 +315,13 @@ module Tinrelay
       )
     end
 
-    private def bootstrap(context : HTTP::Server::Context, coordinate : String?, journey : String?,
-                          action : String?,
+    private def bootstrap(context : HTTP::Server::Context, page : BootstrapPage,
+                          coordinate : String?, journey : String?, action : String?,
                           explicit_markdown : Bool) : Int32
       markdown = if action == BootstrapPage::FLIGHT_PLAN_PAGE
-                   bootstrap_page.flight_plan(coordinate)
+                   page.flight_plan(coordinate)
                  else
-                   bootstrap_page.markdown(
+                   page.markdown(
                      coordinate, action, journey,
                      repeater_origin: request_origin(context.request)
                    )
@@ -324,9 +330,9 @@ module Tinrelay
       private_page = directed || !action.nil?
       alternate = line_markdown_path(coordinate, journey, action)
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
-      page = action || "meet"
-      body = wants_markdown ? markdown : bootstrap_page.html(
-        markdown, private_page, alternate, page, handoffs.waiting_count
+      page_key = action || "meet"
+      body = wants_markdown ? markdown : page.html(
+        markdown, private_page, alternate, page_key, handoffs.waiting_count
       )
       content_type = wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8"
       context.response.headers["Cache-Control"] = "no-store"
@@ -334,14 +340,15 @@ module Tinrelay
       context.response.headers["Referrer-Policy"] = "no-referrer"
       context.response.headers["Content-Security-Policy"] = content_security_policy
       context.response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive" if private_page
-      context.response.headers["Link"] = alternate_link(alternate)
+      context.response.headers["Link"] = alternate_link(page, alternate)
       write_body(context, 200, content_type, body)
     end
 
-    private def public_not_found(context : HTTP::Server::Context) : Int32
-      markdown = bootstrap_page.not_found
+    private def public_not_found(context : HTTP::Server::Context,
+                                 page : BootstrapPage) : Int32
+      markdown = page.not_found
       wants_markdown = markdown_requested?(context.request)
-      body = wants_markdown ? markdown : bootstrap_page.html(
+      body = wants_markdown ? markdown : page.html(
         markdown, true, "/line/index.md", "not-found", handoffs.waiting_count
       )
       context.response.headers["Cache-Control"] = "no-store"
@@ -362,8 +369,9 @@ module Tinrelay
       write_body(context, 200, content_type, body)
     end
 
-    private def public_asset(context : HTTP::Server::Context, name : String) : Int32
-      asset = bootstrap_page.asset(name)
+    private def public_asset(context : HTTP::Server::Context,
+                             page : BootstrapPage, name : String) : Int32
+      asset = page.asset(name)
       context.response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
       context.response.headers["X-Content-Type-Options"] = "nosniff"
       write_body(
@@ -485,9 +493,22 @@ module Tinrelay
         "form-action 'none'"
     end
 
-    private def alternate_link(alternate : String) : String
-      %(<#{bootstrap_page.public_url(alternate)}>; rel="alternate"; type="text/markdown", ) +
-        %(<#{bootstrap_page.public_url("/llms.txt")}>; rel="describedby")
+    private def alternate_link(page : BootstrapPage, alternate : String) : String
+      %(<#{page.public_url(alternate)}>; rel="alternate"; type="text/markdown", ) +
+        %(<#{page.public_url("/llms.txt")}>; rel="describedby")
+    end
+
+    private def load_bootstrap_page : BootstrapPage
+      site = TinrelaydConfig.load(config.configuration_path).try(&.site)
+      art_manifest = ArtManifest.load(
+        site.try(&.art_manifest_path), BootstrapPage::PAGE_KEYS
+      )
+      BootstrapPage.new(
+        config.bootstrap_template, config.source_repository, art_manifest,
+        site_name: site.try(&.site_name) || BootstrapPage::DEFAULT_SITE_NAME,
+        site_base_url: site.try(&.base_url) || BootstrapPage::DEFAULT_SITE_BASE_URL,
+        wordmark: site.try(&.wordmark) || BootstrapPage::DEFAULT_WORDMARK
+      )
     end
 
     private def directed_line_path?(path : String) : Bool

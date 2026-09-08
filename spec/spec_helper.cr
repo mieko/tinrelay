@@ -16,11 +16,23 @@ module TinrelaySpec
                        permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT, &)
     root = temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
+    configuration_path = nil
+    if art_manifest_path
+      configuration_path = File.join(root, "tinrelayd.json")
+      File.write(configuration_path, {
+        site: {
+          site_name:         "TinRelay",
+          base_url:          "https://tinrelay.space",
+          wordmark:          "Tin Relay",
+          art_manifest_path: art_manifest_path,
+        },
+      }.to_json)
+    end
     config = Tinrelay::ServerConfig.new(
       "127.0.0.1", 0, File.join(root, "service.db"),
       template,
       "https://example.test/tinrelay.git", System.cpu_count,
-      art_manifest_path, permanent_metadata_limit
+      permanent_metadata_limit, configuration_path
     )
     api = Tinrelay::API.new(config)
     server = HTTP::Server.new(api.handler)

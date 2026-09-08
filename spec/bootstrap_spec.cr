@@ -1,42 +1,145 @@
 require "./spec_helper"
 
+private def write_site_config(path : String, name : String, base_url : String,
+                              wordmark : String, art_manifest_path : String? = nil) : Nil
+  File.write(
+    path,
+    {
+      site: {
+        site_name:         name,
+        base_url:          base_url,
+        wordmark:          wordmark,
+        art_manifest_path: art_manifest_path,
+      },
+    }.to_json
+  )
+end
+
+private def assert_site_identity(origin : String, name : String, base_url : String,
+                                 wordmark : String, stylesheet : String? = nil) : Nil
+  response = HTTP::Client.get(origin)
+  response.body.should contain("<title>#{name} - #{name}</title>")
+  response.body.should contain(%(href="#{base_url}/"))
+  response.body.should contain(%(href="#{base_url}/index.md"))
+  response.body.should contain("<span>#{wordmark}</span>")
+  response.body.should contain(%(href="#{stylesheet}")) if stylesheet
+  response.headers["Link"].should contain("<#{base_url}/index.md>")
+
+  llms = HTTP::Client.get("#{origin}/llms.txt")
+  llms.body.should contain("#{base_url}/line/index.md")
+  HTTP::Client.get("#{origin}/sitemap.xml").body.should contain(
+    "<loc>#{base_url}/line</loc>"
+  )
+end
+
 describe "the canonical bootstrap representations" do
-  it "renders public site identity from one validated presentation boundary" do
-    TinrelaySpec.with_server do |_root, _origin, api|
-      page = Tinrelay::BootstrapPage.new(
-        api.bootstrap_page.common_path,
-        api.bootstrap_page.source_repository,
-        site_name: "Harbor & Signal",
-        site_base_url: "https://radio.example/"
-      )
+  it "uses defaults when optional runtime site configuration is absent" do
+    TinrelaySpec.with_server do |_root, origin, _api|
+      response = HTTP::Client.get(origin)
+      response.body.should contain("<title>TinRelay - TinRelay</title>")
+      response.body.should contain(%(href="https://tinrelay.space/"))
+    end
+  end
 
-      home = page.homepage
-      markdown_name = "Harbor \\& Signal"
-      home.should contain(markdown_name)
-      home.should contain("https://radio.example/")
-      page.markdown.should contain(markdown_name)
-      page.not_found.should contain(markdown_name)
+  it "loads and atomically reloads complete runtime site identity" do
+    root = TinrelaySpec.temporary_root
+    config_path = File.join(root, "tinrelayd.json")
+    template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
+    first_art = File.join(root, "first-art.json")
+    second_art = File.join(root, "second-art.json")
+    File.write(first_art, {"home" => "/art/harbor.css"}.to_json)
+    File.write(second_art, {"home" => "/art/signal.css"}.to_json)
+    write_site_config(
+      config_path, "Harbor & Signal", "https://radio.example/", "Harbor Signal",
+      first_art
+    )
+    config = Tinrelay::ServerConfig.new(
+      "127.0.0.1", 0, File.join(root, "service.db"), template,
+      "https://example.test/tinrelay.git", System.cpu_count,
+      TinrelaySpec::DEFAULT_METADATA_LIMIT
+    )
+    begin
+      Dir.cd(root) do
+        api = Tinrelay::API.new(config)
+        server = HTTP::Server.new(api.handler)
+        address = server.bind_tcp("127.0.0.1", 0)
+        spawn { server.listen }
+        Fiber.yield
+        origin = "http://127.0.0.1:#{address.port}"
+        begin
+          assert_site_identity(
+            origin, "Harbor &amp; Signal", "https://radio.example", "Harbor Signal",
+            "/art/harbor.css"
+          )
 
-      html = page.html(home, false, "/index.md", "home")
-      html.should contain("<title>Harbor &amp; Signal - Harbor &amp; Signal</title>")
-      html.should contain(%(href="https://radio.example/" aria-label="Harbor &amp; Signal home"))
-      html.should contain(%(href="https://radio.example/index.md"))
+          write_site_config(
+            config_path, "Signal House", "https://signal.example", "Signal  House",
+            second_art
+          )
+          api.reload_site_configuration
+          assert_site_identity(
+            origin, "Signal House", "https://signal.example", "Signal  House",
+            "/art/signal.css"
+          )
 
-      agent_map = page.agent_map
-      agent_map.should contain(markdown_name)
-      agent_map.should contain("https://radio.example/index.md")
-      agent_map.should contain("https://radio.example/line/index.md")
-      page.sitemap.should contain("<loc>https://radio.example/</loc>")
-      page.sitemap.should contain("<loc>https://radio.example/line</loc>")
+          write_site_config(
+            config_path, "Broken", "https://broken.example", " Broken", second_art
+          )
+          expect_raises(Tinrelay::Invalid) { api.reload_site_configuration }
+          assert_site_identity(
+            origin, "Signal House", "https://signal.example", "Signal  House",
+            "/art/signal.css"
+          )
+
+          write_site_config(
+            config_path, "Broken", "https://broken.example", "Broken Mark",
+            File.join(root, "missing-art.json")
+          )
+          expect_raises(Tinrelay::Invalid) { api.reload_site_configuration }
+          assert_site_identity(
+            origin, "Signal House", "https://signal.example", "Signal  House",
+            "/art/signal.css"
+          )
+
+          File.delete(config_path)
+          api.reload_site_configuration
+          assert_site_identity(origin, "TinRelay", "https://tinrelay.space", "Tin Relay")
+          HTTP::Client.get(origin).body.should_not contain("/art/signal.css")
+        ensure
+          server.close
+          api.close
+        end
+      end
 
       expect_raises(Tinrelay::Invalid) do
-        Tinrelay::BootstrapPage.new(
-          api.bootstrap_page.common_path,
-          api.bootstrap_page.source_repository,
-          site_name: "Harbor",
-          site_base_url: "https://radio.example/nested"
-        )
+        Tinrelay::TinrelaydConfig.load(File.join(root, "missing.json"))
       end
+
+      unknown_top = File.join(root, "unknown-top.json")
+      File.write(unknown_top, {
+        site: {
+          site_name: "TinRelay", base_url: "https://tinrelay.space",
+          wordmark: "Tin Relay", art_manifest_path: nil,
+        },
+        typo: true,
+      }.to_json)
+      expect_raises(Tinrelay::Invalid) do
+        Tinrelay::TinrelaydConfig.load(unknown_top)
+      end
+
+      unknown_site = File.join(root, "unknown-site.json")
+      File.write(unknown_site, {
+        site: {
+          site_name: "TinRelay", base_url: "https://tinrelay.space",
+          wordmark: "Tin Relay", art_manifest_path: nil,
+          art_manfiest_path: nil,
+        },
+      }.to_json)
+      expect_raises(Tinrelay::Invalid) do
+        Tinrelay::TinrelaydConfig.load(unknown_site)
+      end
+    ensure
+      FileUtils.rm_r(root) if Dir.exists?(root)
     end
   end
 

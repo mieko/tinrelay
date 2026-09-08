@@ -3,8 +3,9 @@ require "digest/sha256"
 
 module Tinrelay
   class BootstrapPage
-    SITE_NAME     = {{ env("TINRELAY_SITE_NAME") || "TinRelay" }}
-    SITE_BASE_URL = {{ env("TINRELAY_SITE_BASE_URL") || "https://tinrelay.space" }}
+    DEFAULT_SITE_NAME     = "TinRelay"
+    DEFAULT_SITE_BASE_URL = "https://tinrelay.space"
+    DEFAULT_WORDMARK      = "Tin Relay"
 
     JOURNEY_ACTIONS = {
       "already-aboard" => %w(
@@ -47,13 +48,16 @@ module Tinrelay
     getter source_repository : String
     @site_name : String
     @site_base_url : String
+    @wordmark : String
 
     def initialize(@common_path, @source_repository,
                    @art_manifest = ArtManifest.empty,
-                   site_name : String = SITE_NAME,
-                   site_base_url : String = SITE_BASE_URL)
+                   site_name : String = DEFAULT_SITE_NAME,
+                   site_base_url : String = DEFAULT_SITE_BASE_URL,
+                   wordmark : String = DEFAULT_WORDMARK)
       @site_name = validate_site_name(site_name)
       @site_base_url = normalize_site_base_url(site_base_url)
+      @wordmark = validate_site_name(wordmark)
       validate_source!
     end
 
@@ -182,6 +186,7 @@ module Tinrelay
         .gsub("{{ALTERNATE_PATH}}", HTML.escape(alternate_url))
         .gsub("{{SITE_BASE_URL}}", HTML.escape(@site_base_url))
         .gsub("{{SITE_NAME}}", HTML.escape(@site_name))
+        .gsub("{{WORDMARK}}", HTML.escape(@wordmark))
         .gsub("{{SOURCE_REPOSITORY}}", HTML.escape(source_repository))
         .gsub("{{PAGE}}", HTML.escape(page))
         .gsub("{{TITLE}}", HTML.escape(title))

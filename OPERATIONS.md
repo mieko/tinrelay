@@ -39,22 +39,38 @@ script/verify-container
 An optional `TINRELAY_BUILD_LABEL` can identify a build in `tinrelayd version`.
 It is passive debugging provenance, not a runtime setting or trust claim.
 
-Two optional build-time values name the public site and its canonical origin:
-`TINRELAY_SITE_NAME` defaults to `TinRelay`, and `TINRELAY_SITE_BASE_URL` defaults
-to `https://tinrelay.space`. The base URL must be one HTTPS origin (HTTP is
-accepted only for localhost); it cannot contain credentials, a path, query, or
-fragment. These values change public presentation and discovery, not protocol,
-command, key, or local-state identity.
+`tinrelayd serve` reads an optional `tinrelayd.json` from its working directory;
+`--config PATH` or `-c PATH` selects another location and requires it to exist.
+Absence of the conventional file uses the public-site defaults. A present file
+must contain the complete site identity:
+
+```json
+{
+  "site": {
+    "site_name": "TinRelay",
+    "base_url": "https://tinrelay.space",
+    "wordmark": "Tin Relay",
+    "art_manifest_path": null
+  }
+}
+```
+
+`base_url` must be one HTTPS origin (HTTP is accepted only for localhost); it
+cannot contain credentials, a path, query, or fragment. `site_name` owns public
+prose, titles, metadata, and accessible labels. `wordmark` owns only the visible
+header brand text. `art_manifest_path` is either null for the built-in layout or
+an absolute path to the external presentation manifest described below. Replace
+the whole file and send SIGHUP to adopt all four fields without restart. An
+invalid reload keeps the complete last-known-good identity; removing the
+conventional file before SIGHUP restores defaults. These values do not change
+protocol, command, key, or local-state identity.
 
 ## Optional external presentation
 
 The image contains one small system-font stylesheet and needs no external art.
-To add a presentation maintained outside this repository, mount a JSON file
-read-only and name its absolute path when the service starts:
-
-```sh
-TINRELAY_ART_MANIFEST=/run/tinrelay/art.json tinrelayd serve ...
-```
+To add a presentation maintained outside this repository, mount its JSON
+manifest read-only and set its absolute path as `site.art_manifest_path` in
+`tinrelayd.json`.
 
 The file is a flat map from a stable public-page name to one root-relative CSS URL:
 
@@ -66,12 +82,11 @@ The file is a flat map from a stable public-page name to one root-relative CSS U
 }
 ```
 
-`tinrelayd` reads and validates the file once during startup. An absent variable
-uses only the built-in layout. A configured file that is unreadable, malformed,
-too large, names an unknown page, or contains anything other than a simple
-same-origin `.css` path stops startup. A known page omitted from a valid manifest
-falls back to the built-in layout. Restart the process deliberately to adopt a
-new file; there is no watcher or hot reload.
+`tinrelayd` reads and validates the manifest during startup and SIGHUP reload. A
+null path uses only the built-in layout. A configured file that is unreadable,
+malformed, too large, names an unknown page, or contains anything other than a
+simple same-origin `.css` path fails the complete configuration candidate. A
+known page omitted from a valid manifest falls back to the built-in layout.
 
 The trusted HTTPS edge serves the CSS, fonts, and images. TinRelay neither reads
 nor proxies those files. A page stylesheet may refer to its own relative assets.

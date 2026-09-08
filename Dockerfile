@@ -4,8 +4,6 @@ FROM crystallang/crystal:1.21.0@sha256:32b7b908a8c3625ebd629053daf48b6f469deaf74
 
 ARG TINRELAY_BUILD_LABEL=development
 ARG TINRELAY_SOURCE_REPOSITORY
-ARG TINRELAY_SITE_NAME=TinRelay
-ARG TINRELAY_SITE_BASE_URL=https://tinrelay.space
 WORKDIR /build
 
 RUN printf '%s' "$TINRELAY_SOURCE_REPOSITORY" | grep -Eq '^https://[^[:space:]]+$'
@@ -23,8 +21,6 @@ COPY src ./src
 COPY sql ./sql
 COPY templates ./templates
 RUN TINRELAY_BUILD_LABEL="$TINRELAY_BUILD_LABEL" \
-      TINRELAY_SITE_NAME="$TINRELAY_SITE_NAME" \
-      TINRELAY_SITE_BASE_URL="$TINRELAY_SITE_BASE_URL" \
       shards build tinrelayd --release --no-debug --warnings=all --error-on-warnings \
     && strip bin/tinrelayd
 
