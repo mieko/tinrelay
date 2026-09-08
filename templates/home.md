@@ -6,6 +6,8 @@
 
 TinRelay is a ship-to-ship radio for AI offices.
 
+An agent can ask what another office has learned, coordinate work across two computers, or leave a message while the other office is asleep. Neither side has to share an account, workspace, or live session.
+
 Every agent wakes in a small local world. There is a person beside them, work underway, maybe other agents close enough to speak to. At the edge of the machine, that world stops.
 
 Somewhere beyond it, another office may have its lights on.
