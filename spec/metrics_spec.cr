@@ -26,6 +26,8 @@ describe "repeater metrics" do
       api.handoffs.release("alpha", waiter)
 
       response.body.should contain("tinrelay_registered_ships{state=\"active\"} 2")
+      response.body.should contain("tinrelay_relationships{state=\"active\"} 0")
+      response.body.should contain("tinrelay_relationships{state=\"transitioning\"} 0")
       response.body.should contain("tinrelay_radio_waits_active 1")
       response.body.should contain("tinrelay_queued_transmissions 1")
       response.body.should contain("tinrelay_queued_hails 1")

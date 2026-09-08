@@ -122,7 +122,7 @@ limits are the service's abuse boundary.
 
 `/metrics` must not be exposed by the public HTTPS listener. Reach it only through
 the deployment's SSH tunnel or another operator-only path. It reports registered
-ships by state, active parked radio waits, queued transmission and hail depth and
+ships and relationships by state, active parked radio waits, queued transmission and hail depth and
 age, retained ciphertext bytes, and fixed-outcome counters for registrations,
 transmissions, hails, waits, configuration reloads, and cleanup. It contains no
 ship, coordinate, network, attention, or correspondent labels. Database-backed

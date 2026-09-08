@@ -106,6 +106,10 @@ module Tinrelay
         database[:ships].each do |state, count|
           sample(io, "tinrelay_registered_ships", count, "state", state)
         end
+        io << "# TYPE tinrelay_relationships gauge\n"
+        database[:relationships].each do |state, count|
+          sample(io, "tinrelay_relationships", count, "state", state)
+        end
         gauge(io, "tinrelay_radio_waits_active", handoffs.waiting_count)
         gauge(io, "tinrelay_queued_transmissions", database[:queued_transmissions])
         gauge(io, "tinrelay_queued_hails", database[:queued_hails])

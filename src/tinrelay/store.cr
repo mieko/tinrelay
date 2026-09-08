@@ -101,6 +101,7 @@ module Tinrelay
       database.db.transaction do |transaction|
         connection = transaction.connection
         ships = %w[active frozen revoked].to_h { |state| {state, 0_i64} }
+        relationships = %w[active transitioning].to_h { |state| {state, 0_i64} }
         metadata_used = permanent_metadata_usage(connection)
         connection.query("SELECT state, COUNT(*) FROM ships GROUP BY state") do |rows|
           rows.each do
@@ -108,8 +109,15 @@ module Tinrelay
             ships[state] = count
           end
         end
+        connection.query("SELECT state, COUNT(*) FROM relationships GROUP BY state") do |rows|
+          rows.each do
+            state, count = rows.read(String, Int64)
+            relationships[state] = count
+          end
+        end
         {
           ships:                ships,
+          relationships:        relationships,
           queued_transmissions: connection.scalar(
             "SELECT COUNT(*) FROM transmissions WHERE state = 'pending' AND expires_at > ?",
             now
