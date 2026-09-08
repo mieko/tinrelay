@@ -11,5 +11,6 @@
 !templates/**
 templates/assets/tinrelay/**
 !templates/assets/tinrelay/plain.css
+!templates/assets/tinrelay/home-copy.js
 !container/
 !container/tinrelayd-entrypoint

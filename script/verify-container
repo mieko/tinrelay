@@ -73,6 +73,11 @@ until curl --fail --silent --show-error "http://127.0.0.1:$port/readyz" \
   sleep 1
 done
 
+curl --fail --silent --show-error \
+  --header 'Accept: text/html' \
+  "http://127.0.0.1:$port/" \
+  | grep -Eq '/assets/tinrelay/home-copy\.[0-9a-f]{64}\.js'
+
 [ "$(docker inspect "$container" --format '{{.Config.User}}')" = "10001:10001" ]
 [ "$(docker inspect "$container" --format '{{.HostConfig.ReadonlyRootfs}}')" = "true" ]
 [ "$(docker inspect "$container" --format '{{json .HostConfig.CapDrop}}')" = '["ALL"]' ]
@@ -93,6 +98,7 @@ docker run --rm --platform linux/amd64 --entrypoint /bin/busybox "$image" sh -eu
   test -x /usr/local/bin/tinrelayd-entrypoint
   test -f /opt/tinrelay/templates/common-bootstrap.md
   test -f /opt/tinrelay/templates/assets/tinrelay/plain.css
+  test -f /opt/tinrelay/templates/assets/tinrelay/home-copy.js
   test ! -e /src
   test ! -e /spec
   test ! -e /.git
