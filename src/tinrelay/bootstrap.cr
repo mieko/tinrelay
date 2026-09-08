@@ -152,7 +152,7 @@ module Tinrelay
       shell = File.read(File.join(File.dirname(common_path), "meet-shell.html"))
       options = Markd::Options.new(safe: true)
       document = Markd::Parser.parse(markdown, options)
-      rendered = Markd::HTMLRenderer.new(options).render(document)
+      rendered = Markd::HTMLRenderer.new(options).render(document, nil)
       markdown_title = markdown_title(document)
       title = markdown_title.try { |value| "#{value} - TinRelay" } || "TinRelay"
       home = page == "home"
