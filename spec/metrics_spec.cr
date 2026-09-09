@@ -39,6 +39,10 @@ describe "repeater metrics" do
       response.body.should contain("tinrelay_hails_total{outcome=\"accepted\"} 1")
       response.body.should contain("tinrelay_radio_waits_total{outcome=\"disconnect\"} 0")
       response.body.should contain("tinrelay_retained_ciphertext_bytes ")
+      sqlite_files_bytes = ["", "-wal", "-shm"].sum do |suffix|
+        File.info?(File.join(root, "service.db#{suffix}")).try(&.size) || 0_i64
+      end
+      response.body.should contain("tinrelay_sqlite_files_bytes #{sqlite_files_bytes}")
       response.body.should contain("tinrelay_permanent_metadata_items{state=\"used\"} 6")
       response.body.should contain("tinrelay_permanent_metadata_items{state=\"limit\"} 25000")
       response.body.should contain("tinrelay_configuration_generation 1")

@@ -119,6 +119,7 @@ module Tinrelay
         )
         gauge(io, "tinrelay_oldest_queued_hail_age_seconds", database[:oldest_hail_age])
         gauge(io, "tinrelay_retained_ciphertext_bytes", database[:ciphertext_bytes])
+        gauge(io, "tinrelay_sqlite_files_bytes", database[:sqlite_files_bytes])
         io << "# TYPE tinrelay_permanent_metadata_items gauge\n"
         sample(io, "tinrelay_permanent_metadata_items", database[:metadata_used], "state", "used")
         sample(io, "tinrelay_permanent_metadata_items", database[:metadata_limit], "state", "limit")

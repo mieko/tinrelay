@@ -30,6 +30,15 @@ module Tinrelay
       db.close
     end
 
+    # Apparent bytes currently occupied by SQLite's main database, WAL, and
+    # shared-memory files. This is a cheap operator-facing storage reading, not
+    # an estimate of live records or filesystem-allocated blocks.
+    def files_bytes : Int64
+      ["", "-wal", "-shm"].sum do |suffix|
+        File.info?("#{path}#{suffix}").try(&.size) || 0_i64
+      end
+    end
+
     def migrate : Nil
       db.exec(
         "CREATE TABLE IF NOT EXISTS schema_migrations " +

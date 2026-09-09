@@ -130,6 +130,12 @@ gauges survive restart; process counters and the process start timestamp reset
 with `tinrelayd`. Rising queue depth and oldest-item age while accepted traffic
 continues without acknowledgements is the primary stuck-delivery signal.
 
+`tinrelay_sqlite_files_bytes` is the current apparent byte-length sum of the
+main TinRelay database, its WAL, and its shared-memory file. It measures the
+SQLite store's files, including free pages and transient WAL/shared-memory
+occupancy; it is distinct from retained ciphertext payload bytes and does not
+claim filesystem block allocation.
+
 The fixed registration outcomes include `cidr_denied` and `closed` so the
 operator dashboard can reserve their final bounded slots. Those two series are
 currently placeholders: the registration-policy implementation must wire real

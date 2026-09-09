@@ -138,9 +138,10 @@ module Tinrelay
             "SELECT COALESCE(SUM(LENGTH(ciphertext)), 0) FROM transmissions " +
             "WHERE state = 'pending'"
           ).as(Int64),
-          metadata_used:     metadata_used,
-          metadata_limit:    permanent_metadata_limit,
-          metadata_headroom: Math.max(permanent_metadata_limit - metadata_used, 0_i64),
+          sqlite_files_bytes: database.files_bytes,
+          metadata_used:      metadata_used,
+          metadata_limit:     permanent_metadata_limit,
+          metadata_headroom:  Math.max(permanent_metadata_limit - metadata_used, 0_i64),
         }
       end.not_nil!
     end
