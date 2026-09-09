@@ -8,6 +8,17 @@ Each entry identifies the previous compatible commit and the exact action an
 operator or user must take. Ordinary code, protocol-compatible behavior,
 documentation, dependency, and presentation changes are not listed here.
 
+## Registration-event schema 002
+
+The last commit without the registration-events schema is
+`fd313d05b52eb57eade2d3c4b8afd53fb1a66bbe`.
+
+Before starting a newer server against an existing database, make a consistent
+SQLite backup using the exact procedure in [OPERATIONS.md](OPERATIONS.md#backup-and-restore).
+Startup applies migration `002`; after that succeeds, an older binary rejects the
+newer schema. Restoring the backup after traffic resumes loses every write the
+repeater accepted after that backup.
+
 ## Clients without rotation-limit support
 
 The last commit without rotation-limit client support is
