@@ -290,6 +290,10 @@ describe "tinrelayd runtime policy" do
       response.headers["Retry-After"]?.should be_nil
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
       api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
+      metrics = api.metrics.render(api.store, api.handoffs)
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="closed"} 1)
+      )
     ensure
       api.try(&.close)
       FileUtils.rm_r(root) if root && Dir.exists?(root)
@@ -316,6 +320,13 @@ describe "tinrelayd runtime policy" do
       response.headers["Retry-After"]?.should be_nil
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
       api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
+      metrics = api.metrics.render(api.store, api.handoffs)
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="closed"} 1)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="cidr_denied"} 0)
+      )
     end
   end
 

@@ -92,6 +92,10 @@ describe "registration CIDR denial" do
       TinrelayRegistrationCIDRSpec.assert_forbidden(response)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
       api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
+      metrics = api.metrics.render(api.store, api.handoffs)
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="cidr_denied"} 1)
+      )
     end
   end
 
@@ -134,6 +138,10 @@ describe "registration CIDR denial" do
       )
       accepted.status_code.should eq(201)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
+      metrics = api.metrics.render(api.store, api.handoffs)
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="cidr_denied"} 2)
+      )
     end
   end
 
@@ -146,6 +154,10 @@ describe "registration CIDR denial" do
       )
       TinrelayRegistrationCIDRSpec.assert_forbidden(response)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      metrics = api.metrics.render(api.store, api.handoffs)
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="cidr_denied"} 0)
+      )
     end
   end
 

@@ -45,15 +45,18 @@ module Tinrelay
       @rate_limit_exclusions.includes?(ship)
     end
 
-    def registration_source_bucket(
+    def registration_source(
       peer : Socket::Address?,
       headers : HTTP::Headers,
-    ) : String?
+    ) : NamedTuple(bucket: String?, cidr_denied: Bool)
       address = client_address_policy.resolve(peer, headers)
-      return nil if @registration_deny_cidrs.any?(&.includes?(address))
-      LiteralIP.source_bucket(address)
+      if @registration_deny_cidrs.any?(&.includes?(address))
+        {bucket: nil, cidr_denied: true}
+      else
+        {bucket: LiteralIP.source_bucket(address), cidr_denied: false}
+      end
     rescue Invalid
-      nil
+      {bucket: nil, cidr_denied: false}
     end
   end
 
@@ -233,11 +236,19 @@ module Tinrelay
 
     private def claim_ship(context : HTTP::Server::Context) : Int32
       counted = false
+      policy_outcome = nil.as(String?)
       snapshot = runtime_snapshot
-      source_bucket = snapshot.registration_source_bucket(
-        context.request.remote_address, context.request.headers
+      peer = context.request.remote_address
+      headers = context.request.headers
+      source = snapshot.registration_source(
+        peer, headers
       )
+      source_bucket = source[:bucket]
       unless source_bucket
+        if source[:cidr_denied]
+          metrics.registration("cidr_denied")
+          counted = true
+        end
         return error(
           context, 403, "registration_forbidden",
           "registration is not available from this source"
@@ -246,12 +257,34 @@ module Tinrelay
       prepared = store.prepare_claim(parse_body(context, ShipClaim))
       store.claim(
         prepared, source_bucket, snapshot.registration_allowances,
-        policy_current: -> { runtime_snapshot.same?(snapshot) }
+        policy_current: -> do
+          current = runtime_snapshot
+          if current.same?(snapshot)
+            true
+          else
+            current_source = current.registration_source(peer, headers)
+            policy_outcome = if current_source[:cidr_denied]
+                               "cidr_denied"
+                             elsif current.registration_allowances.closed?
+                               "closed"
+                             end
+            false
+          end
+        end
       )
       metrics.registration("accepted")
       counted = true
       json(context, 201, %({"state":"claimed"}))
     rescue ex : RegistrationUnavailable
+      unless counted
+        if snapshot.try { |value| value.registration_allowances.closed? }
+          policy_outcome ||= "closed"
+        end
+        if outcome = policy_outcome
+          metrics.registration(outcome)
+          counted = true
+        end
+      end
       error(
         context, 403, "registration_forbidden",
         "registration is not available from this source"
