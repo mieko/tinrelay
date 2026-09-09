@@ -93,6 +93,21 @@ radio; owner rotation is signed by the prior owner. Peers verify these public ch
 from their first-contact pin. Old private radio generations remain local long enough
 to decrypt transmissions accepted for them.
 
+One ship may complete at most four owner rotations and sixteen radio retunes in a
+rolling 24-hour window. The budgets are independent and count successful rotations
+from the repeater's stored `revoked_at` times, not client clocks or generation order.
+The exact authenticated refusal is HTTP 429 `rotation_limited` with a positive
+`Retry-After`; malformed or unrelated 429 responses remain generic unavailability.
+Forward wall-clock jumps may reopen a window early and backward jumps may prolong it.
+These limits bound unilateral growth but do not prevent eventual collective exhaustion
+of the repeater's permanent-metadata ceiling.
+
+A refused `contact close` still leaves the peer blocked in the local keyring, so no
+accidental outbound correspondence can follow. Remote cryptographic severance and
+pending-queue relief have not completed. The CLI reports that distinction and the
+bounded retry time; repeat the same command after the window and do not replace the
+local key files.
+
 A local block is keyed to the pinned peer identity. It prevents accidental outbound
 correspondence and silently discards that peer's authenticated inbound correspondence
 or hails without body decryption, plaintext spooling, or radio-room attention. The
@@ -243,6 +258,7 @@ Enforced defaults:
   hour across the repeater;
 - 25,000 permanent registry/history rows by default, configurable to a hard
   maximum of 100,000;
+- four owner rotations and sixteen radio retunes per ship per rolling 24 hours;
 - 100 pending transmissions per ship;
 - 60 authenticated new attempts per sending ship per rolling hour, counted before
   destination resolution; accounting is bounded in-process because direct success

@@ -24,6 +24,9 @@ module Tinrelay
     MAX_TRANSMISSIONS_PER_HOUR   =  60
     MAX_HAILS_PER_DAY            =  12
     MAX_UNALLOWED_HAILS_PER_SHIP =  12
+    MAX_OWNER_ROTATIONS_PER_DAY  =   4
+    MAX_RADIO_RETUNES_PER_DAY    =  16
+    ROTATION_WINDOW_SECONDS      = 24 * 60 * 60
     MAX_CIPHERTEXT_BYTES         = 17 * 1024
     MAX_PENDING_SECONDS          = FALLBACK_LIFETIME_SECONDS
     AUTH_SKEW_SECONDS            = 5 * 60
@@ -455,6 +458,10 @@ module Tinrelay
                  )
             raise NotFound.new("active relationship not found")
           end
+          enforce_rotation_budget!(
+            connection, certificate.ship, "ship_radio_keys",
+            MAX_RADIO_RETUNES_PER_DAY, now
+          )
           ensure_permanent_capacity!(connection, 1)
           connection.exec(
             "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
@@ -601,6 +608,10 @@ module Tinrelay
             raise Unauthorized.new("owner rotation lacks the prior owner signature")
           end
           prior_signature = Crypto.unb64(rotation.prior_signature)
+          enforce_rotation_budget!(
+            connection, rotation.auth.ship, "ship_owner_keys",
+            MAX_OWNER_ROTATIONS_PER_DAY, now
+          )
           ensure_permanent_capacity!(connection, 1)
           connection.exec(
             "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
@@ -1129,6 +1140,42 @@ module Tinrelay
       if used > permanent_metadata_limit - growth
         raise Unavailable.new("permanent metadata capacity is exhausted")
       end
+    end
+
+    private def enforce_rotation_budget!(connection : DB::Connection,
+                                         ship : String, table : String,
+                                         allowance : Int32, now : Int64) : Nil
+      missing_time = connection.query_one?(
+        "SELECT 1 FROM #{table} " +
+        "WHERE ship = ? AND state = 'rotated' AND revoked_at IS NULL LIMIT 1",
+        ship, as: Int64
+      )
+      if missing_time
+        raise Error.new("rotated key history lacks a revocation time")
+      end
+
+      cutoff = now - ROTATION_WINDOW_SECONDS
+      recent = connection.scalar(
+        "SELECT COUNT(*) FROM #{table} " +
+        "WHERE ship = ? AND state = 'rotated' AND revoked_at > ?",
+        ship, cutoff
+      ).as(Int64)
+      return if recent < allowance
+
+      # With M recent rows and allowance L, the (M-L+1)th expiry is the first
+      # instant that puts the ship below its limit. revoked_at is server-written;
+      # generation order is not time order when the wall clock moves backward.
+      reopening_time = connection.query_one(
+        "SELECT revoked_at FROM #{table} " +
+        "WHERE ship = ? AND state = 'rotated' AND revoked_at > ? " +
+        "ORDER BY revoked_at ASC LIMIT 1 OFFSET ?",
+        ship, cutoff, recent - allowance, as: Int64
+      )
+      retry_after = reopening_time + ROTATION_WINDOW_SECONDS - now
+      if retry_after <= 0
+        raise Error.new("rotation limit produced a non-positive retry time")
+      end
+      raise RotationLimited.new(retry_after)
     end
 
     private def write_owner_keys(json : JSON::Builder, ship : String) : Nil

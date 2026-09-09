@@ -75,6 +75,14 @@ module Tinrelay
           status = error(context, 409, "conflict", ex.message || "conflict")
         rescue ex : Expired
           status = error(context, 410, "expired", ex.message || "expired")
+        rescue ex : RotationLimited
+          context.response.headers["Retry-After"] = ex.retry_after_seconds.to_s
+          status = json(
+            context, 429,
+            RotationLimitEvidence.new(
+              "rotation_limited", ex.retry_after_seconds
+            ).to_json
+          )
         rescue ex : Unavailable
           status = error(context, 503, "unavailable", ex.message || "unavailable")
         rescue ex

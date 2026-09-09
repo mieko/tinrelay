@@ -1,6 +1,365 @@
 require "./spec_helper"
 
+module TinrelayPermanentMetadataSpec
+  def self.seed_owner_history(api : Tinrelay::API, client : Tinrelay::Client,
+                              passphrase : String,
+                              revoked_at : Array(Int64?)) : Int32
+    return 1 if revoked_at.empty?
+    ship = client.keyring.data.ship
+    public_key = Tinrelay::Crypto.unb64(client.keyring.owner(passphrase).key.public_key)
+    api.database.db.transaction do |transaction|
+      connection = transaction.connection
+      connection.exec(
+        "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +
+        "WHERE ship = ? AND generation = 1",
+        revoked_at.first, ship
+      )
+      revoked_at.each_with_index do |timestamp, index|
+        generation = index + 1
+        next if generation == 1
+        connection.exec(
+          "INSERT INTO ship_owner_keys(" +
+          "ship, generation, public_key, state, valid_from, revoked_at" +
+          ") VALUES (?, ?, ?, 'rotated', 0, ?)",
+          ship, generation, Tinrelay::Crypto.signing_keypair.public_key, timestamp
+        )
+      end
+      active_generation = revoked_at.size + 1
+      connection.exec(
+        "INSERT INTO ship_owner_keys(" +
+        "ship, generation, public_key, state, valid_from" +
+        ") VALUES (?, ?, ?, 'active', 0)",
+        ship, active_generation, public_key
+      )
+      active_generation
+    end.not_nil!.to_i
+  end
+
+  def self.owner_rotation(client : Tinrelay::Client, passphrase : String,
+                          current_generation : Int32, admin_generation : Int64,
+                          now : Int64) : Tinrelay::OwnerRotation
+    keys = Tinrelay::Crypto.signing_keypair
+    public_key = Tinrelay::Crypto.b64(keys.public_key)
+    owner = client.keyring.owner(passphrase).key
+    bytes = Tinrelay::Canonical.fields(
+      "tinrelay-owner-rotation-v1", client.keyring.data.ship,
+      (current_generation + 1).to_s, public_key
+    )
+    prior_signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(bytes, Tinrelay::Crypto.unb64(owner.secret_key))
+    )
+    auth = Tinrelay::OwnerAuth.new(
+      client.keyring.data.ship, current_generation, admin_generation, now
+    )
+    rotation = Tinrelay::OwnerRotation.new(
+      current_generation + 1, public_key, prior_signature, auth
+    )
+    auth.signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(
+        auth.signing_bytes("owner.rotate", rotation.payload),
+        Tinrelay::Crypto.unb64(owner.secret_key)
+      )
+    )
+    rotation
+  end
+
+  def self.seed_radio_history(api : Tinrelay::API, client : Tinrelay::Client,
+                              passphrase : String, owner_generation : Int32,
+                              revoked_at : Array(Int64?)) : Int32
+    return 1 if revoked_at.empty?
+    ship = client.keyring.data.ship
+    radio = client.keyring.data.radio!
+    owner = client.keyring.owner(passphrase).key
+    api.database.db.transaction do |transaction|
+      connection = transaction.connection
+      connection.exec(
+        "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
+        "WHERE ship = ? AND generation = 1",
+        revoked_at.first, ship
+      )
+      revoked_at.each_with_index do |timestamp, index|
+        generation = index + 1
+        next if generation == 1
+        connection.exec(
+          "INSERT INTO ship_radio_keys(" +
+          "ship, generation, signing_public_key, encryption_public_key, " +
+          "state, issued_at, owner_generation, owner_signature, revoked_at" +
+          ") VALUES (?, ?, ?, ?, 'rotated', 0, ?, ?, ?)",
+          ship, generation, Tinrelay::Crypto.signing_keypair.public_key,
+          Tinrelay::Crypto.box_keypair.public_key, owner_generation,
+          Bytes.new(Tinrelay::Crypto::SIGNATURE_BYTES), timestamp
+        )
+      end
+      active_generation = revoked_at.size + 1
+      certificate = Tinrelay::ShipRadioCertificate.new(
+        ship, active_generation, radio.signing.public_key,
+        radio.encryption.public_key, 0_i64, owner_generation
+      )
+      certificate.owner_signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.sign(
+          certificate.unsigned_bytes, Tinrelay::Crypto.unb64(owner.secret_key)
+        )
+      )
+      connection.exec(
+        "INSERT INTO ship_radio_keys(" +
+        "ship, generation, signing_public_key, encryption_public_key, " +
+        "state, issued_at, owner_generation, owner_signature" +
+        ") VALUES (?, ?, ?, ?, 'active', 0, ?, ?)",
+        ship, active_generation, Tinrelay::Crypto.unb64(radio.signing.public_key),
+        Tinrelay::Crypto.unb64(radio.encryption.public_key), owner_generation,
+        Tinrelay::Crypto.unb64(certificate.owner_signature)
+      )
+      active_generation
+    end.not_nil!.to_i
+  end
+
+  def self.relationship_close(client : Tinrelay::Client, passphrase : String,
+                              peer : String, radio_generation : Int32,
+                              owner_generation : Int32, admin_generation : Int64,
+                              now : Int64) : Tinrelay::RelationshipClose
+    prior = client.keyring.data.radio!
+    owner = client.keyring.owner(passphrase).key
+    signing = Tinrelay::Crypto.signing_keypair
+    encryption = Tinrelay::Crypto.box_keypair
+    certificate = Tinrelay::ShipRadioCertificate.new(
+      client.keyring.data.ship, radio_generation + 1,
+      Tinrelay::Crypto.b64(signing.public_key),
+      Tinrelay::Crypto.b64(encryption.public_key), now, owner_generation
+    )
+    certificate.owner_signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(
+        certificate.unsigned_bytes, Tinrelay::Crypto.unb64(owner.secret_key)
+      )
+    )
+    prior_signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(
+        certificate.unsigned_bytes,
+        Tinrelay::Crypto.unb64(prior.signing.secret_key)
+      )
+    )
+    auth = Tinrelay::OwnerAuth.new(
+      client.keyring.data.ship, owner_generation, admin_generation, now
+    )
+    closure = Tinrelay::RelationshipClose.new(
+      peer, [] of String, certificate, prior_signature, auth
+    )
+    auth.signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(
+        auth.signing_bytes("relationship.close", closure.payload),
+        Tinrelay::Crypto.unb64(owner.secret_key)
+      )
+    )
+    closure
+  end
+
+  def self.post(origin : String, path : String, body : String) : HTTP::Client::Response
+    HTTP::Client.post(
+      "#{origin}#{path}",
+      HTTP::Headers{
+        "Content-Type"        => "application/json",
+        "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+      },
+      body
+    )
+  end
+end
+
 describe "permanent relay metadata capacity" do
+  it "bounds one ship before it exhausts shared permanent capacity" do
+    TinrelaySpec.with_server(permanent_metadata_limit: 14_i64) do |root, origin, api|
+      passphrase = "permanent metadata fairness evidence"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+
+      Tinrelay::Store::MAX_OWNER_ROTATIONS_PER_DAY.times do |index|
+        alpha.rotate_owner.should eq(index + 2)
+      end
+      expect_raises(Tinrelay::RotationLimited) { alpha.rotate_owner }
+
+      beta.rotate_owner.should eq(2)
+      TinrelaySpec.admit(root, origin, "gamma", passphrase)
+      api.store.permanent_metadata_usage.should eq(14)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'alpha'"
+      ).as(Int64).should eq(5)
+    end
+  end
+
+  it "limits recent owner rotations by timestamp rank without a lifetime ceiling" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "owner rotation window evidence"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      now = 100_000_i64
+      cutoff = now - Tinrelay::Store::ROTATION_WINDOW_SECONDS
+      old_history = Array(Int64?).new(300, cutoff)
+      generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, alpha, passphrase, old_history
+      )
+      api.store.rotate_owner(
+        TinrelayPermanentMetadataSpec.owner_rotation(
+          alpha, passphrase, generation, 1_i64, now
+        ),
+        now
+      )
+
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      recent = [cutoff + 40, cutoff + 10, cutoff + 10, cutoff + 30, cutoff + 20]
+        .map(&.as(Int64?))
+      beta_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, beta, passphrase, recent
+      )
+      request = TinrelayPermanentMetadataSpec.owner_rotation(
+        beta, passphrase, beta_generation, 1_i64, now
+      )
+      limited = expect_raises(Tinrelay::RotationLimited) do
+        api.store.rotate_owner(request, now)
+      end
+      limited.retry_after_seconds.should eq(10)
+      api.database.db.scalar(
+        "SELECT admin_generation FROM ships WHERE name = 'beta'"
+      ).should eq(0_i64)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'beta'"
+      ).should eq(6_i64)
+
+      api.store.rotate_owner(request, now + limited.retry_after_seconds)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'beta'"
+      ).should eq(7_i64)
+    end
+  end
+
+  it "orders a backward-clock rotation window by server time and rejects NULL history" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "backward clock rotation evidence"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      timestamps = [100_i64, 90_i64, 80_i64, 70_i64, 60_i64].map(&.as(Int64?))
+      generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, alpha, passphrase, timestamps
+      )
+      request = TinrelayPermanentMetadataSpec.owner_rotation(
+        alpha, passphrase, generation, 1_i64, 50_i64
+      )
+      limited = expect_raises(Tinrelay::RotationLimited) do
+        api.store.rotate_owner(request, 50_i64)
+      end
+      limited.retry_after_seconds.should eq(
+        Tinrelay::Store::ROTATION_WINDOW_SECONDS + 20
+      )
+
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      beta_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, beta, passphrase, [nil]
+      )
+      beta_request = TinrelayPermanentMetadataSpec.owner_rotation(
+        beta, passphrase, beta_generation, 1_i64, 50_i64
+      )
+      expect_raises(Tinrelay::Error, /revocation time/) do
+        api.store.rotate_owner(beta_request, 50_i64)
+      end
+    end
+  end
+
+  it "returns exact timed evidence and no retry time for corrupt rotation history" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "rotation limit response evidence"
+      now = Time.utc.to_unix
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, alpha, passphrase, Array(Int64?).new(4, now - 10)
+      )
+      request = TinrelayPermanentMetadataSpec.owner_rotation(
+        alpha, passphrase, generation, 1_i64, now
+      )
+      response = TinrelayPermanentMetadataSpec.post(
+        origin, "/v1/owners/rotate", request.to_json
+      )
+      response.status_code.should eq(429)
+      retry_after = response.headers["Retry-After"].to_i64
+      retry_after.should be > 0
+      evidence = JSON.parse(response.body).as_h
+      evidence.keys.sort.should eq(%w(error retry_after_seconds))
+      evidence["error"].as_s.should eq("rotation_limited")
+      evidence["retry_after_seconds"].as_i64.should eq(retry_after)
+
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      beta_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, beta, passphrase, [nil]
+      )
+      invalid = TinrelayPermanentMetadataSpec.owner_rotation(
+        beta, passphrase, beta_generation, 1_i64, Time.utc.to_unix
+      )
+      corrupt = TinrelayPermanentMetadataSpec.post(
+        origin, "/v1/owners/rotate", invalid.to_json
+      )
+      corrupt.status_code.should eq(500)
+      corrupt.headers["Retry-After"]?.should be_nil
+    end
+  end
+
+  it "keeps owner and radio rotation budgets independent and mutation-free" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "independent radio rotation budget"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      TinrelaySpec.connect(root, alpha, beta)
+      now = 200_000_i64
+      radio_generation = TinrelayPermanentMetadataSpec.seed_radio_history(
+        api, alpha, passphrase, 1,
+        Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY, now - 1)
+      )
+      closure = TinrelayPermanentMetadataSpec.relationship_close(
+        alpha, passphrase, "beta", radio_generation, 1, 1_i64, now
+      )
+      limited = expect_raises(Tinrelay::RotationLimited) do
+        api.store.close_relationship(closure, now)
+      end
+      limited.retry_after_seconds.should eq(
+        Tinrelay::Store::ROTATION_WINDOW_SECONDS - 1
+      )
+      api.database.db.scalar(
+        "SELECT admin_generation FROM ships WHERE name = 'alpha'"
+      ).should eq(0_i64)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_radio_keys WHERE ship = 'alpha'"
+      ).should eq((Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY + 1).to_i64)
+      api.database.db.query_one(
+        "SELECT state FROM relationships WHERE ship_a = 'alpha' AND ship_b = 'beta'",
+        as: String
+      ).should eq("active")
+
+      owner_request = TinrelayPermanentMetadataSpec.owner_rotation(
+        alpha, passphrase, 1, 1_i64, now
+      )
+      api.store.rotate_owner(owner_request, now)
+    end
+
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "independent owner rotation budget"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      beta = TinrelaySpec.admit(root, origin, "beta", passphrase)
+      TinrelaySpec.connect(root, alpha, beta)
+      now = 300_000_i64
+      cutoff = now - Tinrelay::Store::ROTATION_WINDOW_SECONDS
+      owner_generation = TinrelayPermanentMetadataSpec.seed_owner_history(
+        api, alpha, passphrase,
+        Array(Int64?).new(Tinrelay::Store::MAX_OWNER_ROTATIONS_PER_DAY, cutoff + 1)
+      )
+      radio_generation = TinrelayPermanentMetadataSpec.seed_radio_history(
+        api, alpha, passphrase, owner_generation,
+        Array(Int64?).new(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY - 1, now - 1)
+      )
+      closure = TinrelayPermanentMetadataSpec.relationship_close(
+        alpha, passphrase, "beta", radio_generation,
+        owner_generation, 1_i64, now
+      )
+      api.store.close_relationship(closure, now)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_radio_keys WHERE ship = 'alpha'"
+      ).should eq((Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY + 1).to_i64)
+    end
+  end
+
   it "serializes concurrent permanent growth at the configured boundary" do
     root = TinrelaySpec.temporary_root
     database = Tinrelay::Database.new(File.join(root, "capacity.db"), 2)

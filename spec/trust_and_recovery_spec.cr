@@ -78,6 +78,7 @@ end
 
 class AmbiguousRelationshipRemote < Tinrelay::Remote
   getter certificates = [] of String
+  getter requests = [] of Tinrelay::RelationshipClose
 
   def initialize(origin : String, @store : Tinrelay::Store? = nil)
     super(origin)
@@ -87,8 +88,87 @@ class AmbiguousRelationshipRemote < Tinrelay::Remote
     if path == "/v1/relationships/close"
       request = Tinrelay::RelationshipClose.from_json(body)
       certificates << request.certificate.to_json
+      requests << request
       @store.try(&.close_relationship(request))
       raise Tinrelay::Unavailable.new("synthetic lost relationship-close response")
+    end
+    super
+  end
+end
+
+class TimedRelationshipRemote < Tinrelay::Remote
+  def post(path : String, body : String) : String
+    if path == "/v1/relationships/close"
+      raise Tinrelay::RotationLimited.new(37_i64)
+    end
+    super
+  end
+end
+
+class GenericLimitedRelationshipRemote < Tinrelay::Remote
+  def post(path : String, body : String) : String
+    if path == "/v1/relationships/close"
+      raise Tinrelay::Unavailable.new("synthetic generic 429")
+    end
+    super
+  end
+end
+
+class CommitThenConflictRelationshipRemote < Tinrelay::Remote
+  def initialize(origin : String, @store : Tinrelay::Store,
+                 @earlier : Tinrelay::RelationshipClose)
+    super(origin)
+  end
+
+  def post(path : String, body : String) : String
+    if path == "/v1/relationships/close"
+      @store.close_relationship(@earlier)
+      @store.close_relationship(Tinrelay::RelationshipClose.from_json(body))
+    end
+    super
+  end
+end
+
+class AmbiguousOwnerRemote < Tinrelay::Remote
+  getter rotations = [] of Tinrelay::OwnerRotation
+
+  def initialize(origin : String, @store : Tinrelay::Store? = nil)
+    super(origin)
+  end
+
+  def post(path : String, body : String) : String
+    if path == "/v1/owners/rotate"
+      rotation = Tinrelay::OwnerRotation.from_json(body)
+      rotations << rotation
+      @store.try(&.rotate_owner(rotation))
+      raise Tinrelay::Unavailable.new("synthetic lost owner-rotation response")
+    end
+    super
+  end
+end
+
+class TimedOwnerRemote < Tinrelay::Remote
+  getter rotations = [] of Tinrelay::OwnerRotation
+
+  def post(path : String, body : String) : String
+    if path == "/v1/owners/rotate"
+      rotations << Tinrelay::OwnerRotation.from_json(body)
+      raise Tinrelay::RotationLimited.new(37_i64)
+    end
+    super
+  end
+end
+
+class CommitThenConflictOwnerRemote < Tinrelay::Remote
+  def initialize(origin : String, @store : Tinrelay::Store,
+                 @earlier : Tinrelay::OwnerRotation)
+    super(origin)
+  end
+
+  def post(path : String, body : String) : String
+    if path == "/v1/owners/rotate"
+      @store.rotate_owner(@earlier)
+      raise Tinrelay::Conflict.new("synthetic conflict after earlier owner acceptance")
     end
     super
   end
@@ -316,6 +396,157 @@ describe "trust and recovery transitions" do
         rejected.close_contact("gamma")
       end
       rejected.keyring.data.pending_radio.should be_nil
+    end
+  end
+
+  it "clears only a fresh radio after exact timed refusal" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "fresh timed relationship refusal"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+
+      timed = Tinrelay::Client.new(
+        alpha.keyring, passphrase, TimedRelationshipRemote.new(origin)
+      )
+      expect_raises(Tinrelay::RotationLimited) do
+        timed.close_contact("beta")
+      end
+      timed.keyring.data.contact!("beta").blocked?.should be_true
+      timed.keyring.data.pending_radio.should be_nil
+      timed.rotate_owner.should eq(2)
+
+      generic = Tinrelay::Client.new(
+        timed.keyring, passphrase, GenericLimitedRelationshipRemote.new(origin)
+      )
+      expect_raises(Tinrelay::Unavailable) do
+        generic.close_contact("beta")
+      end
+      generic.keyring.data.pending_radio.should_not be_nil
+    end
+  end
+
+  it "retains a reused radio through timed and raced definite refusals" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "reused timed relationship refusal"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+      ambiguous = AmbiguousRelationshipRemote.new(origin)
+      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      expect_raises(Tinrelay::Unavailable) { first.close_contact("beta") }
+      pending = first.keyring.data.pending_radio.not_nil!.to_json
+
+      retry = Tinrelay::Client.new(
+        first.keyring, passphrase, TimedRelationshipRemote.new(origin)
+      )
+      expect_raises(Tinrelay::RotationLimited) { retry.close_contact("beta") }
+      retry.keyring.data.pending_radio.not_nil!.to_json.should eq(pending)
+
+      api.store.close_relationship(ambiguous.requests.first)
+      recovered = Tinrelay::Client.new(retry.keyring, passphrase, Tinrelay::Remote.new(origin))
+      recovered.sync_radio!.should be_true
+      recovered.keyring.data.pending_radio.should be_nil
+      recovered.keyring.data.active_radio_generation.should eq(2)
+    end
+
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "reused conflict relationship refusal"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+      ambiguous = AmbiguousRelationshipRemote.new(origin)
+      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      expect_raises(Tinrelay::Unavailable) { first.close_contact("beta") }
+      pending = first.keyring.data.pending_radio.not_nil!.to_json
+
+      raced = Tinrelay::Client.new(
+        first.keyring, passphrase,
+        CommitThenConflictRelationshipRemote.new(
+          origin, api.store, ambiguous.requests.first
+        )
+      )
+      expect_raises(Tinrelay::Conflict) { raced.close_contact("beta") }
+      raced.keyring.data.pending_radio.not_nil!.to_json.should eq(pending)
+
+      recovered = Tinrelay::Client.new(raced.keyring, passphrase, Tinrelay::Remote.new(origin))
+      recovered.sync_radio!.should be_true
+      recovered.keyring.data.pending_radio.should be_nil
+    end
+  end
+
+  it "clears only a fresh owner identity after exact timed refusal" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "fresh timed owner refusal"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      timed_remote = TimedOwnerRemote.new(origin)
+      timed = Tinrelay::Client.new(alpha.keyring, passphrase, timed_remote)
+
+      expect_raises(Tinrelay::RotationLimited) { timed.rotate_owner }
+      owner = timed.keyring.owner(passphrase)
+      owner.pending_generation.should be_nil
+      owner.pending_key.should be_nil
+      timed.keyring.data.owner_generation.should eq(1)
+      timed_remote.rotations.size.should eq(1)
+    end
+  end
+
+  it "reuses and reconciles one uncertain owner identity without another rotation" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "reused timed owner refusal"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      ambiguous = AmbiguousOwnerRemote.new(origin)
+      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      expect_raises(Tinrelay::Unavailable) { first.rotate_owner }
+      pending = first.keyring.owner(passphrase).pending_key.not_nil!.to_json
+
+      timed_remote = TimedOwnerRemote.new(origin)
+      retry = Tinrelay::Client.new(first.keyring, passphrase, timed_remote)
+      expect_raises(Tinrelay::RotationLimited) { retry.rotate_owner }
+      timed_remote.rotations.first.new_public_key.should eq(
+        ambiguous.rotations.first.new_public_key
+      )
+      retry.keyring.owner(passphrase).pending_key.not_nil!.to_json.should eq(pending)
+
+      api.store.rotate_owner(ambiguous.rotations.first)
+      recovered = Tinrelay::Client.new(retry.keyring, passphrase, Tinrelay::Remote.new(origin))
+      recovered.rotate_owner.should eq(2)
+      recovered.keyring.owner(passphrase).pending_key.should be_nil
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'alpha'"
+      ).should eq(2_i64)
+    end
+
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "reused conflict owner refusal"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      ambiguous = AmbiguousOwnerRemote.new(origin)
+      first = Tinrelay::Client.new(alpha.keyring, passphrase, ambiguous)
+      expect_raises(Tinrelay::Unavailable) { first.rotate_owner }
+      pending = first.keyring.owner(passphrase).pending_key.not_nil!.to_json
+
+      raced = Tinrelay::Client.new(
+        first.keyring, passphrase,
+        CommitThenConflictOwnerRemote.new(
+          origin, api.store, ambiguous.rotations.first
+        )
+      )
+      raced.rotate_owner.should eq(2)
+      raced.keyring.owner(passphrase).pending_key.should be_nil
+      raced.keyring.data.owner_generation.should eq(2)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM ship_owner_keys WHERE ship = 'alpha'"
+      ).should eq(2_i64)
+      pending.should_not be_empty
     end
   end
 

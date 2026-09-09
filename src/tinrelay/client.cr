@@ -5,6 +5,7 @@ module Tinrelay
     # permanent-history allowance.
     MAX_RESPONSE_BYTES      = MAX_ORDINARY_RESPONSE_BYTES.to_i
     IDENTITY_RESPONSE_PATHS = {"/v1/ships/inspect", "/v1/radio/wait"}
+    ROTATION_LIMIT_PATHS    = {"/v1/owners/rotate", "/v1/relationships/close"}
 
     getter origin : String
 
@@ -90,6 +91,10 @@ module Tinrelay
           raise RegistrationLimited.new(retry_after)
         end
       end
+      if status_code == 429 && ROTATION_LIMIT_PATHS.includes?(path)
+        retry_after = rotation_limit_evidence(body, headers)
+        raise RotationLimited.new(retry_after) if retry_after
+      end
       case status_code
       when 400      then raise Invalid.new("relay rejected an invalid request")
       when 401, 403 then raise Unauthorized.new("relay authentication failed")
@@ -100,6 +105,18 @@ module Tinrelay
       when 503      then raise Unavailable.new("relay is unavailable")
       else               raise Error.new("relay returned HTTP #{status_code}")
       end
+    end
+
+    private def rotation_limit_evidence(body : String,
+                                        headers : HTTP::Headers) : Int64?
+      header = headers["Retry-After"]?.try(&.to_i64?)
+      return nil unless header && header > 0
+      evidence = RotationLimitEvidence.from_json(body)
+      return nil unless evidence.error == "rotation_limited"
+      return nil unless evidence.retry_after_seconds == header
+      header
+    rescue JSON::ParseException | JSON::SerializableError
+      nil
     end
 
     private def protocol_mismatch_evidence(body : String) : ProtocolMismatchEvidence
@@ -488,6 +505,7 @@ module Tinrelay
       end
       sync_owner!
       prior = keyring.data.radio!
+      fresh_identity = keyring.data.pending_radio.nil?
       identity = keyring.data.pending_radio || build_pending_radio!(prior)
       certificate = identity.certificate
       prior_signature = Crypto.b64(
@@ -503,8 +521,11 @@ module Tinrelay
       provisional.auth = owner_auth("relationship.close", provisional.payload)
       begin
         remote.post("/v1/relationships/close", provisional.to_json)
+      rescue ex : RotationLimited
+        clear_pending_radio! if fresh_identity
+        raise ex
       rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired | ProtocolMismatch
-        clear_pending_radio!
+        clear_pending_radio! if fresh_identity
         raise ex
       rescue ex : Unavailable | Error | IO::Error
         begin
@@ -551,12 +572,29 @@ module Tinrelay
           "finish the pending contact close radio retune before rotating the owner key"
         )
       end
-      sync_owner!
+      return keyring.data.owner_generation if sync_owner!
       old_generation = keyring.data.owner_generation
       new_generation = old_generation + 1
-      keys = Crypto.signing_keypair
       owner = keyring.owner(passphrase)
-      new_public = Crypto.b64(keys.public_key)
+      pending_generation = owner.pending_generation
+      pending_key = owner.pending_key
+      if pending_generation.nil? != pending_key.nil?
+        raise Error.new("pending owner identity is incomplete")
+      end
+      if pending_generation && pending_generation != new_generation
+        raise Error.new("pending owner identity has an unexpected generation")
+      end
+      fresh_identity = pending_key.nil?
+      unless pending_key
+        keys = Crypto.signing_keypair
+        pending_key = StoredKeyPair.new(
+          Crypto.b64(keys.public_key), Crypto.b64(keys.secret_key)
+        )
+        owner.pending_generation = new_generation
+        owner.pending_key = pending_key
+        keyring.save_owner(owner, passphrase)
+      end
+      new_public = pending_key.public_key
       rotation_bytes = Canonical.fields(
         "tinrelay-owner-rotation-v1", keyring.data.ship,
         new_generation.to_s, new_public
@@ -569,19 +607,20 @@ module Tinrelay
         owner_auth("owner.rotate", Bytes.empty)
       )
       provisional.auth = owner_auth("owner.rotate", provisional.payload)
-      pending_key = StoredKeyPair.new(new_public, Crypto.b64(keys.secret_key))
-      owner.pending_generation = new_generation
-      owner.pending_key = pending_key
-      keyring.save_owner(owner, passphrase)
       begin
         remote.post("/v1/owners/rotate", provisional.to_json)
-      rescue ex
-        begin
-          sync_owner!
-          return new_generation if keyring.data.owner_generation == new_generation
-        rescue
-          # Preserve the pending private key for a later registry reconciliation.
-        end
+      rescue ex : RotationLimited
+        return new_generation if owner_rotation_committed?(new_generation)
+        clear_pending_owner!(new_generation, pending_key) if fresh_identity
+        raise ex
+      rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired | ProtocolMismatch
+        return new_generation if owner_rotation_committed?(new_generation)
+        clear_pending_owner!(new_generation, pending_key) if fresh_identity
+        raise ex
+      rescue ex : Unavailable | Error | IO::Error
+        return new_generation if owner_rotation_committed?(new_generation)
+        # An uncertain or previously reused identity remains durable for the
+        # next exact retry; never create a sibling key at this generation.
         raise ex
       end
       promote_owner!(owner, new_generation, pending_key)
@@ -1164,20 +1203,36 @@ module Tinrelay
       auth
     end
 
-    private def sync_owner! : Nil
+    private def sync_owner! : Bool
       document = inspect_document(keyring.data.ship, all_local_radios: true)
       active = document["owner_keys"].as_a.find { |item| item["state"].as_s == "active" } ||
                raise Unavailable.new("ship has no active owner key")
       generation = active["generation"].as_i.to_i
       public_key = active["public_key"].as_s
       owner = keyring.owner(passphrase)
-      return if generation == owner.generation && public_key == owner.key.public_key
+      return false if generation == owner.generation && public_key == owner.key.public_key
       if owner.pending_generation == generation && owner.pending_key.try(&.public_key) == public_key
         promote_owner!(owner, generation, owner.pending_key.not_nil!)
         keyring.save(passphrase)
-        return
+        return true
       end
       raise Unauthorized.new("active registry owner has no matching local private key")
+    end
+
+    private def owner_rotation_committed?(generation : Int32) : Bool
+      sync_owner!
+      keyring.data.owner_generation == generation
+    rescue
+      false
+    end
+
+    private def clear_pending_owner!(generation : Int32, key : StoredKeyPair) : Nil
+      owner = keyring.owner(passphrase)
+      return unless owner.pending_generation == generation &&
+                    owner.pending_key.try(&.to_json) == key.to_json
+      owner.pending_generation = nil
+      owner.pending_key = nil
+      keyring.save_owner(owner, passphrase)
     end
 
     private def reconcile_radio_if_pending! : Bool

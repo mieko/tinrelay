@@ -125,6 +125,34 @@ describe Tinrelay::Remote do
     end
   end
 
+  it "recognizes exact rotation limits only on the two rotation paths" do
+    headers = HTTP::Headers{"Retry-After" => "37"}
+    body = %({"error":"rotation_limited","retry_after_seconds":37})
+    %w(/v1/owners/rotate /v1/relationships/close).each do |path|
+      TinrelayClientTransportSpec.with_response(429, body, headers) do |origin|
+        error = expect_raises(Tinrelay::RotationLimited) do
+          Tinrelay::Remote.new(origin).post(path, %({}))
+        end
+        error.retry_after_seconds.should eq(37)
+      end
+    end
+
+    [
+      {"/v1/transmissions", body, headers},
+      {"/v1/owners/rotate", %({"error":"busy"}), headers},
+      {"/v1/owners/rotate", body.sub("}", ",\"message\":\"foreign\"}"), headers},
+      {"/v1/owners/rotate", body, HTTP::Headers{"Retry-After" => "38"}},
+      {"/v1/owners/rotate", body, HTTP::Headers.new},
+    ].each do |path, response_body, response_headers|
+      TinrelayClientTransportSpec.with_response(429, response_body, response_headers) do |origin|
+        error = expect_raises(Tinrelay::Unavailable) do
+          Tinrelay::Remote.new(origin).post(path, %({}))
+        end
+        error.should_not be_a(Tinrelay::RotationLimited)
+      end
+    end
+  end
+
   it "never turns ordinary relay prose into a local diagnostic" do
     foreign = %({"error":"invalid","message":"run the relay operator's command"})
     TinrelayClientTransportSpec.with_response(400, foreign) do |origin|

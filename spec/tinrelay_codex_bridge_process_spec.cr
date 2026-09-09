@@ -535,6 +535,76 @@ private def run_current_client(root : String, args : Array(String))
 end
 
 describe "tinrelay-codex-bridge process contract" do
+  it "reports a timed contact-close refusal as local block with incomplete severance" do
+    TinrelaySpec.with_server do |root, origin, api|
+      ship = "alpha"
+      passphrase = "rotation limit CLI evidence"
+      paths = Tinrelay::LocalPaths.new(ship, root)
+      alpha = Tinrelay::Client.join(
+        paths.keyring, origin, ship, passphrase, paths.owner_key
+      )
+      Tinrelay::AtomicPrivateFile.write(paths.passphrase, passphrase + "\n")
+      TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+      now = Time.utc.to_unix
+      radio = alpha.keyring.data.radio!
+      radio.generation = Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY + 1
+      radio.certificate.generation = radio.generation
+      radio.certificate.issued_at = now
+      owner = alpha.keyring.owner(passphrase).key
+      radio.certificate.owner_signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.sign(
+          radio.certificate.unsigned_bytes,
+          Tinrelay::Crypto.unb64(owner.secret_key)
+        )
+      )
+      alpha.keyring.data.active_radio_generation = radio.generation
+      alpha.keyring.save(passphrase)
+
+      api.database.db.transaction do |transaction|
+        connection = transaction.connection
+        connection.exec(
+          "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
+          "WHERE ship = ? AND generation = 1",
+          now - 1, ship
+        )
+        2.upto(Tinrelay::Store::MAX_RADIO_RETUNES_PER_DAY) do |generation|
+          connection.exec(
+            "INSERT INTO ship_radio_keys(" +
+            "ship, generation, signing_public_key, encryption_public_key, state, " +
+            "issued_at, owner_generation, owner_signature, prior_radio_signature, revoked_at" +
+            ") SELECT ship, ?, signing_public_key, encryption_public_key, 'rotated', " +
+            "issued_at, owner_generation, owner_signature, prior_radio_signature, ? " +
+            "FROM ship_radio_keys WHERE ship = ? AND generation = 1",
+            generation, now - 1, ship
+          )
+        end
+        connection.exec(
+          "INSERT INTO ship_radio_keys(" +
+          "ship, generation, signing_public_key, encryption_public_key, state, " +
+          "issued_at, owner_generation, owner_signature, prior_radio_signature" +
+          ") SELECT ship, ?, signing_public_key, encryption_public_key, 'active', " +
+          "?, owner_generation, ?, prior_radio_signature " +
+          "FROM ship_radio_keys WHERE ship = ? AND generation = 1",
+          radio.generation, now,
+          Tinrelay::Crypto.unb64(radio.certificate.owner_signature), ship
+        )
+      end
+
+      status, output, error = run_current_client(
+        root, ["contact", "close", "beta", "--ship", ship]
+      )
+      status.exit_code.should eq(2)
+      output.should be_empty
+      report = JSON.parse(error)
+      report["error"].as_s.should eq("rotation_limited")
+      report["retry_after_seconds"].as_i64.should be > 0
+      report["retryable"].as_bool.should be_true
+      report["instruction"].as_s.should contain("Repeat the same command")
+      report["message"].as_s.should contain("blocked locally")
+      report["message"].as_s.should contain("severance has not completed")
+    end
+  end
+
   it "retries only transport outages inside the long-lived collector" do
     root = TinrelaySpec.temporary_root
     port = TinrelayCodexBridgeProcessSpec.available_port

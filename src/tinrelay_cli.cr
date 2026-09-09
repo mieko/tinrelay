@@ -93,6 +93,9 @@ module Tinrelay
     rescue ex : TransportUnavailable
       report_transport_unavailable(ex)
       exit 2
+    rescue ex : RotationLimited
+      report_rotation_limited(ex)
+      exit 2
     rescue ex : Error
       STDERR.puts({error: ex.class.name.split("::").last.underscore, message: ex.message}.to_json)
       exit 2
@@ -122,7 +125,12 @@ module Tinrelay
       when "close"
         peer = argv.shift? || raise Invalid.new("contact close requires a peer ship")
         no_extra!(argv)
-        generation = client(paths, passphrase_file).close_contact(peer)
+        generation = begin
+          client(paths, passphrase_file).close_contact(peer)
+        rescue ex : RotationLimited
+          report_rotation_limited(ex, contact_close: true)
+          exit 2
+        end
         puts({state: "closed", ship: ship, peer_ship: peer,
               radio_generation: generation}.to_json)
       when "unblock"
@@ -249,6 +257,24 @@ module Tinrelay
         error: "transport_unavailable", retryable: true,
         message: ex.message,
       }.to_json)
+      STDERR.flush
+    end
+
+    private def self.report_rotation_limited(ex : RotationLimited,
+                                             contact_close = false) : Nil
+      common = {
+        error: "rotation_limited", retry_after_seconds: ex.retry_after_seconds,
+        retryable: true,
+        instruction: "Repeat the same command after the retry window.",
+      }
+      if contact_close
+        STDERR.puts(common.merge({
+          message: "The peer is already blocked locally, but remote cryptographic " +
+                   "severance has not completed.",
+        }).to_json)
+      else
+        STDERR.puts(common.to_json)
+      end
       STDERR.flush
     end
 

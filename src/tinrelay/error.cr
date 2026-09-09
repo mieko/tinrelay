@@ -25,6 +25,17 @@ module Tinrelay
     end
   end
 
+  class RotationLimited < Unavailable
+    getter retry_after_seconds : Int64
+
+    def initialize(@retry_after_seconds)
+      super(
+        "relay rotation limit reached; try again in " +
+        "#{retry_after_seconds} seconds"
+      )
+    end
+  end
+
   # A failure at the relay's network boundary. Its distinct type lets a caller
   # retry narrowly without treating local I/O or unknown failures as transient.
   class TransportUnavailable < Unavailable

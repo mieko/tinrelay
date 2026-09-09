@@ -552,6 +552,17 @@ module Tinrelay
     end
   end
 
+  class RotationLimitEvidence
+    include JSON::Serializable
+    include JSON::Serializable::Strict
+
+    getter error : String
+    getter retry_after_seconds : Int64
+
+    def initialize(@error, @retry_after_seconds)
+    end
+  end
+
   class MaintenanceEvidence
     include JSON::Serializable
     include JSON::Serializable::Strict
