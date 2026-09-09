@@ -126,8 +126,9 @@ module Tinrelay
   end
 
   class TinrelaydConfig
-    MAX_BYTES    = 64 * 1024
-    DEFAULT_PATH = "tinrelayd.json"
+    MAX_BYTES          = 64 * 1024
+    MAX_EXCLUDED_SHIPS = 256
+    DEFAULT_PATH       = "tinrelayd.json"
 
     class Site
       include JSON::Serializable
@@ -152,12 +153,14 @@ module Tinrelay
       getter per_source_hour : Int32 = RegistrationAllowances::DEFAULT_PER_SOURCE_HOUR
       getter per_source_day : Int32 = RegistrationAllowances::DEFAULT_PER_SOURCE_DAY
       getter deny_cidrs : Array(String) = [] of String
+      getter exclude : Array(String) = [] of String
 
       def initialize(@global_hour = RegistrationAllowances::DEFAULT_GLOBAL_HOUR,
                      @global_day = RegistrationAllowances::DEFAULT_GLOBAL_DAY,
                      @per_source_hour = RegistrationAllowances::DEFAULT_PER_SOURCE_HOUR,
                      @per_source_day = RegistrationAllowances::DEFAULT_PER_SOURCE_DAY,
-                     @deny_cidrs = [] of String)
+                     @deny_cidrs = [] of String,
+                     @exclude = [] of String)
       end
     end
 
@@ -192,6 +195,20 @@ module Tinrelay
 
     def registration_deny_cidrs : Array(IPNetwork)
       registration.deny_cidrs.map { |cidr| IPNetwork.new(cidr) }
+    end
+
+    def rate_limit_exclusions : Array(String)
+      ships = registration.exclude
+      if ships.size > MAX_EXCLUDED_SHIPS
+        raise Invalid.new("too many rate-limit exclusions")
+      end
+      seen = {} of String => Bool
+      ships.each do |ship|
+        Names.ship!(ship)
+        raise Invalid.new("rate-limit exclusions must be unique") if seen.has_key?(ship)
+        seen[ship] = true
+      end
+      ships.dup
     end
 
     def client_address_policy : ClientAddressPolicy

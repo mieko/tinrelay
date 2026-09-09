@@ -19,7 +19,7 @@ module TinrelayRuntimePolicySpec
     }.to_json)
   end
 
-  def self.write_complete(path : String) : Nil
+  def self.write_complete(path : String, exclude = [] of String) : Nil
     File.write(path, {
       site: {
         site_name: "Second Site", base_url: "https://second.example",
@@ -29,12 +29,29 @@ module TinrelayRuntimePolicySpec
         global_hour: 301, global_day: 1001,
         per_source_hour: 5, per_source_day: 6,
         deny_cidrs: ["192.0.2.0/24", "2001:db8::/32"],
+        exclude: exclude,
       },
       client_address: {
         mode:                  "trusted_proxy",
         trusted_ingress_cidrs: ["198.51.100.0/24"],
       },
     }.to_json)
+  end
+
+  def self.claim(api : Tinrelay::API, ship : String) : Nil
+    owner = Tinrelay::Crypto.signing_keypair
+    signing = Tinrelay::Crypto.signing_keypair
+    encryption = Tinrelay::Crypto.box_keypair
+    certificate = Tinrelay::ShipRadioCertificate.new(
+      ship, 1, Tinrelay::Crypto.b64(signing.public_key),
+      Tinrelay::Crypto.b64(encryption.public_key), Time.utc.to_unix, 1
+    )
+    certificate.owner_signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
+    )
+    api.store.claim(api.store.prepare_claim(Tinrelay::ShipClaim.new(
+      ship, Tinrelay::Crypto.b64(owner.public_key), certificate
+    )))
   end
 end
 
@@ -57,6 +74,26 @@ describe "tinrelayd runtime policy" do
     ensure
       api.close
       FileUtils.rm_r(root)
+    end
+  end
+
+  it "bounds exclusion names before registry validation" do
+    names = Array.new(256) { |index| "ship-#{index}" }
+    site = Tinrelay::TinrelaydConfig::Site.new(
+      "TinRelay", "https://tinrelay.space", "Tin Relay"
+    )
+    registration = Tinrelay::TinrelaydConfig::Registration.from_json({
+      exclude: names,
+    }.to_json)
+    config = Tinrelay::TinrelaydConfig.new(site, registration)
+    config.rate_limit_exclusions.should eq(names)
+
+    registration = Tinrelay::TinrelaydConfig::Registration.from_json({
+      exclude: names + ["ship-256"],
+    }.to_json)
+    config = Tinrelay::TinrelaydConfig.new(site, registration)
+    expect_raises(Tinrelay::Invalid, /too many/) do
+      config.rate_limit_exclusions
     end
   end
 
@@ -95,6 +132,35 @@ describe "tinrelayd runtime policy" do
       File.delete(path)
       expect_raises(Tinrelay::Invalid) { api.reload_configuration }
       api.runtime_snapshot.same?(current).should be_true
+    ensure
+      api.close
+      FileUtils.rm_r(root)
+    end
+  end
+
+  it "publishes only canonical unique exclusions for already claimed ships" do
+    root = TinrelaySpec.temporary_root
+    path = File.join(root, "tinrelayd.json")
+    TinrelayRuntimePolicySpec.write_site_only(path)
+    api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
+    begin
+      TinrelayRuntimePolicySpec.claim(api, "alpha")
+      TinrelayRuntimePolicySpec.write_complete(path, ["alpha"])
+      api.reload_configuration
+      included = api.runtime_snapshot
+      included.rate_limit_excluded?("alpha").should be_true
+      included.rate_limit_excluded?("beta").should be_false
+
+      [["alpha", "alpha"], ["Alpha"], ["unknown"]].each do |exclude|
+        TinrelayRuntimePolicySpec.write_complete(path, exclude)
+        expect_raises(Tinrelay::Invalid) { api.reload_configuration }
+        api.runtime_snapshot.same?(included).should be_true
+      end
+
+      TinrelayRuntimePolicySpec.write_complete(path)
+      api.reload_configuration
+      api.runtime_snapshot.rate_limit_excluded?("alpha").should be_false
+      included.rate_limit_excluded?("alpha").should be_true
     ensure
       api.close
       FileUtils.rm_r(root)

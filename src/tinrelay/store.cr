@@ -100,6 +100,18 @@ module Tinrelay
       permanent_metadata_usage(database.db)
     end
 
+    def require_claimed_ships!(ships : Array(String)) : Nil
+      return if ships.empty?
+      placeholders = Array.new(ships.size, "?").join(',')
+      claimed = database.db.scalar(
+        "SELECT COUNT(*) FROM ships WHERE name IN (#{placeholders})",
+        args: ships
+      ).as(Int64)
+      unless claimed == ships.size
+        raise Invalid.new("rate-limit exclusion ship is not claimed")
+      end
+    end
+
     def metrics_snapshot(now : Int64 = Time.utc.to_unix)
       database.db.transaction do |transaction|
         connection = transaction.connection
@@ -418,7 +430,8 @@ module Tinrelay
     end
 
     def close_relationship(request : RelationshipClose,
-                           now : Int64 = Time.utc.to_unix) : Nil
+                           now : Int64 = Time.utc.to_unix,
+                           exempt_from_rotation_limit : Bool = false) : Nil
       peer = Names.ship!(request.peer_ship)
       retained = request.retained_ships.map { |ship| Names.ship!(ship) }.uniq.sort
       if peer == request.auth.ship || retained.includes?(request.auth.ship)
@@ -458,10 +471,12 @@ module Tinrelay
                  )
             raise NotFound.new("active relationship not found")
           end
-          enforce_rotation_budget!(
-            connection, certificate.ship, "ship_radio_keys",
-            MAX_RADIO_RETUNES_PER_DAY, now
-          )
+          unless exempt_from_rotation_limit
+            enforce_rotation_budget!(
+              connection, certificate.ship, "ship_radio_keys",
+              MAX_RADIO_RETUNES_PER_DAY, now
+            )
+          end
           ensure_permanent_capacity!(connection, 1)
           connection.exec(
             "UPDATE ship_radio_keys SET state = 'rotated', revoked_at = ? " +
@@ -584,7 +599,8 @@ module Tinrelay
     end
 
     def rotate_owner(rotation : OwnerRotation,
-                     now : Int64 = Time.utc.to_unix) : Nil
+                     now : Int64 = Time.utc.to_unix,
+                     exempt_from_rotation_limit : Bool = false) : Nil
       @permanent_write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
@@ -608,10 +624,12 @@ module Tinrelay
             raise Unauthorized.new("owner rotation lacks the prior owner signature")
           end
           prior_signature = Crypto.unb64(rotation.prior_signature)
-          enforce_rotation_budget!(
-            connection, rotation.auth.ship, "ship_owner_keys",
-            MAX_OWNER_ROTATIONS_PER_DAY, now
-          )
+          unless exempt_from_rotation_limit
+            enforce_rotation_budget!(
+              connection, rotation.auth.ship, "ship_owner_keys",
+              MAX_OWNER_ROTATIONS_PER_DAY, now
+            )
+          end
           ensure_permanent_capacity!(connection, 1)
           connection.exec(
             "UPDATE ship_owner_keys SET state = 'rotated', revoked_at = ? " +

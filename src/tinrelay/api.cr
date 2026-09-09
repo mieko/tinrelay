@@ -1,4 +1,5 @@
 require "uri"
+require "set"
 
 module Tinrelay
   class ServerConfig
@@ -26,15 +27,22 @@ module Tinrelay
     getter registration_allowances : RegistrationAllowances
     getter client_address_policy : ClientAddressPolicy
     @registration_deny_cidrs : Array(IPNetwork)
+    @rate_limit_exclusions : Set(String)
 
     def initialize(@page, @registration_allowances,
                    registration_deny_cidrs : Array(IPNetwork),
-                   @client_address_policy)
+                   @client_address_policy,
+                   rate_limit_exclusions : Array(String))
       @registration_deny_cidrs = registration_deny_cidrs.dup
+      @rate_limit_exclusions = Set.new(rate_limit_exclusions)
     end
 
     def registration_deny_cidrs : Array(IPNetwork)
       @registration_deny_cidrs.dup
+    end
+
+    def rate_limit_excluded?(ship : String) : Bool
+      @rate_limit_exclusions.includes?(ship)
     end
   end
 
@@ -53,9 +61,15 @@ module Tinrelay
     @runtime_snapshot : Atomic(RuntimeSnapshot)
 
     def initialize(@config)
-      @runtime_snapshot = Atomic(RuntimeSnapshot).new(load_runtime_snapshot(true))
       @database = Database.new(config.database_path, config.database_connections)
       @store = Store.new(database, config.permanent_metadata_limit)
+      snapshot = begin
+        load_runtime_snapshot(true)
+      rescue ex
+        database.close
+        raise ex
+      end
+      @runtime_snapshot = Atomic(RuntimeSnapshot).new(snapshot)
       @handoffs = DirectHandoff.new
       @metrics = Metrics.new
       @submission_window = SubmissionWindow.new
@@ -175,7 +189,12 @@ module Tinrelay
         json(context, 200, %({"state":"acknowledged"}))
       when {"POST", "/v1/relationships/close"}
         closure = parse_body(context, RelationshipClose)
-        store.close_relationship(closure)
+        store.close_relationship(
+          closure,
+          exempt_from_rotation_limit: runtime_snapshot.rate_limit_excluded?(
+            closure.auth.ship
+          )
+        )
         handoffs.notify(closure.auth.ship)
         closure.retained_ships.each { |ship| handoffs.notify(ship) }
         json(context, 200, %({"state":"retuning"}))
@@ -187,7 +206,13 @@ module Tinrelay
         metrics.hail("allowed")
         json(context, 200, %({"state":"active"}))
       when {"POST", "/v1/owners/rotate"}
-        store.rotate_owner(parse_body(context, OwnerRotation))
+        rotation = parse_body(context, OwnerRotation)
+        store.rotate_owner(
+          rotation,
+          exempt_from_rotation_limit: runtime_snapshot.rate_limit_excluded?(
+            rotation.auth.ship
+          )
+        )
         json(context, 200, %({"state":"rotated"}))
       when {"POST", "/v1/ships/change"}
         store.ship_change(parse_body(context, ShipChange))
@@ -231,7 +256,9 @@ module Tinrelay
       counted = false
       envelope = parse_body(context, SignedRelayEnvelope)
       if prepared = store.prepare(envelope)
-        if submission_window.allow?(envelope.sender_ship) && store.deliverable?(prepared)
+        excluded = runtime_snapshot.rate_limit_excluded?(envelope.sender_ship)
+        if (excluded || submission_window.allow?(envelope.sender_ship)) &&
+           store.deliverable?(prepared)
           remaining = acceptance_at - Time.instant
           if remaining > Time::Span.zero && handoffs.deliver(prepared, remaining)
             outcome = "direct"
@@ -260,7 +287,9 @@ module Tinrelay
       counted = false
       hail = parse_body(context, Hail)
       if prepared = store.prepare_hail(hail)
-        if hail_window.allow?(hail.sender_ship) && store.persist_hail(prepared)
+        excluded = runtime_snapshot.rate_limit_excluded?(hail.sender_ship)
+        if (excluded || hail_window.allow?(hail.sender_ship)) &&
+           store.persist_hail(prepared)
           handoffs.notify(hail.recipient_ship)
           outcome = "accepted"
         end
@@ -623,8 +652,17 @@ module Tinrelay
         candidate.try(&.registration_allowances) || RegistrationAllowances.new,
         candidate.try(&.registration_deny_cidrs) || [] of IPNetwork,
         candidate.try(&.client_address_policy) ||
-        ClientAddressPolicy.new("direct", [] of String)
+        ClientAddressPolicy.new("direct", [] of String),
+        validated_rate_limit_exclusions(candidate)
       )
+    end
+
+    private def validated_rate_limit_exclusions(
+      candidate : TinrelaydConfig?,
+    ) : Array(String)
+      exclusions = candidate.try(&.rate_limit_exclusions) || [] of String
+      store.require_claimed_ships!(exclusions)
+      exclusions
     end
 
     private def directed_line_path?(path : String) : Bool
