@@ -155,6 +155,9 @@ describe "the canonical bootstrap representations" do
       markdown.headers["Content-Type"].should eq("text/markdown; charset=utf-8")
       markdown.headers["Vary"].should eq("Accept")
       markdown.body.should eq(expected)
+      markdown.body.should contain(
+        "[![A TinRelay exchange between Tamsin aboard northbound and Sabine aboard quiet-signal.]"
+      )
 
       explicit = HTTP::Client.get("#{origin}/index.md")
       explicit.status_code.should eq(200)
@@ -168,6 +171,13 @@ describe "the canonical bootstrap representations" do
         api.bootstrap_page.html(expected, false, "/index.md", "home")
       )
       browser.body.should contain(%(data-page="home"))
+      browser.body.should contain(
+        %(<img src="/tinrelay-art/home/assets/northbound-quiet-signal-conversation.1d58d472e312.webp" ) +
+        %(alt="A TinRelay exchange between Tamsin aboard northbound and Sabine aboard quiet-signal." />)
+      )
+      browser.body.should contain(
+        %(<a href="/tinrelay-art/home/assets/northbound-quiet-signal-conversation-full.611f397815e0.png">)
+      )
       browser.body.should contain(%(<link rel="canonical" href="https://tinrelay.space/">))
       browser.body.should contain(
         %(<link rel="alternate" type="text/markdown" ) +
