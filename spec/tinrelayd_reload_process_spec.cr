@@ -30,7 +30,9 @@ module TinrelaydReloadProcessSpec
   end
 
   def self.write_config(path : String, site_name : String,
-                        base_url : String, wordmark : String) : Nil
+                        base_url : String, wordmark : String,
+                        trusted_ingress = [] of String,
+                        client_address_mode : String? = nil) : Nil
     temporary = "#{path}.next"
     File.write(temporary, {
       site: {
@@ -38,6 +40,16 @@ module TinrelaydReloadProcessSpec
         base_url:          base_url,
         wordmark:          wordmark,
         art_manifest_path: nil,
+      },
+      registration: {
+        global_hour: 301, global_day: 1001,
+        per_source_hour: 5, per_source_day: 6,
+        deny_cidrs: ["192.0.2.0/24"],
+      },
+      client_address: {
+        mode: client_address_mode ||
+              (trusted_ingress.empty? ? "direct" : "trusted_proxy"),
+        trusted_ingress_cidrs: trusted_ingress,
       },
     }.to_json)
     File.rename(temporary, path)
@@ -96,7 +108,8 @@ describe "tinrelayd runtime configuration process" do
       end
 
       TinrelaydReloadProcessSpec.write_config(
-        config_path, "Second Site", "http://localhost:#{port}", "Second  Mark"
+        config_path, "Second Site", "http://localhost:#{port}", "Second  Mark",
+        ["127.0.0.0/8"]
       )
       process.signal(Signal::HUP)
       TinrelaydReloadProcessSpec.eventually do
@@ -107,15 +120,27 @@ describe "tinrelayd runtime configuration process" do
       end
 
       TinrelaydReloadProcessSpec.write_config(
-        config_path, "Broken Site", "https://broken.example", " Broken Mark"
+        config_path, "Broken Site", "https://broken.example", "Broken Mark",
+        client_address_mode: "trusted_proxy"
       )
       process.signal(Signal::HUP)
       TinrelaydReloadProcessSpec.eventually do
         File.read(errors_path).includes?(
           %("event":"configuration_reload_failed")
         ) && File.read(errors_path).includes?(
-          %("message":"public site name is invalid")
+          %("message":"trusted proxy mode requires a trusted ingress CIDR")
         )
+      end
+      response = HTTP::Client.get(origin)
+      response.body.should contain("Second Site - Second Site")
+      response.body.should contain("http://localhost:#{port}/")
+      response.body.should contain("<span>Second  Mark</span>")
+
+      failures = File.read(errors_path).scan(/configuration_reload_failed/).size
+      File.delete(config_path)
+      process.signal(Signal::HUP)
+      TinrelaydReloadProcessSpec.eventually do
+        File.read(errors_path).scan(/configuration_reload_failed/).size > failures
       end
       response = HTTP::Client.get(origin)
       response.body.should contain("Second Site - Second Site")

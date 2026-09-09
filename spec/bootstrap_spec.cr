@@ -76,7 +76,7 @@ describe "the canonical bootstrap representations" do
             config_path, "Signal House", "https://signal.example", "Signal  House",
             second_art
           )
-          api.reload_site_configuration
+          api.reload_configuration
           assert_site_identity(
             origin, "Signal House", "https://signal.example", "Signal  House",
             "/art/signal.css"
@@ -85,7 +85,7 @@ describe "the canonical bootstrap representations" do
           write_site_config(
             config_path, "Broken", "https://broken.example", " Broken", second_art
           )
-          expect_raises(Tinrelay::Invalid) { api.reload_site_configuration }
+          expect_raises(Tinrelay::Invalid) { api.reload_configuration }
           assert_site_identity(
             origin, "Signal House", "https://signal.example", "Signal  House",
             "/art/signal.css"
@@ -95,16 +95,18 @@ describe "the canonical bootstrap representations" do
             config_path, "Broken", "https://broken.example", "Broken Mark",
             File.join(root, "missing-art.json")
           )
-          expect_raises(Tinrelay::Invalid) { api.reload_site_configuration }
+          expect_raises(Tinrelay::Invalid) { api.reload_configuration }
           assert_site_identity(
             origin, "Signal House", "https://signal.example", "Signal  House",
             "/art/signal.css"
           )
 
           File.delete(config_path)
-          api.reload_site_configuration
-          assert_site_identity(origin, "TinRelay", "https://tinrelay.space", "Tin Relay")
-          HTTP::Client.get(origin).body.should_not contain("/art/signal.css")
+          expect_raises(Tinrelay::Invalid) { api.reload_configuration }
+          assert_site_identity(
+            origin, "Signal House", "https://signal.example", "Signal  House",
+            "/art/signal.css"
+          )
         ensure
           server.close
           api.close

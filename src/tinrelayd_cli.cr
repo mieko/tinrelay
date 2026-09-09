@@ -75,7 +75,7 @@ module Tinrelay
         loop do
           reload_requests.receive
           begin
-            api.reload_site_configuration
+            api.reload_configuration
             api.metrics.configuration_reload("accepted")
             STDERR.puts({event: "configuration_reloaded"}.to_json)
           rescue ex

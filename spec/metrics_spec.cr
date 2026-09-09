@@ -54,7 +54,6 @@ describe "repeater metrics" do
       response.body.should_not contain("beta")
 
       alpha.acknowledge(envelope.transmission_id)
-      api.reload_site_configuration
       api.metrics.configuration_reload("accepted")
       updated = HTTP::Client.get("#{origin}/metrics")
       updated.body.should contain("tinrelay_transmissions_total{outcome=\"acknowledged\"} 1")

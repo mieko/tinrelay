@@ -21,6 +21,23 @@ module Tinrelay
     end
   end
 
+  class RuntimeSnapshot
+    getter page : BootstrapPage
+    getter registration_allowances : RegistrationAllowances
+    getter client_address_policy : ClientAddressPolicy
+    @registration_deny_cidrs : Array(IPNetwork)
+
+    def initialize(@page, @registration_allowances,
+                   registration_deny_cidrs : Array(IPNetwork),
+                   @client_address_policy)
+      @registration_deny_cidrs = registration_deny_cidrs.dup
+    end
+
+    def registration_deny_cidrs : Array(IPNetwork)
+      @registration_deny_cidrs.dup
+    end
+  end
+
   class API
     MAX_REQUEST_BYTES       = 64 * 1024
     ACCEPTANCE_TARGET       = 250.milliseconds
@@ -33,10 +50,10 @@ module Tinrelay
     getter metrics : Metrics
     getter submission_window : SubmissionWindow
     getter hail_window : SubmissionWindow
-    @bootstrap_page : Atomic(BootstrapPage)
+    @runtime_snapshot : Atomic(RuntimeSnapshot)
 
     def initialize(@config)
-      @bootstrap_page = Atomic(BootstrapPage).new(load_bootstrap_page)
+      @runtime_snapshot = Atomic(RuntimeSnapshot).new(load_runtime_snapshot(true))
       @database = Database.new(config.database_path, config.database_connections)
       @store = Store.new(database, config.permanent_metadata_limit)
       @handoffs = DirectHandoff.new
@@ -48,13 +65,17 @@ module Tinrelay
       )
     end
 
-    def bootstrap_page : BootstrapPage
-      @bootstrap_page.get(:acquire)
+    def runtime_snapshot : RuntimeSnapshot
+      @runtime_snapshot.get(:acquire)
     end
 
-    def reload_site_configuration : Nil
-      candidate = load_bootstrap_page
-      @bootstrap_page.set(candidate, :release)
+    def bootstrap_page : BootstrapPage
+      runtime_snapshot.page
+    end
+
+    def reload_configuration : Nil
+      candidate = load_runtime_snapshot(false)
+      @runtime_snapshot.set(candidate, :release)
     end
 
     def handler
@@ -583,16 +604,26 @@ module Tinrelay
         %(<#{page.public_url("/llms.txt")}>; rel="describedby")
     end
 
-    private def load_bootstrap_page : BootstrapPage
-      site = TinrelaydConfig.load(config.configuration_path).try(&.site)
+    private def load_runtime_snapshot(allow_missing_default : Bool) : RuntimeSnapshot
+      candidate = TinrelaydConfig.load(
+        config.configuration_path, allow_missing_default
+      )
+      site = candidate.try(&.site)
       art_manifest = ArtManifest.load(
         site.try(&.art_manifest_path), BootstrapPage::PAGE_KEYS
       )
-      BootstrapPage.new(
+      page = BootstrapPage.new(
         config.bootstrap_template, config.source_repository, art_manifest,
         site_name: site.try(&.site_name) || BootstrapPage::DEFAULT_SITE_NAME,
         site_base_url: site.try(&.base_url) || BootstrapPage::DEFAULT_SITE_BASE_URL,
         wordmark: site.try(&.wordmark) || BootstrapPage::DEFAULT_WORDMARK
+      )
+      RuntimeSnapshot.new(
+        page,
+        candidate.try(&.registration_allowances) || RegistrationAllowances.new,
+        candidate.try(&.registration_deny_cidrs) || [] of IPNetwork,
+        candidate.try(&.client_address_policy) ||
+        ClientAddressPolicy.new("direct", [] of String)
       )
     end
 
