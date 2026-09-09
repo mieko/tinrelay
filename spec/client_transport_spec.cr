@@ -125,6 +125,26 @@ describe Tinrelay::Remote do
     end
   end
 
+  it "reports join policy denial without treating it as authentication failure" do
+    TinrelayClientTransportSpec.with_response(
+      403, %({"error":"registration_forbidden","message":"foreign"})
+    ) do |origin|
+      error = expect_raises(Tinrelay::RegistrationUnavailable) do
+        Tinrelay::Remote.new(origin).post("/v1/join", %({}))
+      end
+      error.message.should eq("relay registration policy does not allow this claim")
+    end
+
+    [%({"error":"foreign"}), "not JSON"].each do |body|
+      TinrelayClientTransportSpec.with_response(403, body) do |origin|
+        error = expect_raises(Tinrelay::Unauthorized) do
+          Tinrelay::Remote.new(origin).post("/v1/join", %({}))
+        end
+        error.message.should eq("relay authentication failed")
+      end
+    end
+  end
+
   it "recognizes exact rotation limits only on the two rotation paths" do
     headers = HTTP::Headers{"Retry-After" => "37"}
     body = %({"error":"rotation_limited","retry_after_seconds":37})

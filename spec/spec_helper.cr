@@ -120,7 +120,10 @@ module TinrelaySpec
   def self.claim_directly(store : Tinrelay::Store,
                           prepared : Tinrelay::PreparedShipClaim,
                           now : Int64 = Time.utc.to_unix) : Nil
-    store.claim(prepared, TEST_SOURCE_BUCKET, OPEN_REGISTRATION_ALLOWANCES, now)
+    store.claim(
+      prepared, TEST_SOURCE_BUCKET, OPEN_REGISTRATION_ALLOWANCES,
+      -> { true }, now
+    )
   end
 
   def self.admit_contact(root : String, origin : String, ship : String,

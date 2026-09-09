@@ -1,6 +1,29 @@
 require "./spec_helper"
 
 module TinrelayRuntimePolicySpec
+  class GatedBody < IO
+    getter entered = Channel(Nil).new(1)
+    getter release = Channel(Nil).new(1)
+
+    def initialize(body : String)
+      @body = IO::Memory.new(body)
+      @waiting = true
+    end
+
+    def read(slice : Bytes) : Int32
+      if @waiting
+        @waiting = false
+        entered.send(nil)
+        release.receive
+      end
+      @body.read(slice)
+    end
+
+    def write(slice : Bytes) : NoReturn
+      raise IO::Error.new("read only")
+    end
+  end
+
   def self.server_config(root : String, configuration_path : String) : Tinrelay::ServerConfig
     Tinrelay::ServerConfig.new(
       database_path: File.join(root, "service.db"),
@@ -38,7 +61,25 @@ module TinrelayRuntimePolicySpec
     }.to_json)
   end
 
+  def self.write_closed(path : String) : Nil
+    File.write(path, {
+      site: {
+        site_name: "Closed Site", base_url: "https://closed.example",
+        wordmark: "Closed Mark", art_manifest_path: nil,
+      },
+      registration: {
+        global_hour: 0, global_day: 0,
+        per_source_hour: 0, per_source_day: 0,
+      },
+    }.to_json)
+  end
+
   def self.claim(api : Tinrelay::API, ship : String) : Nil
+    TinrelaySpec.claim_directly(api.store, prepared(api, ship))
+  end
+
+  def self.prepared(api : Tinrelay::API,
+                    ship : String) : Tinrelay::PreparedShipClaim
     owner = Tinrelay::Crypto.signing_keypair
     signing = Tinrelay::Crypto.signing_keypair
     encryption = Tinrelay::Crypto.box_keypair
@@ -49,16 +90,28 @@ module TinrelayRuntimePolicySpec
     certificate.owner_signature = Tinrelay::Crypto.b64(
       Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
     )
-    TinrelaySpec.claim_directly(
-      api.store,
-      api.store.prepare_claim(Tinrelay::ShipClaim.new(
-        ship, Tinrelay::Crypto.b64(owner.public_key), certificate
-      ))
-    )
+    api.store.prepare_claim(Tinrelay::ShipClaim.new(
+      ship, Tinrelay::Crypto.b64(owner.public_key), certificate
+    ))
+  end
+
+  def self.claim_body(api : Tinrelay::API, ship : String) : String
+    prepared = prepared(api, ship)
+    Tinrelay::ShipClaim.new(
+      ship, Tinrelay::Crypto.b64(prepared.owner_key), prepared.certificate
+    ).to_json
   end
 end
 
 describe "tinrelayd runtime policy" do
+  it "accepts zero as explicit registration closure and rejects negative allowances" do
+    Tinrelay::RegistrationAllowances.new(0, 0, 0, 0).closed?.should be_true
+    Tinrelay::RegistrationAllowances.new(1, 1, 1, 1).closed?.should be_false
+    expect_raises(Tinrelay::Invalid, /non-negative/) do
+      Tinrelay::RegistrationAllowances.new(-1, 1, 1, 1)
+    end
+  end
+
   it "gives a site-only configuration the exact policy defaults" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
@@ -138,6 +191,131 @@ describe "tinrelayd runtime policy" do
     ensure
       api.close
       FileUtils.rm_r(root)
+    end
+  end
+
+  it "publishes reload only outside an active claim commit" do
+    root = TinrelaySpec.temporary_root
+    path = File.join(root, "tinrelayd.json")
+    TinrelayRuntimePolicySpec.write_site_only(path)
+    api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
+    begin
+      prior = api.runtime_snapshot
+      entered = Channel(Nil).new(1)
+      release = Channel(Nil).new(1)
+      claim_done = Channel(Exception?).new(1)
+      reload_done = Channel(Exception?).new(1)
+      prepared = TinrelayRuntimePolicySpec.prepared(api, "before-closure")
+      spawn do
+        begin
+          api.store.claim(
+            prepared, TinrelaySpec::TEST_SOURCE_BUCKET,
+            prior.registration_allowances,
+            policy_current: -> do
+              entered.send(nil)
+              release.receive
+              true
+            end
+          )
+          claim_done.send(nil)
+        rescue ex
+          claim_done.send(ex)
+        end
+      end
+      TinrelaySpec.receive(entered)
+
+      TinrelayRuntimePolicySpec.write_closed(path)
+      spawn do
+        begin
+          api.reload_configuration
+          reload_done.send(nil)
+        rescue ex
+          reload_done.send(ex)
+        end
+      end
+      Fiber.yield
+      api.runtime_snapshot.same?(prior).should be_true
+
+      release.send(nil)
+      TinrelaySpec.receive(claim_done).should be_nil
+      TinrelaySpec.receive(reload_done).should be_nil
+      api.runtime_snapshot.same?(prior).should be_false
+      api.runtime_snapshot.registration_allowances.closed?.should be_true
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
+    ensure
+      api.try(&.close)
+      FileUtils.rm_r(root) if root && Dir.exists?(root)
+    end
+  end
+
+  it "rejects a delayed claim whose captured policy was replaced" do
+    root = TinrelaySpec.temporary_root
+    path = File.join(root, "tinrelayd.json")
+    TinrelayRuntimePolicySpec.write_site_only(path)
+    api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
+    begin
+      body = TinrelayRuntimePolicySpec::GatedBody.new(
+        TinrelayRuntimePolicySpec.claim_body(api, "stale-policy")
+      )
+      request = HTTP::Request.new(
+        "POST", "/v1/join",
+        HTTP::Headers{
+          "Content-Type"        => "application/json",
+          "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+        },
+        body
+      )
+      request.remote_address = Socket::IPAddress.new("127.0.0.1", 12_345)
+      output = IO::Memory.new
+      response = HTTP::Server::Response.new(output)
+      context = HTTP::Server::Context.new(request, response)
+      handled = Channel(Exception?).new(1)
+      spawn do
+        begin
+          api.handler.call(context)
+          response.close
+          handled.send(nil)
+        rescue ex
+          handled.send(ex)
+        end
+      end
+      TinrelaySpec.receive(body.entered)
+
+      TinrelayRuntimePolicySpec.write_closed(path)
+      api.reload_configuration
+      body.release.send(nil)
+      TinrelaySpec.receive(handled).should be_nil
+
+      response.status_code.should eq(403)
+      response.headers["Retry-After"]?.should be_nil
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
+    ensure
+      api.try(&.close)
+      FileUtils.rm_r(root) if root && Dir.exists?(root)
+    end
+  end
+
+  it "returns policy closure without a retry time for a current request" do
+    closed = Tinrelay::RegistrationAllowances.new(0, 0, 0, 0)
+    TinrelaySpec.with_server(registration_allowances: closed) do |_root, origin, api|
+      headers = HTTP::Headers{
+        "Content-Type"        => "application/json",
+        "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+      }
+      response = HTTP::Client.post(
+        "#{origin}/v1/join", headers,
+        TinrelayRuntimePolicySpec.claim_body(api, "closed-current")
+      )
+
+      response.status_code.should eq(403)
+      response.body.should eq(
+        %({"error":"registration_forbidden",) +
+        %("message":"registration is not available from this source"})
+      )
+      response.headers["Retry-After"]?.should be_nil
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
     end
   end
 

@@ -25,6 +25,12 @@ module Tinrelay
     end
   end
 
+  class RegistrationUnavailable < Unavailable
+    def initialize
+      super("relay registration policy does not allow this claim")
+    end
+  end
+
   class RotationLimited < Unavailable
     getter retry_after_seconds : Int64
 

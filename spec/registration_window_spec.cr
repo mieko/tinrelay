@@ -34,7 +34,7 @@ module TinrelayRegistrationWindowSpec
 
   def self.claim(store : Tinrelay::Store, ship : String, bucket : String,
                  allowances = OPEN, now = 1_000_000_i64) : Nil
-    store.claim(prepared(store, ship, now), bucket, allowances, now)
+    store.claim(prepared(store, ship, now), bucket, allowances, -> { true }, now)
   end
 
   def self.seed(store : Tinrelay::Store, bucket : String, accepted_at : Int64) : Nil
@@ -135,6 +135,19 @@ describe "durable successful ship-registration windows" do
     end
   end
 
+  it "treats any zero allowance as administrative closure without writing" do
+    TinrelayRegistrationWindowSpec.with_store do |store|
+      allowances = Tinrelay::RegistrationAllowances.new(10, 10, 0, 10)
+      expect_raises(Tinrelay::RegistrationUnavailable) do
+        TinrelayRegistrationWindowSpec.claim(
+          store, "closed", "192.0.2.8/32", allowances
+        )
+      end
+      store.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      store.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
+    end
+  end
+
   it "uses each lowered window's reopening event and returns the latest delay" do
     TinrelayRegistrationWindowSpec.with_store do |store|
       now = 100_000_i64
@@ -214,7 +227,9 @@ describe "durable successful ship-registration windows" do
       prepared = TinrelayRegistrationWindowSpec.prepared(store, ship, 200_000_i64)
       spawn do
         begin
-          store.claim(prepared, "192.0.2.8/32", allowances, 200_000_i64)
+          store.claim(
+            prepared, "192.0.2.8/32", allowances, -> { true }, 200_000_i64
+          )
           results.send(nil)
         rescue ex
           results.send(ex)

@@ -95,7 +95,9 @@ module Tinrelay
 
     def reload_configuration : Nil
       candidate = load_runtime_snapshot(false)
-      @runtime_snapshot.set(candidate, :release)
+      store.synchronize_claim_commit do
+        @runtime_snapshot.set(candidate, :release)
+      end
     end
 
     def handler
@@ -242,10 +244,18 @@ module Tinrelay
         )
       end
       prepared = store.prepare_claim(parse_body(context, ShipClaim))
-      store.claim(prepared, source_bucket, snapshot.registration_allowances)
+      store.claim(
+        prepared, source_bucket, snapshot.registration_allowances,
+        policy_current: -> { runtime_snapshot.same?(snapshot) }
+      )
       metrics.registration("accepted")
       counted = true
       json(context, 201, %({"state":"claimed"}))
+    rescue ex : RegistrationUnavailable
+      error(
+        context, 403, "registration_forbidden",
+        "registration is not available from this source"
+      )
     rescue ex : RegistrationLimited
       metrics.registration("rate_limited") unless counted
       counted = true

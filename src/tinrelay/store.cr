@@ -50,6 +50,7 @@ module Tinrelay
       end
       @pending_write_mutex = Mutex.new
       @permanent_write_mutex = Mutex.new
+      @claim_commit_mutex = Mutex.new
     end
 
     def prepare_claim(claim : ShipClaim) : PreparedShipClaim
@@ -73,44 +74,53 @@ module Tinrelay
 
     def claim(prepared : PreparedShipClaim, source_bucket : String,
               allowances : RegistrationAllowances,
+              policy_current : Proc(Bool),
               now : Int64? = nil) : Nil
-      @permanent_write_mutex.synchronize do
-        accepted_at = now || Time.utc.to_unix
-        database.db.transaction do |transaction|
-          connection = transaction.connection
-          if connection.query_one?(
-               "SELECT 1 FROM ships WHERE name = ?", prepared.ship, as: Int64
-             )
-            raise Conflict.new("ship name is already claimed")
+      @claim_commit_mutex.synchronize do
+        raise RegistrationUnavailable.new unless policy_current.call
+        raise RegistrationUnavailable.new if allowances.closed?
+        @permanent_write_mutex.synchronize do
+          accepted_at = now || Time.utc.to_unix
+          database.db.transaction do |transaction|
+            connection = transaction.connection
+            if connection.query_one?(
+                 "SELECT 1 FROM ships WHERE name = ?", prepared.ship, as: Int64
+               )
+              raise Conflict.new("ship name is already claimed")
+            end
+            ensure_permanent_capacity!(connection, 3)
+            if retry_after = registration_retry_after(
+                 connection, source_bucket, allowances, accepted_at
+               )
+              raise RegistrationLimited.new(retry_after)
+            end
+            connection.exec(
+              "DELETE FROM registration_events WHERE accepted_at <= ?",
+              accepted_at - REGISTRATION_DAY_SECONDS
+            )
+            connection.exec(
+              "INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')",
+              prepared.ship, accepted_at
+            )
+            connection.exec(
+              <<-SQL, prepared.ship, prepared.owner_key, accepted_at
+                INSERT INTO ship_owner_keys(
+                  ship, generation, public_key, state, valid_from
+                ) VALUES (?, 1, ?, 'active', ?)
+              SQL
+            )
+            insert_radio_key(connection, prepared.certificate)
+            connection.exec(
+              "INSERT INTO registration_events(accepted_at, source_bucket) VALUES (?, ?)",
+              accepted_at, source_bucket
+            )
           end
-          ensure_permanent_capacity!(connection, 3)
-          if retry_after = registration_retry_after(
-               connection, source_bucket, allowances, accepted_at
-             )
-            raise RegistrationLimited.new(retry_after)
-          end
-          connection.exec(
-            "DELETE FROM registration_events WHERE accepted_at <= ?",
-            accepted_at - REGISTRATION_DAY_SECONDS
-          )
-          connection.exec(
-            "INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')",
-            prepared.ship, accepted_at
-          )
-          connection.exec(
-            <<-SQL, prepared.ship, prepared.owner_key, accepted_at
-              INSERT INTO ship_owner_keys(
-                ship, generation, public_key, state, valid_from
-              ) VALUES (?, 1, ?, 'active', ?)
-            SQL
-          )
-          insert_radio_key(connection, prepared.certificate)
-          connection.exec(
-            "INSERT INTO registration_events(accepted_at, source_bucket) VALUES (?, ?)",
-            accepted_at, source_bucket
-          )
         end
       end
+    end
+
+    def synchronize_claim_commit(&)
+      @claim_commit_mutex.synchronize { yield }
     end
 
     def permanent_metadata_usage : Int64

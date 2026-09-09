@@ -18,9 +18,13 @@ module Tinrelay
                    @global_day = DEFAULT_GLOBAL_DAY,
                    @per_source_hour = DEFAULT_PER_SOURCE_HOUR,
                    @per_source_day = DEFAULT_PER_SOURCE_DAY)
-      unless {global_hour, global_day, per_source_hour, per_source_day}.all?(&.> 0)
-        raise Invalid.new("registration allowances must be positive")
+      unless {global_hour, global_day, per_source_hour, per_source_day}.all?(&.>= 0)
+        raise Invalid.new("registration allowances must be non-negative")
       end
+    end
+
+    def closed? : Bool
+      {global_hour, global_day, per_source_hour, per_source_day}.any?(&.zero?)
     end
   end
 

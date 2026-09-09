@@ -91,6 +91,9 @@ module Tinrelay
           raise RegistrationLimited.new(retry_after)
         end
       end
+      if status_code == 403 && path == "/v1/join" && registration_forbidden?(body)
+        raise RegistrationUnavailable.new
+      end
       if status_code == 429 && ROTATION_LIMIT_PATHS.includes?(path)
         retry_after = rotation_limit_evidence(body, headers)
         raise RotationLimited.new(retry_after) if retry_after
@@ -105,6 +108,14 @@ module Tinrelay
       when 503      then raise Unavailable.new("relay is unavailable")
       else               raise Error.new("relay returned HTTP #{status_code}")
       end
+    end
+
+    private def registration_forbidden?(body : String) : Bool
+      object = JSON.parse(body).as_h?
+      return false unless object
+      object["error"]?.try(&.as_s?) == "registration_forbidden"
+    rescue JSON::ParseException
+      false
     end
 
     private def rotation_limit_evidence(body : String,
@@ -197,10 +208,10 @@ module Tinrelay
           raise ex
         end
         client
-      rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired
+      rescue ex : Invalid | NotFound | Conflict | Expired
         remove_provisional_claim(keyring_path, owner_file) if created
         raise ex
-      rescue ex : ProtocolMismatch | RegistrationLimited
+      rescue ex : ProtocolMismatch | RegistrationLimited | RegistrationUnavailable
         remove_provisional_claim(keyring_path, owner_file) if created
         raise ex
       end

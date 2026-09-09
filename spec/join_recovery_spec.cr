@@ -4,7 +4,9 @@ class JoinRecoveryRelay
   getter origin : String
   getter join_bodies = [] of String
 
-  def initialize(@api : Tinrelay::API, @commit_first : Bool)
+  def initialize(@api : Tinrelay::API, @commit_first : Bool,
+                 @first_status = 503,
+                 @first_body = %({"error":"unavailable"}))
     @join_attempts = 0
     application = @api.handler
     @server = HTTP::Server.new do |context|
@@ -16,9 +18,9 @@ class JoinRecoveryRelay
           claim = Tinrelay::ShipClaim.from_json(body)
           TinrelaySpec.claim_directly(@api.store, @api.store.prepare_claim(claim))
         end
-        context.response.status_code = 503
+        context.response.status_code = @first_status
         context.response.content_type = "application/json"
-        context.response.print(%({"error":"unavailable"}))
+        context.response.print(@first_body)
       else
         if context.request.path == "/v1/join"
           body = context.request.body.not_nil!.gets_to_end
@@ -39,7 +41,8 @@ class JoinRecoveryRelay
 end
 
 module JoinRecoverySpec
-  def self.with_relay(commit_first : Bool, &)
+  def self.with_relay(commit_first : Bool, first_status = 503,
+                      first_body = %({"error":"unavailable"}), &)
     root = TinrelaySpec.temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     config = Tinrelay::ServerConfig.new(
@@ -47,7 +50,7 @@ module JoinRecoverySpec
       bootstrap_template: template
     )
     api = Tinrelay::API.new(config)
-    relay = JoinRecoveryRelay.new(api, commit_first)
+    relay = JoinRecoveryRelay.new(api, commit_first, first_status, first_body)
     yield root, relay, api
   ensure
     relay.try(&.close)
@@ -66,6 +69,52 @@ module JoinRecoverySpec
 end
 
 describe "ship claim recovery" do
+  it "removes provisional identity after a definite registration-policy denial" do
+    root = TinrelaySpec.temporary_root
+    server = HTTP::Server.new do |context|
+      context.response.status_code = 403
+      context.response.content_type = "application/json"
+      context.response.print(%({"error":"registration_forbidden"}))
+    end
+    address = server.bind_tcp("127.0.0.1", 0)
+    spawn { server.listen }
+    Fiber.yield
+    path = File.join(root, "closed.keyring")
+    owner_path = "#{path}.owner"
+    begin
+      expect_raises(Tinrelay::RegistrationUnavailable) do
+        Tinrelay::Client.join(
+          path, "http://127.0.0.1:#{address.port}", "closed", "closed passphrase"
+        )
+      end
+      File.exists?(path).should be_false
+      File.exists?(owner_path).should be_false
+    ensure
+      server.close
+      FileUtils.rm_r(root) if Dir.exists?(root)
+    end
+  end
+
+  it "preserves provisional identity when a committed response becomes a foreign 403" do
+    JoinRecoverySpec.with_relay(
+      commit_first: true, first_status: 403,
+      first_body: %({"error":"foreign"})
+    ) do |root, relay, api|
+      path = File.join(root, "foreign.keyring")
+      owner_path = "#{path}.owner"
+
+      expect_raises(Tinrelay::Unauthorized) do
+        Tinrelay::Client.join(
+          path, relay.origin, "foreign-response", "foreign response passphrase"
+        )
+      end
+
+      File.exists?(path).should be_true
+      File.exists?(owner_path).should be_true
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
+    end
+  end
+
   it "keeps the original keys and recovers a committed claim after a lost response" do
     JoinRecoverySpec.with_relay(commit_first: true) do |root, relay, api|
       path = File.join(root, "lost.keyring")
