@@ -44,6 +44,17 @@ module Tinrelay
     def rate_limit_excluded?(ship : String) : Bool
       @rate_limit_exclusions.includes?(ship)
     end
+
+    def registration_source_bucket(
+      peer : Socket::Address?,
+      headers : HTTP::Headers,
+    ) : String?
+      address = client_address_policy.resolve(peer, headers)
+      return nil if @registration_deny_cidrs.any?(&.includes?(address))
+      LiteralIP.source_bucket(address)
+    rescue Invalid
+      nil
+    end
   end
 
   class API
@@ -225,6 +236,15 @@ module Tinrelay
 
     private def claim_ship(context : HTTP::Server::Context) : Int32
       counted = false
+      snapshot = runtime_snapshot
+      unless snapshot.registration_source_bucket(
+               context.request.remote_address, context.request.headers
+             )
+        return error(
+          context, 403, "registration_forbidden",
+          "registration is not available from this source"
+        )
+      end
       prepared = store.prepare_claim(parse_body(context, ShipClaim))
       if retry_after = @registration_window.admit(REGISTRATION_WINDOW_KEY)
         metrics.registration("rate_limited")

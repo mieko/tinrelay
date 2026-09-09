@@ -173,7 +173,7 @@ describe "tinrelayd runtime policy" do
     headers.add(Tinrelay::ClientAddressPolicy::HEADER, "203.0.113.1")
     headers.add(Tinrelay::ClientAddressPolicy::HEADER, "not-an-address")
     peer = Socket::IPAddress.new("::ffff:192.0.2.10", 4321)
-    policy.resolve(peer, headers).should eq("192.0.2.10")
+    policy.resolve(peer, headers).address.should eq("192.0.2.10")
 
     expect_raises(Tinrelay::Invalid) { policy.resolve(nil, headers) }
     unix = Socket::UNIXAddress.new("/tmp/tinrelay-policy-spec")
@@ -188,7 +188,7 @@ describe "tinrelayd runtime policy" do
       Tinrelay::ClientAddressPolicy::HEADER => "2001:0db8:0:0::5",
     }
     mapped_peer = Socket::IPAddress.new("::ffff:192.0.2.8", 4321)
-    policy.resolve(mapped_peer, headers).should eq("2001:db8::5")
+    policy.resolve(mapped_peer, headers).address.should eq("2001:db8::5")
 
     untrusted = Socket::IPAddress.new("198.51.100.8", 4321)
     expect_raises(Tinrelay::Invalid) { policy.resolve(untrusted, headers) }

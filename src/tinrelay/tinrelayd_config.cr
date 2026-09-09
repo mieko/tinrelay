@@ -55,6 +55,18 @@ module Tinrelay
         raise Invalid.new("client address is invalid")
       end
     end
+
+    def self.source_bucket(address : Socket::IPAddress) : String
+      bits, number = number(address)
+      return "#{address.address}/32" if bits == 32
+
+      fields = Array(String).new(8) do |index|
+        value = index < 4 ? (number >> ((7 - index) * 16)) & 0xffff_u128 : 0_u128
+        value.to_s(16)
+      end
+      network = Socket::IPAddress.new(fields.join(':'), 0)
+      "#{network.address}/64"
+    end
   end
 
   struct IPNetwork
@@ -111,9 +123,10 @@ module Tinrelay
       @trusted_ingress_cidrs.dup
     end
 
-    def resolve(peer : Socket::Address?, headers : HTTP::Headers) : String
+    def resolve(peer : Socket::Address?,
+                headers : HTTP::Headers) : Socket::IPAddress
       socket_address = LiteralIP.peer(peer)
-      return socket_address.address if mode.direct?
+      return socket_address if mode.direct?
       unless @trusted_ingress_cidrs.any?(&.includes?(socket_address))
         raise Invalid.new("client address cannot be resolved")
       end
@@ -121,7 +134,7 @@ module Tinrelay
       unless values && values.size == 1 && !values[0].includes?(',')
         raise Invalid.new("client address cannot be resolved")
       end
-      LiteralIP.parse(values[0]).address
+      LiteralIP.parse(values[0])
     end
   end
 
