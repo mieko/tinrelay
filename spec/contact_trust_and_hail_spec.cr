@@ -119,7 +119,9 @@ describe "contact trust and content-free hails" do
   end
 
   it "keeps collected hails in the recipient bound and selects correspondence first" do
-    TinrelaySpec.with_server do |root, origin, api|
+    TinrelaySpec.with_server(
+      registration_allowances: TinrelaySpec::OPEN_REGISTRATION_ALLOWANCES
+    ) do |root, origin, api|
       passphrase = "recipient hail attention bound"
       alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
       beta = TinrelaySpec.admit_contact(

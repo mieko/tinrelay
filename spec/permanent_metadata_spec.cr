@@ -384,7 +384,7 @@ describe "permanent relay metadata capacity" do
     prepared.each do |claim|
       spawn do
         begin
-          store.claim(claim)
+          TinrelaySpec.claim_directly(store, claim)
           results.send(nil)
         rescue ex
           results.send(ex)
@@ -409,6 +409,7 @@ describe "permanent relay metadata capacity" do
       expect_raises(Tinrelay::Unavailable) do
         TinrelaySpec.admit(root, origin, "beta", passphrase)
       end
+      api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(1_i64)
       api.store.permanent_metadata_usage.should eq(3)
       below_limit = Tinrelay::Store.new(api.database, 2_i64)
       below_limit.permanent_metadata_usage.should eq(3)

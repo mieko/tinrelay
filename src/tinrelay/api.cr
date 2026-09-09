@@ -58,10 +58,8 @@ module Tinrelay
   end
 
   class API
-    MAX_REQUEST_BYTES       = 64 * 1024
-    ACCEPTANCE_TARGET       = 250.milliseconds
-    REGISTRATION_WINDOW_KEY = "all"
-
+    MAX_REQUEST_BYTES = 64 * 1024
+    ACCEPTANCE_TARGET = 250.milliseconds
     getter config : ServerConfig
     getter database : Database
     getter store : Store
@@ -85,9 +83,6 @@ module Tinrelay
       @metrics = Metrics.new
       @submission_window = SubmissionWindow.new
       @hail_window = SubmissionWindow.new(Store::MAX_HAILS_PER_DAY, 24 * 60 * 60)
-      @registration_window = SubmissionWindow.new(
-        MAX_SHIP_REGISTRATIONS_PER_HOUR, 60 * 60
-      )
     end
 
     def runtime_snapshot : RuntimeSnapshot
@@ -237,28 +232,28 @@ module Tinrelay
     private def claim_ship(context : HTTP::Server::Context) : Int32
       counted = false
       snapshot = runtime_snapshot
-      unless snapshot.registration_source_bucket(
-               context.request.remote_address, context.request.headers
-             )
+      source_bucket = snapshot.registration_source_bucket(
+        context.request.remote_address, context.request.headers
+      )
+      unless source_bucket
         return error(
           context, 403, "registration_forbidden",
           "registration is not available from this source"
         )
       end
       prepared = store.prepare_claim(parse_body(context, ShipClaim))
-      if retry_after = @registration_window.admit(REGISTRATION_WINDOW_KEY)
-        metrics.registration("rate_limited")
-        counted = true
-        context.response.headers["Retry-After"] = retry_after.to_s
-        return error(
-          context, 429, "registration_limited",
-          "relay is receiving too many registrations"
-        )
-      end
-      store.claim(prepared)
+      store.claim(prepared, source_bucket, snapshot.registration_allowances)
       metrics.registration("accepted")
       counted = true
       json(context, 201, %({"state":"claimed"}))
+    rescue ex : RegistrationLimited
+      metrics.registration("rate_limited") unless counted
+      counted = true
+      context.response.headers["Retry-After"] = ex.retry_after_seconds.to_s
+      error(
+        context, 429, "registration_limited",
+        "relay is receiving too many registrations"
+      )
     rescue ex : Conflict
       metrics.registration("conflict") unless counted
       raise ex

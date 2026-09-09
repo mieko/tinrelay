@@ -4,7 +4,11 @@ require "../src/tinrelay/client_runtime"
 require "../src/tinrelay/server"
 
 module TinrelaySpec
-  DEFAULT_METADATA_LIMIT = Tinrelay::DEFAULT_PERMANENT_METADATA_LIMIT
+  DEFAULT_METADATA_LIMIT       = Tinrelay::DEFAULT_PERMANENT_METADATA_LIMIT
+  OPEN_REGISTRATION_ALLOWANCES = Tinrelay::RegistrationAllowances.new(
+    1_000_000, 1_000_000, 1_000_000, 1_000_000
+  )
+  TEST_SOURCE_BUCKET = "127.0.0.1/32"
 
   def self.temporary_root : String
     root = File.join(Dir.tempdir, "tinrelay-spec-#{Process.pid}-#{Tinrelay::Ids.uuid}")
@@ -13,20 +17,28 @@ module TinrelaySpec
   end
 
   def self.with_server(art_manifest_path : String? = nil,
-                       permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT, &)
+                       permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT,
+                       registration_allowances : Tinrelay::RegistrationAllowances? = nil, &)
     root = temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     configuration_path = nil
-    if art_manifest_path
+    if art_manifest_path || registration_allowances
       configuration_path = File.join(root, "tinrelayd.json")
-      File.write(configuration_path, {
-        site: {
-          site_name:         "TinRelay",
-          base_url:          "https://tinrelay.space",
-          wordmark:          "Tin Relay",
-          art_manifest_path: art_manifest_path,
-        },
-      }.to_json)
+      registration = registration_allowances.try do |allowances|
+        Tinrelay::TinrelaydConfig::Registration.new(
+          allowances.global_hour, allowances.global_day,
+          allowances.per_source_hour, allowances.per_source_day
+        )
+      end || Tinrelay::TinrelaydConfig::Registration.new
+      File.write(
+        configuration_path,
+        Tinrelay::TinrelaydConfig.new(
+          Tinrelay::TinrelaydConfig::Site.new(
+            "TinRelay", "https://tinrelay.space", "Tin Relay", art_manifest_path
+          ),
+          registration
+        ).to_json
+      )
     end
     config = Tinrelay::ServerConfig.new(
       "127.0.0.1", 0, File.join(root, "service.db"),
@@ -103,6 +115,12 @@ module TinrelaySpec
     Tinrelay::Client.join(
       File.join(root, "#{ship}.keyring"), origin, ship, passphrase
     )
+  end
+
+  def self.claim_directly(store : Tinrelay::Store,
+                          prepared : Tinrelay::PreparedShipClaim,
+                          now : Int64 = Time.utc.to_unix) : Nil
+    store.claim(prepared, TEST_SOURCE_BUCKET, OPEN_REGISTRATION_ALLOWANCES, now)
   end
 
   def self.admit_contact(root : String, origin : String, ship : String,

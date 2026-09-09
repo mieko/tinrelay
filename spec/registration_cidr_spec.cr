@@ -91,6 +91,7 @@ describe "registration CIDR denial" do
       )
       TinrelayRegistrationCIDRSpec.assert_forbidden(response)
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(0_i64)
     end
   end
 

@@ -86,7 +86,7 @@ module Tinrelay
         raise Maintenance.new(back_at) if valid
       end
       if status_code == 429 && path == "/v1/join"
-        retry_after = headers["Retry-After"]?.try(&.to_i?)
+        retry_after = headers["Retry-After"]?.try(&.to_i64?)
         if retry_after && retry_after > 0
           raise RegistrationLimited.new(retry_after)
         end

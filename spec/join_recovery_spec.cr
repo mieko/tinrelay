@@ -14,7 +14,7 @@ class JoinRecoveryRelay
         @join_bodies << body
         if @commit_first
           claim = Tinrelay::ShipClaim.from_json(body)
-          @api.store.claim(@api.store.prepare_claim(claim))
+          TinrelaySpec.claim_directly(@api.store, @api.store.prepare_claim(claim))
         end
         context.response.status_code = 503
         context.response.content_type = "application/json"
@@ -61,7 +61,7 @@ module JoinRecoverySpec
       keyring.data.owner_public_key,
       keyring.data.radio!.certificate
     )
-    api.store.claim(api.store.prepare_claim(claim))
+    TinrelaySpec.claim_directly(api.store, api.store.prepare_claim(claim))
   end
 end
 

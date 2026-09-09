@@ -27,6 +27,8 @@ module Tinrelay
     MAX_OWNER_ROTATIONS_PER_DAY  =   4
     MAX_RADIO_RETUNES_PER_DAY    =  16
     ROTATION_WINDOW_SECONDS      = 24 * 60 * 60
+    REGISTRATION_HOUR_SECONDS    = 60_i64 * 60
+    REGISTRATION_DAY_SECONDS     = 24_i64 * REGISTRATION_HOUR_SECONDS
     MAX_CIPHERTEXT_BYTES         = 17 * 1024
     MAX_PENDING_SECONDS          = FALLBACK_LIFETIME_SECONDS
     AUTH_SKEW_SECONDS            = 5 * 60
@@ -69,9 +71,11 @@ module Tinrelay
       PreparedShipClaim.new(ship, owner_key, certificate)
     end
 
-    def claim(prepared : PreparedShipClaim,
-              now : Int64 = Time.utc.to_unix) : Nil
+    def claim(prepared : PreparedShipClaim, source_bucket : String,
+              allowances : RegistrationAllowances,
+              now : Int64? = nil) : Nil
       @permanent_write_mutex.synchronize do
+        accepted_at = now || Time.utc.to_unix
         database.db.transaction do |transaction|
           connection = transaction.connection
           if connection.query_one?(
@@ -80,18 +84,31 @@ module Tinrelay
             raise Conflict.new("ship name is already claimed")
           end
           ensure_permanent_capacity!(connection, 3)
+          if retry_after = registration_retry_after(
+               connection, source_bucket, allowances, accepted_at
+             )
+            raise RegistrationLimited.new(retry_after)
+          end
           connection.exec(
-            "INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')",
-            prepared.ship, now
+            "DELETE FROM registration_events WHERE accepted_at <= ?",
+            accepted_at - REGISTRATION_DAY_SECONDS
           )
           connection.exec(
-            <<-SQL, prepared.ship, prepared.owner_key, now
+            "INSERT INTO ships(name, claimed_at, state) VALUES (?, ?, 'active')",
+            prepared.ship, accepted_at
+          )
+          connection.exec(
+            <<-SQL, prepared.ship, prepared.owner_key, accepted_at
               INSERT INTO ship_owner_keys(
                 ship, generation, public_key, state, valid_from
               ) VALUES (?, 1, ?, 'active', ?)
             SQL
           )
           insert_radio_key(connection, prepared.certificate)
+          connection.exec(
+            "INSERT INTO registration_events(accepted_at, source_bucket) VALUES (?, ?)",
+            accepted_at, source_bucket
+          )
         end
       end
     end
@@ -1158,6 +1175,74 @@ module Tinrelay
       if used > permanent_metadata_limit - growth
         raise Unavailable.new("permanent metadata capacity is exhausted")
       end
+    end
+
+    private def registration_retry_after(
+      connection : DB::Connection,
+      source_bucket : String,
+      allowances : RegistrationAllowances,
+      now : Int64,
+    ) : Int64?
+      retries = [] of Int64
+      registration_window_retry_at(
+        connection, nil, now - REGISTRATION_HOUR_SECONDS,
+        allowances.global_hour, REGISTRATION_HOUR_SECONDS
+      ).try { |retry_at| retries << retry_at }
+      registration_window_retry_at(
+        connection, nil, now - REGISTRATION_DAY_SECONDS,
+        allowances.global_day, REGISTRATION_DAY_SECONDS
+      ).try { |retry_at| retries << retry_at }
+      registration_window_retry_at(
+        connection, source_bucket, now - REGISTRATION_HOUR_SECONDS,
+        allowances.per_source_hour, REGISTRATION_HOUR_SECONDS
+      ).try { |retry_at| retries << retry_at }
+      registration_window_retry_at(
+        connection, source_bucket, now - REGISTRATION_DAY_SECONDS,
+        allowances.per_source_day, REGISTRATION_DAY_SECONDS
+      ).try { |retry_at| retries << retry_at }
+      return nil if retries.empty?
+      retry_after = retries.max - now
+      raise Error.new("registration limit produced a non-positive retry time") if retry_after <= 0
+      retry_after
+    end
+
+    private def registration_window_retry_at(
+      connection : DB::Connection,
+      source_bucket : String?,
+      cutoff : Int64,
+      allowance : Int32,
+      window_seconds : Int64,
+    ) : Int64?
+      count = if source_bucket
+                connection.scalar(
+                  "SELECT COUNT(*) FROM registration_events " +
+                  "WHERE source_bucket = ? AND accepted_at > ?",
+                  source_bucket, cutoff
+                ).as(Int64)
+              else
+                connection.scalar(
+                  "SELECT COUNT(*) FROM registration_events WHERE accepted_at > ?",
+                  cutoff
+                ).as(Int64)
+              end
+      return nil if count < allowance
+      offset = count - allowance
+      accepted_at = if source_bucket
+                      connection.query_one(
+                        "SELECT accepted_at FROM registration_events " +
+                        "WHERE source_bucket = ? AND accepted_at > ? " +
+                        "ORDER BY accepted_at ASC LIMIT 1 OFFSET ?",
+                        source_bucket, cutoff, offset, as: Int64
+                      )
+                    else
+                      connection.query_one(
+                        "SELECT accepted_at FROM registration_events " +
+                        "WHERE accepted_at > ? " +
+                        "ORDER BY accepted_at ASC LIMIT 1 OFFSET ?",
+                        cutoff, offset, as: Int64
+                      )
+                    end
+      accepted_at + window_seconds
     end
 
     private def enforce_rotation_budget!(connection : DB::Connection,

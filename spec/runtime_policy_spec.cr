@@ -49,9 +49,12 @@ module TinrelayRuntimePolicySpec
     certificate.owner_signature = Tinrelay::Crypto.b64(
       Tinrelay::Crypto.sign(certificate.unsigned_bytes, owner.secret_key)
     )
-    api.store.claim(api.store.prepare_claim(Tinrelay::ShipClaim.new(
-      ship, Tinrelay::Crypto.b64(owner.public_key), certificate
-    )))
+    TinrelaySpec.claim_directly(
+      api.store,
+      api.store.prepare_claim(Tinrelay::ShipClaim.new(
+        ship, Tinrelay::Crypto.b64(owner.public_key), certificate
+      ))
+    )
   end
 end
 

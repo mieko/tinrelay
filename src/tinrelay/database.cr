@@ -2,6 +2,7 @@ module Tinrelay
   class Database
     MIGRATIONS = [
       {1, {{ read_file("sql/migrations/001_initial.sql") }}},
+      {2, {{ read_file("sql/migrations/002_registration_events.sql") }}},
     ]
 
     getter db : DB::Database

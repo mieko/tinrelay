@@ -15,7 +15,7 @@ module Tinrelay
   end
 
   class RegistrationLimited < Unavailable
-    getter retry_after_seconds : Int32
+    getter retry_after_seconds : Int64
 
     def initialize(@retry_after_seconds)
       super(

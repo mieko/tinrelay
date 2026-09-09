@@ -67,6 +67,7 @@ describe "open ship claims" do
       api.database.db.scalar(
         "SELECT COUNT(*) FROM ships WHERE name = 'one-name'"
       ).should eq(1)
+      api.database.db.scalar("SELECT COUNT(*) FROM registration_events").should eq(1_i64)
     end
   end
 
@@ -155,7 +156,7 @@ describe "open ship claims" do
     end
   end
 
-  it "charges only valid claims to the global registration window" do
+  it "charges only valid claims to the registration windows" do
     TinrelaySpec.with_server do |_root, origin, api|
       owner = Tinrelay::Crypto.signing_keypair
       signing = Tinrelay::Crypto.signing_keypair
@@ -182,7 +183,8 @@ describe "open ship claims" do
       )
       TinrelayShipClaimSpec.submit(origin, invalid).status_code.should eq(401)
 
-      Tinrelay::MAX_SHIP_REGISTRATIONS_PER_HOUR.times do |index|
+      allowance = Tinrelay::RegistrationAllowances::DEFAULT_PER_SOURCE_DAY
+      allowance.times do |index|
         claim = TinrelayShipClaimSpec.claim(
           "ship-#{index}", owner, signing, encryption
         )
@@ -196,7 +198,9 @@ describe "open ship claims" do
       limited.status_code.should eq(429)
       limited.headers["Retry-After"].to_i.should be > 0
       api.database.db.scalar("SELECT COUNT(*) FROM ships").as(Int64)
-        .should eq(Tinrelay::MAX_SHIP_REGISTRATIONS_PER_HOUR)
+        .should eq(allowance)
+      api.database.db.scalar("SELECT COUNT(*) FROM registration_events").as(Int64)
+        .should eq(allowance)
     end
   end
 end
