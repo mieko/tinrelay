@@ -146,8 +146,9 @@ alternate inbox, or bridge queue is needed.
 
 An ordinary user service may start the bridge at login and restart it only after
 unexpected failure. For launchd, `KeepAlive.SuccessfulExit = false` expresses that
-policy; for systemd, use `Restart=on-failure`. A deliberate terminally blocked
-`run` exits 0. Failed `check` exits 2; an unexpected bridge failure exits 1.
+policy; for systemd, use `Restart=on-failure`. A blocked `run` exits 1 after its
+configured fault notification returns; failed `check` exits 2. Signals and a
+second-instance refusal remain clean exits.
 
 If Desktop is unavailable or the configured task has no compatible live owner, the
 bridge leaves the exact event pending in TinRelay's existing spool. With a notifier
