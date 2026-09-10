@@ -178,7 +178,7 @@ module TinrelayCodexBridge
             )
             return turn_id
           when ClientMessageState::Absent
-            @reporter.emit("submission_not_accepted", local_id: event.id)
+            @reporter.emit("submission_not_observed", local_id: event.id)
             return nil
           when ClientMessageState::Provisional
             @reporter.emit(
@@ -218,11 +218,11 @@ module TinrelayCodexBridge
 
     private def deliver_through_desktop(event)
       attempts = 0
+      client_user_message_id = "tinrelay-turn:#{event.id}"
       loop do
         ipc = idle_connection
         return if @child.routed?(event)
         raise Blocked.new("recovery_exhausted") if attempts == 2
-        client_user_message_id = "tinrelay-turn:#{UUID.random}"
         begin
           id = ipc.start(event, client_user_message_id)
         rescue Busy
@@ -231,11 +231,9 @@ module TinrelayCodexBridge
           ipc.lifecycle.invalidate
           next
         rescue Disconnected
-          # The per-attempt client message ID is persisted with an accepted
-          # user message. Complete history can therefore distinguish this
-          # exact attempt from one that never reached Codex without confusing
-          # it with an earlier recovery turn for the same TinRelay event or
-          # guessing from elapsed time.
+          # Every request for one TinRelay event has one logical message ID.
+          # A delayed turn therefore remains recognizable after an absent
+          # history snapshot or bridge restart.
           disconnect
           return if @child.routed?(event)
           if recovered_id = reconcile_submission(event, client_user_message_id)

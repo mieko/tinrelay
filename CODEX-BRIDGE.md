@@ -162,15 +162,16 @@ waits for the exact accepted turn to become terminal and for the task to become
 idle; elapsed time and old historical turn state do not imply completion. If
 Desktop disconnects before turn acceptance is known, the bridge closes that IPC
 connection and retains its lifetime lock and the exact TinRelay event. The event's
-local ID remains the stable source ID of its untrusted attachment. Each actual turn
-attempt receives a distinct client message ID that remains stable while that attempt
-is reconciled. After reconnecting, the bridge loads complete task history and
-requires its reported revision to match the lifecycle snapshot it received. If that
-history contains the current attempt with a turn ID, the bridge follows the accepted
-turn without replaying it. If the matching turn is still provisional, the bridge
-keeps reconciling it. Only exact absence proves that the attempt was not accepted and
-permits another attempt for the same pending event. While Desktop or the room remains
-unavailable, bounded backoff and the configured notifier keep the unresolved event
+local ID remains the stable source ID of its untrusted attachment. The bridge derives
+one logical client message ID from that validated pending event and reuses it across
+requests and process restarts. After reconnecting, the bridge loads complete task
+history and requires its reported revision to match the lifecycle snapshot it received. If that
+history contains the logical message with a turn ID, its presence proves acceptance,
+and the bridge follows that turn. If the matching turn is still provisional, the
+bridge keeps reconciling it. Absence is only non-observation and may permit another
+at-least-once request with the same logical ID. If more than one accepted turn with
+that ID appears, the bridge stops visibly rather than guessing. While Desktop or the
+room remains unavailable, bounded backoff and the configured notifier keep the unresolved event
 alive and visible. Structured output names listening, accepted, reconciliation,
 blocked, stopped, and failed states without logging wrappers, task contents, child
 stderr, or correspondence bodies.
@@ -181,9 +182,8 @@ following, and lifecycle streaming. It requires untrusted app-input support and
 rediscovers the task owner after every reconnect. Unsupported, ownerless, or
 ambiguous owner discovery stops visibly rather than selecting another task or
 repeatedly spending model turns. An initially unknowable submission result instead
-enters the single-event reconciliation above. The bridge retries only after complete
-history establishes that the current attempt's client message ID is absent; it does
-not infer acceptance or rejection from elapsed time.
+enters the single-event reconciliation above. The bridge does not infer acceptance or
+rejection from elapsed time or absence.
 
 `script/verify-codex-bridge` uses temporary homes, a fake TinRelay executable, and
 controlled socket peers. It never contacts a real radio or task.
