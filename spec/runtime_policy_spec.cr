@@ -74,6 +74,19 @@ module TinrelayRuntimePolicySpec
     }.to_json)
   end
 
+  def self.write_open_policy(path : String) : Nil
+    File.write(path, {
+      site: {
+        site_name: "Updated Site", base_url: "https://updated.example",
+        wordmark: "Updated Mark", art_manifest_path: nil,
+      },
+      registration: {
+        global_hour: 301, global_day: 1001,
+        per_source_hour: 5, per_source_day: 6,
+      },
+    }.to_json)
+  end
+
   def self.claim(api : Tinrelay::API, ship : String) : Nil
     TinrelaySpec.claim_directly(api.store, prepared(api, ship))
   end
@@ -293,6 +306,65 @@ describe "tinrelayd runtime policy" do
       metrics = api.metrics.render(api.store, api.handoffs)
       metrics.should contain(
         %(tinrelay_registrations_total{outcome="closed"} 1)
+      )
+    ensure
+      api.try(&.close)
+      FileUtils.rm_r(root) if root && Dir.exists?(root)
+    end
+  end
+
+  it "counts a nonspecific stale-policy rejection as policy changed" do
+    root = TinrelaySpec.temporary_root
+    path = File.join(root, "tinrelayd.json")
+    TinrelayRuntimePolicySpec.write_site_only(path)
+    api = Tinrelay::API.new(TinrelayRuntimePolicySpec.server_config(root, path))
+    begin
+      body = TinrelayRuntimePolicySpec::GatedBody.new(
+        TinrelayRuntimePolicySpec.claim_body(api, "stale-policy-metric")
+      )
+      request = HTTP::Request.new(
+        "POST", "/v1/join",
+        HTTP::Headers{
+          "Content-Type"        => "application/json",
+          "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+        },
+        body
+      )
+      request.remote_address = Socket::IPAddress.new("127.0.0.1", 12_345)
+      output = IO::Memory.new
+      response = HTTP::Server::Response.new(output)
+      context = HTTP::Server::Context.new(request, response)
+      handled = Channel(Exception?).new(1)
+      spawn do
+        begin
+          api.handler.call(context)
+          response.close
+          handled.send(nil)
+        rescue ex
+          handled.send(ex)
+        end
+      end
+      TinrelaySpec.receive(body.entered)
+
+      TinrelayRuntimePolicySpec.write_open_policy(path)
+      api.reload_configuration
+      body.release.send(nil)
+      TinrelaySpec.receive(handled).should be_nil
+
+      response.status_code.should eq(403)
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      metrics = api.metrics.render(api.store, api.handoffs)
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="policy_changed"} 1)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="closed"} 0)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="cidr_denied"} 0)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="accepted"} 0)
       )
     ensure
       api.try(&.close)

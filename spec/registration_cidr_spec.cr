@@ -142,6 +142,12 @@ describe "registration CIDR denial" do
       metrics.should contain(
         %(tinrelay_registrations_total{outcome="cidr_denied"} 2)
       )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="invalid"} 4)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="accepted"} 1)
+      )
     end
   end
 
@@ -157,6 +163,12 @@ describe "registration CIDR denial" do
       metrics = api.metrics.render(api.store, api.handoffs)
       metrics.should contain(
         %(tinrelay_registrations_total{outcome="cidr_denied"} 0)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="invalid"} 1)
+      )
+      metrics.should contain(
+        %(tinrelay_registrations_total{outcome="accepted"} 0)
       )
     end
   end

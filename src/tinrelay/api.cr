@@ -245,10 +245,9 @@ module Tinrelay
       )
       source_bucket = source[:bucket]
       unless source_bucket
-        if source[:cidr_denied]
-          metrics.registration("cidr_denied")
-          counted = true
-        end
+        outcome = source[:cidr_denied] ? "cidr_denied" : "invalid"
+        metrics.registration(outcome)
+        counted = true
         return error(
           context, 403, "registration_forbidden",
           "registration is not available from this source"
@@ -267,6 +266,8 @@ module Tinrelay
                                "cidr_denied"
                              elsif current.registration_allowances.closed?
                                "closed"
+                             else
+                               "policy_changed"
                              end
             false
           end

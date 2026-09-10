@@ -34,6 +34,7 @@ describe "repeater metrics" do
       response.body.should contain("tinrelay_registrations_total{outcome=\"accepted\"} 2")
       response.body.should contain("tinrelay_registrations_total{outcome=\"cidr_denied\"} 0")
       response.body.should contain("tinrelay_registrations_total{outcome=\"closed\"} 0")
+      response.body.should contain("tinrelay_registrations_total{outcome=\"policy_changed\"} 0")
       response.body.should contain("tinrelay_transmissions_total{outcome=\"queued\"} 1")
       response.body.should contain("tinrelay_transmissions_total{outcome=\"rejected\"} 1")
       response.body.should contain("tinrelay_hails_total{outcome=\"accepted\"} 1")

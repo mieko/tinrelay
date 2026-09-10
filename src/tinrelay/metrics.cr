@@ -1,7 +1,7 @@
 module Tinrelay
   class Metrics
     REGISTRATION_OUTCOMES = %w[
-      accepted rate_limited cidr_denied closed capacity invalid conflict
+      accepted rate_limited cidr_denied closed policy_changed capacity invalid conflict
     ]
     TRANSMISSION_OUTCOMES      = %w[direct queued acknowledged expired rejected]
     TRANSMISSION_BYTE_OUTCOMES = %w[direct queued]
