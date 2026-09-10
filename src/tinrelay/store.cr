@@ -720,6 +720,10 @@ module Tinrelay
     def cleanup(now : Int64 = Time.utc.to_unix)
       database.db.transaction do |transaction|
         connection = transaction.connection
+        connection.exec(
+          "DELETE FROM registration_events WHERE accepted_at <= ?",
+          now - REGISTRATION_DAY_SECONDS
+        )
         expired = connection.exec(
           <<-SQL, now
             UPDATE transmissions

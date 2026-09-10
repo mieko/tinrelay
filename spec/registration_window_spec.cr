@@ -199,6 +199,27 @@ describe "durable successful ship-registration windows" do
     end
   end
 
+  it "expires source events through periodic cleanup without another registration" do
+    TinrelayRegistrationWindowSpec.with_store do |store|
+      now = 100_000_i64
+      TinrelayRegistrationWindowSpec.seed(
+        store, "old/32", now - TinrelayRegistrationWindowSpec::DAY - 1
+      )
+      TinrelayRegistrationWindowSpec.seed(
+        store, "boundary/32", now - TinrelayRegistrationWindowSpec::DAY
+      )
+      TinrelayRegistrationWindowSpec.seed(store, "current/32", now - 1)
+
+      store.cleanup(now)
+
+      store.database.db.query_all(
+        "SELECT source_bucket FROM registration_events ORDER BY accepted_at",
+        as: String
+      ).should eq(["current/32"])
+      store.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+    end
+  end
+
   it "survives restart and does not oversubscribe concurrent claims" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "durable.db")
