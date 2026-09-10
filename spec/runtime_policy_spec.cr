@@ -330,7 +330,7 @@ describe "tinrelayd runtime policy" do
     end
   end
 
-  it "publishes only canonical unique exclusions for already claimed ships" do
+  it "publishes only canonical unique exclusions as immutable snapshots" do
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
     TinrelayRuntimePolicySpec.write_site_only(path)
@@ -343,7 +343,7 @@ describe "tinrelayd runtime policy" do
       included.rate_limit_excluded?("alpha").should be_true
       included.rate_limit_excluded?("beta").should be_false
 
-      [["alpha", "alpha"], ["Alpha"], ["unknown"]].each do |exclude|
+      [["alpha", "alpha"], ["Alpha"]].each do |exclude|
         TinrelayRuntimePolicySpec.write_complete(path, exclude)
         expect_raises(Tinrelay::Invalid) { api.reload_configuration }
         api.runtime_snapshot.same?(included).should be_true

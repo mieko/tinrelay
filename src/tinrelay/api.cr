@@ -711,16 +711,8 @@ module Tinrelay
         candidate.try(&.registration_deny_cidrs) || [] of IPNetwork,
         candidate.try(&.client_address_policy) ||
         ClientAddressPolicy.new("direct", [] of String),
-        validated_rate_limit_exclusions(candidate)
+        candidate.try(&.rate_limit_exclusions) || [] of String
       )
-    end
-
-    private def validated_rate_limit_exclusions(
-      candidate : TinrelaydConfig?,
-    ) : Array(String)
-      exclusions = candidate.try(&.rate_limit_exclusions) || [] of String
-      store.require_claimed_ships!(exclusions)
-      exclusions
     end
 
     private def directed_line_path?(path : String) : Bool

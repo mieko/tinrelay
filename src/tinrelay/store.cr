@@ -127,18 +127,6 @@ module Tinrelay
       permanent_metadata_usage(database.db)
     end
 
-    def require_claimed_ships!(ships : Array(String)) : Nil
-      return if ships.empty?
-      placeholders = Array.new(ships.size, "?").join(',')
-      claimed = database.db.scalar(
-        "SELECT COUNT(*) FROM ships WHERE name IN (#{placeholders})",
-        args: ships
-      ).as(Int64)
-      unless claimed == ships.size
-        raise Invalid.new("rate-limit exclusion ship is not claimed")
-      end
-    end
-
     def metrics_snapshot(now : Int64 = Time.utc.to_unix)
       database.db.transaction do |transaction|
         connection = transaction.connection

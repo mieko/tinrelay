@@ -13,10 +13,10 @@ module TinrelayRateLimitExclusionSpec
     }.to_json)
   end
 
-  def self.with_server(&)
+  def self.with_server(exclude = [] of String, &)
     root = TinrelaySpec.temporary_root
     path = File.join(root, "tinrelayd.json")
-    write_config(path, [] of String)
+    write_config(path, exclude)
     config = Tinrelay::ServerConfig.new(
       "127.0.0.1", 0, File.join(root, "service.db"),
       File.expand_path("../templates/common-bootstrap.md", __DIR__),
@@ -145,8 +145,10 @@ end
 
 describe "authenticated ship rate-limit exclusions" do
   it "adds and removes transmission and hail exclusions atomically" do
-    TinrelayRateLimitExclusionSpec.with_server do |root, origin, api, path|
+    TinrelayRateLimitExclusionSpec.with_server(["alpha"]) do |root, origin, api, path|
       passphrase = "rate limit exclusion passphrase"
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(0_i64)
+      api.runtime_snapshot.rate_limit_excluded?("alpha").should be_true
       alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
       beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
       gamma = TinrelaySpec.admit(root, origin, "gamma", passphrase)
@@ -155,11 +157,10 @@ describe "authenticated ship rate-limit exclusions" do
       Tinrelay::Store::MAX_TRANSMISSIONS_PER_HOUR.times do
         api.submission_window.allow?("alpha").should be_true
       end
-      (Tinrelay::Store::MAX_HAILS_PER_DAY - 1).times do
+      Tinrelay::Store::MAX_HAILS_PER_DAY.times do
         api.hail_window.allow?("alpha").should be_true
       end
 
-      TinrelayRateLimitExclusionSpec.reload(api, path, ["alpha"])
       transmission = alpha.send("steward@beta", "excluded transmission")
       hail = alpha.hail("gamma")
       api.database.db.scalar(
