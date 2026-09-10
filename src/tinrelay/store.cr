@@ -26,6 +26,7 @@ module Tinrelay
     MAX_UNALLOWED_HAILS_PER_SHIP =  12
     MAX_OWNER_ROTATIONS_PER_DAY  =   4
     MAX_RADIO_RETUNES_PER_DAY    =  16
+    CLEANUP_BATCH_SIZE           = 256
     ROTATION_WINDOW_SECONDS      = 24 * 60 * 60
     REGISTRATION_HOUR_SECONDS    = 60_i64 * 60
     REGISTRATION_DAY_SECONDS     = 24_i64 * REGISTRATION_HOUR_SECONDS
@@ -712,17 +713,32 @@ module Tinrelay
           "DELETE FROM registration_events WHERE accepted_at <= ?",
           now - REGISTRATION_DAY_SECONDS
         )
-        expired = connection.exec(
-          <<-SQL, now
-            UPDATE transmissions
-               SET state = 'expired', ciphertext = NULL,
-                   signature = NULL
-             WHERE state = 'pending' AND expires_at <= ?
-          SQL
-        ).rows_affected
-        deleted = connection.exec(
-          "DELETE FROM transmissions WHERE state != 'pending' AND expires_at <= ?", now
-        ).rows_affected
+        transmission_rowids = [] of Int64
+        expired = 0_i64
+        %w[pending collected expired].each do |state|
+          remaining = CLEANUP_BATCH_SIZE - transmission_rowids.size
+          break if remaining == 0
+          selected = connection.query_all(
+            <<-SQL, state, now, remaining, as: Int64
+              SELECT rowid
+                FROM transmissions
+               WHERE state = ? AND expires_at <= ?
+               ORDER BY expires_at, rowid
+               LIMIT ?
+            SQL
+          )
+          expired = selected.size.to_i64 if state == "pending"
+          transmission_rowids.concat(selected)
+        end
+        deleted = if transmission_rowids.empty?
+                    0_i64
+                  else
+                    placeholders = Array.new(transmission_rowids.size, "?").join(',')
+                    connection.exec(
+                      "DELETE FROM transmissions WHERE rowid IN (#{placeholders})",
+                      args: transmission_rowids
+                    ).rows_affected
+                  end
         hails_deleted = connection.exec(
           "DELETE FROM hails WHERE expires_at <= ?", now
         ).rows_affected

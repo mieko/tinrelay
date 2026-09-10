@@ -89,8 +89,9 @@ module Tinrelay
         end
       end
       spawn do
+        cleanup_delay = 60.seconds
         loop do
-          sleep 60.seconds
+          sleep cleanup_delay
           break if stopping
           result = api.store.cleanup
           api.metrics.cleanup(result)
@@ -101,9 +102,15 @@ module Tinrelay
               deleted: result[:deleted],
             }.to_json)
           end
+          cleanup_delay = if result[:deleted] == Store::CLEANUP_BATCH_SIZE
+                            1.second
+                          else
+                            60.seconds
+                          end
         rescue ex
           api.metrics.cleanup_error
           STDERR.puts({event: "cleanup_failed", error: ex.class.name}.to_json)
+          cleanup_delay = 60.seconds
         end
       end
       STDERR.puts({

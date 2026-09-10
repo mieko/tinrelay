@@ -146,8 +146,9 @@ limits are the service's abuse boundary.
 - `GET /readyz` proves SQLite is queryable.
 - `GET /metrics` emits aggregate Prometheus text for an operator-only listener.
 - SIGTERM and SIGINT close the listener and database cleanly.
-- Cleanup runs every 60 seconds; `tinrelayd cleanup --database "$DATABASE_PATH"` is the
-  idempotent manual equivalent.
+- Cleanup ordinarily runs every 60 seconds. After a full 256-row transmission batch, it runs
+  again one second later and repeats until the next batch is not full; `tinrelayd cleanup ...` is
+  the idempotent manual equivalent.
 
 Successful registration source buckets and server acceptance times survive process
 restart in `registration_events`. Rows at or before the 24-hour cutoff are removed by
