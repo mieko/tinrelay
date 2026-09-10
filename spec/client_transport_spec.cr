@@ -5,6 +5,10 @@ module TinrelayClientTransportSpec
     def retryable_transport_error_for_spec?(error : IO::Error) : Bool
       retryable_transport_error?(error)
     end
+
+    def read_timeout_for_spec(path : String) : Time::Span
+      read_timeout(path)
+    end
   end
 
   def self.with_response(status : Int32, body : String,
@@ -39,6 +43,13 @@ module TinrelayClientTransportSpec
 end
 
 describe Tinrelay::Remote do
+  it "gives the signed radio wait its longer response window" do
+    remote = TinrelayClientTransportSpec::Remote.new("https://relay.example")
+
+    remote.read_timeout_for_spec("/v1/radio/wait").should eq(115.seconds)
+    remote.read_timeout_for_spec("/v1/transmissions").should eq(35.seconds)
+  end
+
   it "classifies an OS socket timeout without classifying other IO failures" do
     remote = TinrelayClientTransportSpec::Remote.new("https://relay.example")
 

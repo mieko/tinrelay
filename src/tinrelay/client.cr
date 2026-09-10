@@ -25,7 +25,7 @@ module Tinrelay
       uri = URI.parse("#{origin.rstrip('/')}#{path}")
       client = HTTP::Client.new(uri)
       client.connect_timeout = 5.seconds
-      client.read_timeout = 35.seconds
+      client.read_timeout = read_timeout(path)
       headers = HTTP::Headers{
         "Accept"              => "application/json",
         "User-Agent"          => "tinrelay/#{VERSION}",
@@ -57,6 +57,11 @@ module Tinrelay
       else
         false
       end
+    end
+
+    private def read_timeout(path : String) : Time::Span
+      return 115.seconds if path == "/v1/radio/wait"
+      35.seconds
     end
 
     private def response_limit(path : String) : Int64
@@ -343,13 +348,15 @@ module Tinrelay
       hail
     end
 
-    def radio_wait(spool : Spool, hold_seconds : Int32 = 25) : RadioEvent
+    def radio_wait(spool : Spool,
+                   hold_seconds : Int32 = RADIO_WAIT_HOLD_SECONDS) : RadioEvent
       spool.with_radio_lock do
         radio_wait_unlocked(spool, hold_seconds)
       end
     end
 
-    def radio_collect(spool : Spool, hold_seconds : Int32 = 25) : RadioEvent
+    def radio_collect(spool : Spool,
+                      hold_seconds : Int32 = RADIO_WAIT_HOLD_SECONDS) : RadioEvent
       spool.with_radio_lock do
         radio_collect_unlocked(spool, hold_seconds)
       end

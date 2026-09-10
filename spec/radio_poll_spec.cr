@@ -28,6 +28,45 @@ class RadioPollRemote < Tinrelay::Remote
 end
 
 describe "immediate radio polling" do
+  it "accepts the signed 100-second maximum and rejects a longer hold" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "radio hold boundary passphrase"
+      ship = Tinrelay::Client.join(
+        File.join(root, "ship.keyring"), origin, "ship", passphrase
+      )
+
+      accepted = TinrelaySpec.radio_wait_request(ship, 100)
+      api.store.wait_once(accepted).empty?.should be_true
+
+      rejected = TinrelaySpec.radio_wait_request(ship, 101)
+      error = expect_raises(Tinrelay::Invalid) { api.store.wait_once(rejected) }
+      error.message.should eq("wait hold must be between 0 and 100 seconds")
+    end
+  end
+
+  it "uses the 100-second hold for ordinary radio waits and collection" do
+    root = TinrelaySpec.temporary_root
+    remote = RadioPollRemote.new(
+      "http://127.0.0.1:1", [] of Tinrelay::RadioWaitResponse
+    )
+    keyring = Tinrelay::Keyring.create(
+      File.join(root, "ship.keyring"), remote.origin, "ship",
+      "radio default hold passphrase"
+    )
+
+    client = Tinrelay::Client.new(keyring, "radio default hold passphrase", remote)
+    spool = Tinrelay::Spool.new(File.join(root, "inbox"))
+    expect_raises(Exception, "test radio sequence is empty") do
+      client.radio_wait(spool)
+    end
+    expect_raises(Exception, "test radio sequence is empty") do
+      client.radio_collect(spool)
+    end
+    remote.holds.should eq([100, 100])
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
   it "surfaces durable local work even when relay cleanup is unavailable" do
     TinrelaySpec.with_server do |root, origin, _api|
       passphrase = "local poll recovery passphrase"

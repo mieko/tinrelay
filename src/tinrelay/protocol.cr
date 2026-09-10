@@ -13,6 +13,7 @@ module Tinrelay
   DEFAULT_PERMANENT_METADATA_LIMIT =  25_000_i64
   MAX_PERMANENT_METADATA_LIMIT     = 100_000_i64
   MAX_IDENTITY_RESPONSE_BYTES      = 64_i64 * 1024 * 1024
+  RADIO_WAIT_HOLD_SECONDS          = 100
 
   module Ids
     def self.uuid : String

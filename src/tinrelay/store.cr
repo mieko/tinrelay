@@ -358,8 +358,10 @@ module Tinrelay
 
     def wait_once(request : RadioWaitRequest,
                   now : Int64 = Time.utc.to_unix) : RadioWaitResponse
-      unless request.hold_seconds.in?(0..25)
-        raise Invalid.new("wait hold must be between 0 and 25 seconds")
+      unless request.hold_seconds.in?(0..RADIO_WAIT_HOLD_SECONDS)
+        raise Invalid.new(
+          "wait hold must be between 0 and #{RADIO_WAIT_HOLD_SECONDS} seconds"
+        )
       end
       database.db.transaction do |transaction|
         connection = transaction.connection

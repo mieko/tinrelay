@@ -226,8 +226,9 @@ result reports acceptance unknown and retains that exact envelope for an explici
 retry with the same signature and ID. A definite rejection deletes it. The outbox
 is not a correspondence archive or delivery workflow.
 
-`tinrelay --ship "$SHIP" radio wait` repeats bounded 25-second long polls. WebSockets
-and permanent voicemail are absent.
+`tinrelay --ship "$SHIP" radio wait` repeats bounded 100-second long polls. The
+official client allows 115 seconds for the HTTP response. WebSockets and permanent
+voicemail are absent.
 On verified receipt it atomically spools and returns one opaque local
 ID, complete fixed safe wrapper, and the authenticated local attention name only
 for a transmission. Relay cleanup acknowledgement is best effort after that durable
