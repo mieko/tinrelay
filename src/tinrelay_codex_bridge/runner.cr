@@ -34,7 +34,7 @@ module TinrelayCodexBridge
         begin
           lock.flock_exclusive(false)
         rescue IO::Error
-          raise Blocked.new("bridge_already_running")
+          raise AlreadyRunning.new("bridge_already_running")
         end
         @child.version
         loop do
@@ -43,6 +43,8 @@ module TinrelayCodexBridge
           deliver(@child.wait_event)
         end
       end
+    rescue ex : AlreadyRunning
+      raise ex
     rescue ex : Blocked
       @notifier.fault(ex.message || "bridge_blocked") if @notifier.configured?
       raise ex
@@ -120,20 +122,31 @@ module TinrelayCodexBridge
             return if wait_for_radio_room(event)
             next
           end
-          cooldown = @notifier.wait
-          seconds, reason = reminder_cooldown(cooldown)
-          @reporter.emit("radio_room_reminder_deferred", reason, local_id: event.id)
+          seconds = unavailable_cooldown(event)
           return if wait_for_radio_room(event, seconds)
         end
       end
     end
 
-    private def reminder_cooldown(cooldown)
-      case cooldown
+    private def unavailable_cooldown(event) : Int32
+      case @notifier.wait
       when Notifier::Cooldown::OpenIt
-        {OPEN_IT_COOLDOWN_SECONDS, "five_minutes"}
+        @reporter.emit(
+          "radio_room_reminder_deferred",
+          "five_minutes",
+          local_id: event.id
+        )
+        OPEN_IT_COOLDOWN_SECONDS
       when Notifier::Cooldown::NotToday
-        {NOT_TODAY_SECONDS, "twenty_four_hours"}
+        @reporter.emit(
+          "radio_room_reminder_deferred",
+          "twenty_four_hours",
+          local_id: event.id
+        )
+        NOT_TODAY_SECONDS
+      when Notifier::Cooldown::Failed
+        @reporter.emit("waiting_for_radio_room", "notifier_failed", local_id: event.id)
+        OPEN_IT_COOLDOWN_SECONDS
       else
         raise Blocked.new("unknown_notifier_cooldown")
       end
@@ -194,9 +207,7 @@ module TinrelayCodexBridge
 
         now = Time.instant
         if @notifier.configured? && now >= next_reminder
-          cooldown = @notifier.wait
-          seconds, reason = reminder_cooldown(cooldown)
-          @reporter.emit("radio_room_reminder_deferred", reason, local_id: event.id)
+          seconds = unavailable_cooldown(event)
           next_reminder = Time.instant + seconds.seconds
         end
         @control.pause(retry_seconds(Time.instant - started))

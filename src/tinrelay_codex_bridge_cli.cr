@@ -11,8 +11,8 @@ module TinrelayCodexBridge
               --notify-command PATH --radio-room-name NAME
     run stays in the foreground. check never submits a model turn.
     Desktop must have a compatible live owner for the configured task.
-    A blocked run prints a structured reason and exits 0; check failures exit 2.
-    Unexpected failures exit 1. Quiet listening spends no model turns.
+    A second running instance and signals exit 0. check failures exit 2.
+    Other blocked or unexpected run failures exit 1. Quiet listening spends no model turns.
     TEXT
 
   def self.main(argv : Array(String)) : Int32
@@ -62,9 +62,12 @@ module TinrelayCodexBridge
   rescue Stopped
     Reporter.new.emit("stopped", "signal")
     0
+  rescue ex : AlreadyRunning
+    Reporter.new.emit("blocked", ex.message)
+    0
   rescue ex : Blocked
     Reporter.new.emit("blocked", ex.message)
-    command == "run" ? 0 : 2
+    command == "run" ? 1 : 2
   rescue Exception
     Reporter.new(STDERR).emit("failed", "unexpected_bridge_failure")
     1

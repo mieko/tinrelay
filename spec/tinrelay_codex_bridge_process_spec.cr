@@ -471,12 +471,22 @@ module TinrelayCodexBridgeProcessSpec
       File.touch(File.join(root, "notify-release-#{number}"))
     end
 
+    def fault_notifier_calls
+      calls.select do |call|
+        call["args"].as_a.first?.try(&.as_s?) == "--fault"
+      end
+    end
+
+    def release_fault_notifier(number = 1)
+      File.touch(File.join(root, "fault-notify-release-#{number}"))
+    end
+
     def output(number = 0)
       path = File.join(root, "stdout-#{number}")
       File.exists?(path) ? File.read(path) : ""
     end
 
-    def assert_blocked(process : ManagedProcess, reason : String, code = 0)
+    def assert_blocked(process : ManagedProcess, reason : String, code = 1)
       process.wait(8.seconds).exit_code.should eq(code)
       output(processes.index!(process)).should contain(%("reason":"#{reason}"))
     end
@@ -878,10 +888,12 @@ describe "tinrelay-codex-bridge process contract" do
         h.peer.accept_start(connection, request)
         nil
       end
-      h.start
+      notify_args = ["--notify-command", FIXTURE, "--radio-room-name", ROOM]
+      h.start(extra: notify_args)
       eventually { h.output.includes?(%("state":"accepted")) }
-      second = h.start
-      h.assert_blocked(second, "bridge_already_running")
+      second = h.start(extra: notify_args)
+      h.assert_blocked(second, "bridge_already_running", 0)
+      h.fault_notifier_calls.should be_empty
       h.peer.starts.size.should eq(1)
       h.calls("wait").size.should eq(1)
     end
@@ -1484,7 +1496,7 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "leaves the event pending when its configured notifier fails" do
+  it "continues discovery on the short cooldown when its reminder fails" do
     with_bridge_harness do |h|
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
@@ -1496,9 +1508,16 @@ describe "tinrelay-codex-bridge process contract" do
       ])
       eventually { h.notifier_calls.size == 1 }
       h.release_notifier
-      h.assert_blocked(process, "notifier_failed")
+      eventually do
+        h.output.includes?(%("state":"waiting_for_radio_room","reason":"notifier_failed"))
+      end
+      process.running?.should be_true
+      h.fault_notifier_calls.should be_empty
       File.exists?(File.join(h.root, "#{event[:local_id]}.routed")).should be_false
       h.peer.starts.should be_empty
+      h.peer.no_owner = false
+      eventually { h.calls("wait").size == 2 }
+      h.peer.starts.size.should eq(1)
     end
   end
 
@@ -1529,16 +1548,41 @@ describe "tinrelay-codex-bridge process contract" do
         "--notify-command", FIXTURE, "--radio-room-name", ROOM,
       ])
       reason = "ipc_request_rejected:thread-follower-start-turn:unclassified"
+      eventually { h.fault_notifier_calls.size == 1 }
+      process.running?.should be_true
+      h.release_fault_notifier
       h.assert_blocked(process, reason)
-      terminal_calls = h.calls.select do |call|
-        call["args"].as_a.first?.try(&.as_s?) == "--fault"
-      end
+      terminal_calls = h.fault_notifier_calls
       terminal_calls.size.should eq(1)
       terminal_calls[0]["args"].as_a.map(&.as_s).should eq(["--fault", reason])
       h.notifier_calls.should be_empty
       h.output.should_not contain("foreign private rejection text")
       File.exists?(File.join(h.root, "#{event[:local_id]}.routed")).should be_false
       h.peer.starts.size.should eq(1)
+    end
+  end
+
+  it "keeps the original run failure when its fault notifier fails" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.config["fault_notifier_failure"] = JSON::Any.new(true)
+      h.save
+      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+        h.peer.reply(connection, request, error: "private rejection")
+        nil
+      end
+
+      process = h.start(extra: [
+        "--notify-command", FIXTURE, "--radio-room-name", ROOM,
+      ])
+      eventually { h.fault_notifier_calls.size == 1 }
+      h.release_fault_notifier
+      reason = "ipc_request_rejected:thread-follower-start-turn:unclassified"
+      h.assert_blocked(process, reason)
+      h.fault_notifier_calls.size.should eq(1)
+      h.output.should_not contain("private rejection")
+      File.exists?(File.join(h.root, "#{event[:local_id]}.routed")).should be_false
     end
   end
 

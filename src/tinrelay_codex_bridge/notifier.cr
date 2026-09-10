@@ -3,6 +3,7 @@ module TinrelayCodexBridge
     enum Cooldown
       OpenIt
       NotToday
+      Failed
     end
 
     def initialize(@config : Config, @control : Control)
@@ -17,10 +18,10 @@ module TinrelayCodexBridge
       case result.exit_code
       when  0 then Cooldown::OpenIt
       when 75 then Cooldown::NotToday
-      else         raise Blocked.new("notifier_failed")
+      else         Cooldown::Failed
       end
     rescue IO::Error
-      raise Blocked.new("notifier_failed")
+      Cooldown::Failed
     end
 
     def fault(classification : String)

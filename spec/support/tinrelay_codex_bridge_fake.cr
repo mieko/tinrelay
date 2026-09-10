@@ -21,6 +21,13 @@ when args == ["TinRelay Radio Room"]
   loop { break if File.exists?(release); sleep 20.milliseconds }
   exit 75 if config["notifier_choice"]?.try(&.as_s?) == "not_today"
   exit 3 if config["notifier_failure"]?.try(&.as_bool?)
+when args.first? == "--fault"
+  number = File.read_lines(File.join(root, "child_calls.jsonl")).count do |row|
+    JSON.parse(row)["args"].as_a.first?.try(&.as_s?) == "--fault"
+  end
+  release = File.join(root, "fault-notify-release-#{number}")
+  loop { break if File.exists?(release); sleep 20.milliseconds }
+  exit 3 if config["fault_notifier_failure"]?.try(&.as_bool?)
 when args == ["version"]
   puts "tinrelay fixture"
 when args[0, 2]? == ["radio", "wait"]

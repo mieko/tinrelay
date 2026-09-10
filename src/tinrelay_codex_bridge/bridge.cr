@@ -13,6 +13,8 @@ module TinrelayCodexBridge
 
   class Blocked < Exception; end
 
+  class AlreadyRunning < Blocked; end
+
   class DeliveryUnavailable < Blocked; end
 
   class Stopped < Exception; end

@@ -63,12 +63,19 @@ name. The bridge passes that name as its only argument—never correspondence,
 addresses, wrappers, or task contents. Exit zero suppresses another prompt for five
 minutes; exit 75 suppresses it for 24 hours. During either cooldown the bridge
 performs the same model-free owner discovery and delivers as soon as the configured
-room appears. Any other exit is terminal and leaves the event pending.
+room appears. Any other exit or an execution failure reports
+`waiting_for_radio_room` with reason `notifier_failed`, uses the five-minute
+discovery cooldown, and leaves the bridge running with the event pending.
 
 `run` remains in the foreground and holds
 `$HOME/.local/share/tinrelay-codex-bridge/locks/$SHIP.lock` for its lifetime. Do not
 remove a live lock file. SIGINT and SIGTERM stop the bridge and reap its current
-TinRelay child.
+TinRelay child with exit zero. A second instance also exits zero after reporting
+`bridge_already_running`, without displaying a fault dialog. Every other blocked
+`run` failure exits one and, when configured, invokes the notifier once as
+`--fault CLASSIFICATION` before stopping. A failed fault notifier does not replace
+the original classification or exit status. Blocked `check` failures exit two and
+do not display dialogs.
 
 ## Install the user services
 
