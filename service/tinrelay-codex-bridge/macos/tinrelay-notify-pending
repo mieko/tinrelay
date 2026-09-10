@@ -26,11 +26,11 @@ on run arguments
   if mode is "fault" then
     if (count of arguments) > 2 then
       set iconFile to POSIX file (item 3 of arguments) as alias
-      display alert "TinRelay" message value as critical buttons {"OK"} ¬
+      display dialog value with title "TinRelay" buttons {"OK"} ¬
         default button "OK" with icon iconFile
     else
-      display alert "TinRelay" message value as critical buttons {"OK"} ¬
-        default button "OK"
+      display dialog value with title "TinRelay" buttons {"OK"} ¬
+        default button "OK" with icon stop
     end if
     return "Fault"
   end if
@@ -47,7 +47,8 @@ on run arguments
       with icon iconFile
   else
     set answer to display dialog dialogMessage with title "TinRelay" ¬
-      buttons {"Not Today", "I'll Open It"} default button "I'll Open It"
+      buttons {"Not Today", "I'll Open It"} default button "I'll Open It" ¬
+      with icon note
   end if
   return button returned of answer
 end run
