@@ -19,7 +19,7 @@ module Tinrelay
         prune_inactive(cutoff)
         timestamps = @attempts[ship]?
         if timestamps
-          timestamps.reject! { |timestamp| timestamp < cutoff }
+          timestamps.reject! { |timestamp| timestamp <= cutoff }
           @attempts.delete(ship) if timestamps.empty?
         end
         timestamps ||= [] of Int64
@@ -38,7 +38,7 @@ module Tinrelay
       # prefix is visited and each inactive identity is removed once.
       while oldest = @attempts.first?
         ship, timestamps = oldest
-        break unless timestamps.empty? || timestamps.last < cutoff
+        break unless timestamps.empty? || timestamps.last <= cutoff
         @attempts.delete(ship)
       end
     end

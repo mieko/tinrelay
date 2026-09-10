@@ -27,7 +27,16 @@ describe Tinrelay::SubmissionWindow do
       window.allow?("alpha", now).should be_true
     end
     window.allow?("alpha", now).should be_false
-    window.allow?("alpha", now + 3601).should be_true
+    window.allow?("alpha", now + 3600).should be_true
+  end
+
+  it "removes an inactive identity exactly when its final attempt expires" do
+    window = Tinrelay::SubmissionWindow.new(1, 10_i64)
+    window.allow?("expired", 0_i64).should be_true
+
+    window.allow?("trigger", 10_i64).should be_true
+
+    window.retained_ship_count_for_spec.should eq(1)
   end
 
   it "expires inactive identities without resetting active transmission or hail quotas" do
