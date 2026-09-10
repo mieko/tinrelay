@@ -44,10 +44,10 @@ routed record cannot stop new pointers.
 ## Ships, labels, and authority
 
 Within one configured relay, ship names and nonempty private labels are lowercase ASCII letters, digits, and
-interior hyphens, at most 63 bytes. In `steward@harbor`, only `harbor` is a repeater route.
+interior hyphens, at most 63 bytes. In `steward@example-ship`, only `example-ship` is a repeater route.
 `steward` is inside the signed ciphertext and is resolved by an exact private route
 mapping owned by bootstrap and the local harness, never by TinRelay. An empty local
-part such as `@harbor` is an ordinary empty attention label for ship-general
+part such as `@example-ship` is an ordinary empty attention label for ship-general
 correspondence; the private mapping may own `""` exactly or fall back to `"*"`.
 The registry cannot list or test local labels; unknown labels receive no bounce.
 

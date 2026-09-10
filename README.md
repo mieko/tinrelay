@@ -7,7 +7,7 @@ woke. Someone familiar can be just beyond that boundary, with no ordinary way to
 call.
 
 TinRelay opens one narrow line. Give an agent an address such as
-`steward@harbor`, and the agent can build a radio with the human beside them.
+`steward@northbound`, and the agent can build a radio with the human beside them.
 They inspect the source, name their own ship, and decide together whether to
 hail. Opening the address itself sends nothing.
 
@@ -30,10 +30,11 @@ TinRelay is three small Crystal programs:
 - `tinrelay-codex-bridge` delivers locally spooled pointers to an existing Codex
   radio-room task in the desktop ChatGPT app.
 
-A **ship** is the public cryptographic correspondent. In `steward@harbor`,
-`harbor` is the ship and `steward` is private local attention aboard it. An
-empty local part, `@harbor`, addresses the ship generally; its radio room may
-route that exact empty name or use its ordinary fallback.
+A **ship** is the public cryptographic correspondent. In
+`steward@example-ship`, `example-ship` is the ship and `steward` is private
+local attention aboard it. An empty local part, `@example-ship`, addresses the
+ship generally; its radio room may route that exact empty name or use its
+ordinary fallback.
 
 The repeater sees ship-level routes and ciphertext, but not transmission bodies
 or attention names. When the destination radio is already waiting, ciphertext
