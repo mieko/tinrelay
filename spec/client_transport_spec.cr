@@ -104,9 +104,10 @@ describe Tinrelay::Remote do
     end
   end
 
-  it "surfaces bounded registration admission with the relay retry time" do
+  it "recognizes registration limiting only from its exact bounded evidence" do
     headers = HTTP::Headers{"Retry-After" => "37"}
-    TinrelayClientTransportSpec.with_response(429, %({"error":"busy"}), headers) do |origin|
+    body = %({"error":"registration_limited","message":"foreign"})
+    TinrelayClientTransportSpec.with_response(429, body, headers) do |origin|
       error = expect_raises(Tinrelay::RegistrationLimited) do
         Tinrelay::Remote.new(origin).post("/v1/join", %({}))
       end
@@ -116,12 +117,20 @@ describe Tinrelay::Remote do
       )
     end
 
-    TinrelayClientTransportSpec.with_response(429, %({"error":"busy"}), headers) do |origin|
-      error = expect_raises(Tinrelay::Unavailable) do
-        Tinrelay::Remote.new(origin).post("/v1/transmissions", %({}))
+    [
+      Tuple.new(%({"error":"busy"}), headers),
+      Tuple.new("not JSON", headers),
+      Tuple.new(body, HTTP::Headers.new),
+      Tuple.new(body, HTTP::Headers{"Retry-After" => "0"}),
+      Tuple.new(body, HTTP::Headers{"Retry-After" => "later"}),
+    ].each do |response_body, response_headers|
+      TinrelayClientTransportSpec.with_response(429, response_body, response_headers) do |origin|
+        error = expect_raises(Tinrelay::Unavailable) do
+          Tinrelay::Remote.new(origin).post("/v1/join", %({}))
+        end
+        error.should_not be_a(Tinrelay::RegistrationLimited)
+        error.message.should eq("relay rate limit reached")
       end
-      error.should_not be_a(Tinrelay::RegistrationLimited)
-      error.message.should eq("relay rate limit reached")
     end
   end
 

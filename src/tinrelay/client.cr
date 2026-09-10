@@ -86,10 +86,8 @@ module Tinrelay
         raise Maintenance.new(back_at) if valid
       end
       if status_code == 429 && path == "/v1/join"
-        retry_after = headers["Retry-After"]?.try(&.to_i64?)
-        if retry_after && retry_after > 0
-          raise RegistrationLimited.new(retry_after)
-        end
+        retry_after = registration_limit_evidence(body, headers)
+        raise RegistrationLimited.new(retry_after) if retry_after
       end
       if status_code == 403 && path == "/v1/join" && registration_forbidden?(body)
         raise RegistrationUnavailable.new
@@ -116,6 +114,18 @@ module Tinrelay
       object["error"]?.try(&.as_s?) == "registration_forbidden"
     rescue JSON::ParseException
       false
+    end
+
+    private def registration_limit_evidence(body : String,
+                                            headers : HTTP::Headers) : Int64?
+      retry_after = headers["Retry-After"]?.try(&.to_i64?)
+      return nil unless retry_after && retry_after > 0
+      object = JSON.parse(body).as_h?
+      return nil unless object
+      return nil unless object["error"]?.try(&.as_s?) == "registration_limited"
+      retry_after
+    rescue JSON::ParseException
+      nil
     end
 
     private def rotation_limit_evidence(body : String,

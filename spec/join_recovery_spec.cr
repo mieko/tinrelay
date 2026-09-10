@@ -6,7 +6,8 @@ class JoinRecoveryRelay
 
   def initialize(@api : Tinrelay::API, @commit_first : Bool,
                  @first_status = 503,
-                 @first_body = %({"error":"unavailable"}))
+                 @first_body = %({"error":"unavailable"}),
+                 @first_headers = HTTP::Headers.new)
     @join_attempts = 0
     application = @api.handler
     @server = HTTP::Server.new do |context|
@@ -20,6 +21,7 @@ class JoinRecoveryRelay
         end
         context.response.status_code = @first_status
         context.response.content_type = "application/json"
+        @first_headers.each { |key, values| context.response.headers[key] = values }
         context.response.print(@first_body)
       else
         if context.request.path == "/v1/join"
@@ -42,7 +44,8 @@ end
 
 module JoinRecoverySpec
   def self.with_relay(commit_first : Bool, first_status = 503,
-                      first_body = %({"error":"unavailable"}), &)
+                      first_body = %({"error":"unavailable"}),
+                      first_headers = HTTP::Headers.new, &)
     root = TinrelaySpec.temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     config = Tinrelay::ServerConfig.new(
@@ -50,7 +53,9 @@ module JoinRecoverySpec
       bootstrap_template: template
     )
     api = Tinrelay::API.new(config)
-    relay = JoinRecoveryRelay.new(api, commit_first, first_status, first_body)
+    relay = JoinRecoveryRelay.new(
+      api, commit_first, first_status, first_body, first_headers
+    )
     yield root, relay, api
   ensure
     relay.try(&.close)
@@ -109,6 +114,28 @@ describe "ship claim recovery" do
         )
       end
 
+      File.exists?(path).should be_true
+      File.exists?(owner_path).should be_true
+      api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
+    end
+  end
+
+  it "preserves provisional identity when a committed response becomes a generic 429" do
+    headers = HTTP::Headers{"Retry-After" => "37"}
+    JoinRecoverySpec.with_relay(
+      commit_first: true, first_status: 429,
+      first_body: %({"error":"busy"}), first_headers: headers
+    ) do |root, relay, api|
+      path = File.join(root, "foreign-429.keyring")
+      owner_path = "#{path}.owner"
+
+      error = expect_raises(Tinrelay::Unavailable) do
+        Tinrelay::Client.join(
+          path, relay.origin, "foreign-429", "foreign response passphrase"
+        )
+      end
+
+      error.should_not be_a(Tinrelay::RegistrationLimited)
       File.exists?(path).should be_true
       File.exists?(owner_path).should be_true
       api.database.db.scalar("SELECT COUNT(*) FROM ships").should eq(1_i64)
