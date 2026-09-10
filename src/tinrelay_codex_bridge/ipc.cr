@@ -1,7 +1,22 @@
 module TinrelayCodexBridge
   class IPC
-    MAX_FRAME       = 268_435_456
-    REQUEST_TIMEOUT = 20.seconds
+    MAX_FRAME               = 268_435_456
+    REQUEST_TIMEOUT         = 20.seconds
+    COMPLETE_HISTORY_METHOD = "thread-follower-load-complete-history"
+    # Desktop may publish a task owner before that window has resumed its
+    # conversation. Only its closed set of history-transition failures retries.
+    RETRYABLE_HISTORY = {
+      "Conversation must be resumed before loading history"     => "conversation_not_resumed",
+      "no-client-found: thread stream owner became unavailable" => "owner_unavailable",
+      "no-client-found: thread stream owner is unavailable"     => "owner_unavailable",
+      "no-client-found: thread stream owner changed"            => "owner_changed",
+      "no-client-found: thread stream owner disconnected"       => "owner_disconnected",
+      "client-disconnected"                                     => "owner_window_unavailable",
+      "no-client-found: client-disconnected"                    => "owner_window_unavailable",
+      "no-client-found: webcontents-destroyed"                  => "owner_window_unavailable",
+      "no-client-found: webview-disposed"                       => "owner_window_unavailable",
+      "no-client-found: provider-disposed"                      => "owner_window_unavailable",
+    }
     getter lifecycle = Lifecycle.new
     @client = ""
     @owner = ""
@@ -58,16 +73,17 @@ module TinrelayCodexBridge
                   params: {hostId: "local", conversationId: @task, following: value}})
     end
 
-    private def rpc(method, params, version, target : String? = nil)
+    private def rpc(method, params, version, target : String? = nil,
+                    deadline : Time::Instant? = nil)
       request_id = UUID.random.to_s
       message = JSON.parse({type: "request", requestId: request_id, method: method,
                             params: params, version: version, timeoutMs: 20_000}.to_json)
       message.as_h["sourceClientId"] = JSON::Any.new(@client) unless @client.empty?
       message.as_h["targetClientId"] = JSON::Any.new(target) if target
       send_frame(message)
-      deadline = Time.instant + REQUEST_TIMEOUT
+      request_deadline = deadline || Time.instant + REQUEST_TIMEOUT
       loop do
-        response = receive(deadline)
+        response = receive(request_deadline)
         next unless response.as_h["type"]?.try(&.as_s?) == "response" &&
                     response.as_h["requestId"]?.try(&.as_s?) == request_id
         if response.as_h["resultType"]?.try(&.as_s?) == "error"
@@ -76,12 +92,15 @@ module TinrelayCodexBridge
              reason == "App context must wait until the current turn finishes"
             raise Busy.new
           end
-          failure = if reason == "no-client-found"
-                      raise DeliveryUnavailable.new("no_compatible_task_owner")
-                    else
-                      "ipc_request_rejected"
-                    end
-          raise Blocked.new(failure)
+          raise DeliveryUnavailable.new("no_compatible_task_owner") if reason == "no-client-found"
+          if method == COMPLETE_HISTORY_METHOD
+            if rejection = RETRYABLE_HISTORY[reason]?
+              raise DeliveryUnavailable.new(
+                "ipc_retryable_rejection:#{method}:#{rejection}"
+              )
+            end
+          end
+          raise Blocked.new("ipc_request_rejected:#{method}:unclassified")
         end
         unless response.as_h["resultType"]?.try(&.as_s?) == "success"
           raise Blocked.new("invalid_ipc_result")
@@ -113,15 +132,27 @@ module TinrelayCodexBridge
     end
 
     def load_complete_history
+      deadline = Time.instant + REQUEST_TIMEOUT
       response = rpc(
-        "thread-follower-load-complete-history",
+        COMPLETE_HISTORY_METHOD,
         {conversationId: @task},
         1,
-        @owner
+        @owner,
+        deadline
       )
       revision = response.as_h["result"].as_h["revision"].as_i64
-      unless lifecycle.revision == revision
+      current_revision = lifecycle.revision ||
+                         raise Blocked.new("complete_history_revision_mismatch")
+      if current_revision > revision
         raise Blocked.new("complete_history_revision_mismatch")
+      end
+      while current_revision < revision
+        receive(deadline)
+        current_revision = lifecycle.revision ||
+                           raise Blocked.new("complete_history_revision_mismatch")
+        if current_revision > revision
+          raise Blocked.new("complete_history_revision_mismatch")
+        end
       end
     rescue TypeCastError | KeyError
       raise Blocked.new("invalid_complete_history_response")

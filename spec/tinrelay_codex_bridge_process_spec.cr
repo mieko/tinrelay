@@ -1146,6 +1146,118 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
+  it "waits for the promised complete-history snapshot before reconciling" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      prior_state = JSON.parse(h.peer.state.to_json)
+      subscriptions = 0
+      h.peer.on_subscribe = ->(connection : Connection) do
+        subscriptions += 1
+        if subscriptions == 2
+          h.peer.stream(connection, JSON.parse({
+            type:              "snapshot",
+            revision:          h.peer.revision - 1,
+            conversationState: prior_state,
+          }.to_json))
+        else
+          h.peer.stream(connection)
+        end
+        nil
+      end
+      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+        h.peer.record_start(request)
+        h.peer.disconnect(connection)
+        nil
+      end
+      history_replied = false
+      snapshot_release = Channel(Nil).new
+      h.peer.on_load_history = ->(connection : Connection, request : JSON::Any) do
+        h.peer.reply(connection, request, {revision: h.peer.revision})
+        history_replied = true
+        spawn do
+          snapshot_release.receive
+          begin
+            h.peer.stream(connection)
+          rescue IO::Error
+          end
+        end
+        nil
+      end
+
+      process = h.start
+      eventually { history_replied }
+      sleep 100.milliseconds
+      stayed_alive = process.running?
+      snapshot_release.send(nil)
+      stayed_alive.should be_true
+      eventually { h.output.includes?(%("reason":"accepted_after_reconnect")) }
+      h.peer.starts.size.should eq(1)
+      h.peer.finish("turn-1")
+      eventually { h.calls("wait").size == 2 }
+      h.peer.starts.size.should eq(1)
+    end
+  end
+
+  it "waits through an owner-visible conversation-resume gap while reconciling" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      history_rejections = [
+        "Conversation must be resumed before loading history",
+        "no-client-found: thread stream owner became unavailable",
+        "client-disconnected",
+      ]
+      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+        h.peer.record_start(request)
+        h.peer.no_owner = true
+        h.peer.disconnect(connection)
+        nil
+      end
+      h.peer.on_load_history = ->(connection : Connection, request : JSON::Any) do
+        if rejection = history_rejections.shift?
+          h.peer.reply(connection, request, error: rejection)
+        else
+          h.peer.stream(connection)
+          h.peer.reply(connection, request, {revision: h.peer.revision})
+        end
+        nil
+      end
+
+      process = h.start(extra: [
+        "--notify-command", FIXTURE, "--radio-room-name", ROOM,
+      ])
+      eventually { h.output.includes?(%("reason":"no_compatible_task_owner")) }
+      process.running?.should be_true
+      eventually { h.notifier_calls.size == 1 }
+      h.peer.no_owner = false
+      h.release_notifier
+      eventually(14.seconds) { h.output.includes?(%("reason":"accepted_after_reconnect")) }
+      h.output.should contain(
+        %("reason":"ipc_retryable_rejection:thread-follower-load-complete-history:) +
+        %(conversation_not_resumed")
+      )
+      h.output.should contain(
+        %("reason":"ipc_retryable_rejection:thread-follower-load-complete-history:) +
+        %(owner_unavailable")
+      )
+      h.output.should contain(
+        %("reason":"ipc_retryable_rejection:thread-follower-load-complete-history:) +
+        %(owner_window_unavailable")
+      )
+      h.notifier_calls.size.should eq(1)
+      h.calls.any? do |call|
+        call["args"].as_a.first?.try(&.as_s?) == "--fault"
+      end.should be_false
+      h.peer.starts.size.should eq(1)
+      h.peer.finish("turn-1")
+      eventually { h.calls("wait").size == 2 }
+      h.peer.starts.size.should eq(1)
+    end
+  end
+
   it "waits for a provisional history match to resolve before following its turn" do
     with_bridge_harness do |h|
       h.config["events"] = JSON.parse([TinrelayCodexBridgeProcessSpec.event].to_json)
@@ -1400,6 +1512,46 @@ describe "tinrelay-codex-bridge process contract" do
       end
       process = h.start
       h.assert_blocked(process, "ipc_response_method_mismatch")
+    end
+  end
+
+  it "notifies once with safe evidence when a run stops on an IPC rejection" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+        h.peer.reply(connection, request, error: "foreign private rejection text")
+        nil
+      end
+
+      process = h.start(extra: [
+        "--notify-command", FIXTURE, "--radio-room-name", ROOM,
+      ])
+      reason = "ipc_request_rejected:thread-follower-start-turn:unclassified"
+      h.assert_blocked(process, reason)
+      terminal_calls = h.calls.select do |call|
+        call["args"].as_a.first?.try(&.as_s?) == "--fault"
+      end
+      terminal_calls.size.should eq(1)
+      terminal_calls[0]["args"].as_a.map(&.as_s).should eq(["--fault", reason])
+      h.notifier_calls.should be_empty
+      h.output.should_not contain("foreign private rejection text")
+      File.exists?(File.join(h.root, "#{event[:local_id]}.routed")).should be_false
+      h.peer.starts.size.should eq(1)
+    end
+  end
+
+  it "keeps interactive check failures non-dialog" do
+    with_bridge_harness do |h|
+      h.peer.no_owner = true
+      process = h.start("check", extra: [
+        "--notify-command", FIXTURE, "--radio-room-name", ROOM,
+      ])
+      h.assert_blocked(process, "no_compatible_task_owner", 2)
+      h.calls.any? do |call|
+        call["args"].as_a.first?.try(&.as_s?) == "--fault"
+      end.should be_false
     end
   end
 

@@ -43,6 +43,9 @@ module TinrelayCodexBridge
           deliver(@child.wait_event)
         end
       end
+    rescue ex : Blocked
+      @notifier.fault(ex.message || "bridge_blocked") if @notifier.configured?
+      raise ex
     ensure
       @ipc.try(&.close)
     end
