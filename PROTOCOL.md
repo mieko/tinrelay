@@ -6,7 +6,7 @@ so JSON whitespace and key order do not affect signatures.
 
 ## Persistent nouns and copies
 
-The repeater has eight relational nouns:
+The repeater has nine relational nouns:
 
 1. `ships`: first-claim-unique names within this relay, state, and monotonic admin generation;
 2. `ship_owner_keys`: public namespace-administration key history;
@@ -17,7 +17,9 @@ The repeater has eight relational nouns:
 6. `hails`: at most one unallowed short-lived, signed, content-free request per directed sender/recipient pair;
 7. `transmissions`: durable-fallback routing metadata and one pending ciphertext, then a
    content-free cleanup tombstone;
-8. `schema_migrations`: applied forward schema versions.
+8. `registration_events`: successful-claim acceptance time and canonical source bucket retained
+   for the registration windows;
+9. `schema_migrations`: applied forward schema versions.
 
 There are no endpoint, local-label, crew, nonce-ledger, directory, profile,
 presence, availability, content-index, workflow, or per-ship broadcast tables.
@@ -56,6 +58,23 @@ and owner-signed initial radio certificate; the first valid insert wins. Claimin
 ship creates no contact or relationship. The repeater has no operator approval or
 name-preauthorization role. Open claims therefore accept that a public name may be
 claimed by someone other than the person who hoped to use it.
+
+Registration admission is one serialized transaction. It checks the permanent-metadata
+ceiling and four successful-claim windows, creates the ship and keys, and records one
+`registration_events` row or commits none of them. The row contains only the server
+acceptance time and source bucket. Events at or before the 24-hour cutoff are removed
+during a later successful claim or the next periodic cleanup, normally within one
+cleanup interval; future-dated events are retained conservatively after a backward
+clock adjustment.
+
+In direct mode, the source is the socket peer and forwarded-address headers are ignored.
+Trusted-proxy mode accepts exactly one `X-Tinrelay-Client-IP` value only from a configured
+trusted ingress. IPv4 sources use canonical `/32` buckets and IPv6 sources use canonical
+`/64` buckets. Configured CIDR denial rejects registration before reading its body and
+reveals no matching range. A zero allowance administratively closes registration. The
+operator may separately exclude named, authenticated ships from transmission, hail,
+owner-rotation, and radio-retune windows; exclusion does not bypass authentication,
+registration policy, request or pending bounds, or permanent-metadata capacity.
 
 Registry inspection is signed and limited to the requesting ship itself or a locally
 pinned peer with a positive relationship. Unrelated and nonexistent targets have
@@ -254,8 +273,10 @@ Enforced defaults:
 
 - 16 KiB plaintext; 17 KiB ciphertext; 64 KiB HTTP request;
 - 72 KiB ordinary JSON response; 64 MiB identity/history response;
-- 300 structurally and cryptographically valid ship-claim attempts per rolling
-  hour across the repeater;
+- 300 successful ship claims per rolling hour and 1,000 per rolling 24 hours across
+  the repeater;
+- four successful ship claims per canonical IPv4 `/32` or IPv6 `/64` source bucket
+  per rolling hour and per rolling 24 hours;
 - 25,000 permanent registry/history rows by default, configurable to a hard
   maximum of 100,000;
 - four owner rotations and sixteen radio retunes per ship per rolling 24 hours;

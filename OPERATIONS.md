@@ -41,8 +41,8 @@ It is passive debugging provenance, not a runtime setting or trust claim.
 
 `tinrelayd serve` reads an optional `tinrelayd.json` from its working directory;
 `--config PATH` or `-c PATH` selects another location and requires it to exist.
-Absence of the conventional file uses the public-site defaults. A present file
-must contain the complete site identity:
+Absence of the conventional file at startup uses the defaults. A present file contains
+one complete runtime policy:
 
 ```json
 {
@@ -51,6 +51,18 @@ must contain the complete site identity:
     "base_url": "https://tinrelay.space",
     "wordmark": "Tin Relay",
     "art_manifest_path": null
+  },
+  "registration": {
+    "global_hour": 300,
+    "global_day": 1000,
+    "per_source_hour": 4,
+    "per_source_day": 4,
+    "deny_cidrs": [],
+    "exclude": []
+  },
+  "client_address": {
+    "mode": "direct",
+    "trusted_ingress_cidrs": []
   }
 }
 ```
@@ -59,11 +71,28 @@ must contain the complete site identity:
 cannot contain credentials, a path, query, or fragment. `site_name` owns public
 prose, titles, metadata, and accessible labels. `wordmark` owns only the visible
 header brand text. `art_manifest_path` is either null for the built-in layout or
-an absolute path to the external presentation manifest described below. Replace
-the whole file and send SIGHUP to adopt all four fields without restart. An
-invalid reload keeps the complete last-known-good identity; removing the
-conventional file before SIGHUP restores defaults. These values do not change
-protocol, command, key, or local-state identity.
+an absolute path to the external presentation manifest described below.
+
+The four registration allowances count successful claims in rolling one-hour and
+24-hour windows. Any zero allowance closes registration. `deny_cidrs` rejects new
+claims from matching source addresses before reading their bodies. After ordinary
+authentication, each canonical name in `exclude` bypasses the transmission, hail,
+owner-rotation, and radio-retune windows; it does not bypass registration policy,
+authentication, request or pending bounds, or permanent-metadata capacity. An
+unclaimed excluded name remains dormant until that exact ship is claimed.
+
+In `direct` client-address mode, registration uses the socket peer and ignores
+forwarded-address headers. In `trusted_proxy` mode, `trusted_ingress_cidrs` must name
+the final trusted proxy ingress. TinRelay accepts exactly one
+`X-Tinrelay-Client-IP` value only from such a peer. The final proxy must overwrite
+that header, and the origin firewall must exclude untrusted ingress. IPv4 addresses
+use `/32` source buckets; IPv6 addresses use `/64` buckets.
+
+Replace the whole file and send SIGHUP to atomically adopt the complete site,
+presentation, registration, and client-address policy without restart. An unreadable,
+missing, or invalid reload keeps the complete last-known-good policy. Removing the
+conventional file restores defaults only on a fresh startup, not during reload. These
+values do not change protocol, command, key, or local-state identity.
 
 ## Optional external presentation
 
@@ -120,6 +149,11 @@ limits are the service's abuse boundary.
 - Cleanup runs every 60 seconds; `tinrelayd cleanup --database "$DATABASE_PATH"` is the
   idempotent manual equivalent.
 
+Successful registration source buckets and server acceptance times survive process
+restart in `registration_events`. Rows at or before the 24-hour cutoff are removed by
+the next successful claim or periodic cleanup. Cleanup is periodic, so removal normally
+occurs on the first sweep after 24 hours rather than at the exact anniversary.
+
 `/metrics` must not be exposed by the public HTTPS listener. Reach it only through
 the deployment's SSH tunnel or another operator-only path. It reports registered
 ships and relationships by state, active parked radio waits, queued transmission and hail depth and
@@ -136,10 +170,10 @@ SQLite store's files, including free pages and transient WAL/shared-memory
 occupancy; it is distinct from retained ciphertext payload bytes and does not
 claim filesystem block allocation.
 
-The fixed registration outcomes include `cidr_denied` and `closed` so the
-operator dashboard can reserve their final bounded slots. Those two series are
-currently placeholders: the registration-policy implementation must wire real
-events before either zero can be interpreted as observed production truth.
+The fixed registration outcomes are `accepted`, `rate_limited`, `cidr_denied`,
+`closed`, `policy_changed`, `capacity`, `invalid`, and `conflict`. Each modeled
+terminal registration-admission outcome increments exactly one of these process
+counters.
 
 Logs are newline JSON containing request ID, method, normalized public path, HTTP
 status, duration, cleanup counts, and exception class. They omit bodies,
