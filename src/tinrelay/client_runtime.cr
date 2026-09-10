@@ -2,6 +2,7 @@ require "http/client"
 
 require "./protocol"
 require "./local_paths"
+require "./atomic_private_file"
 require "./keyring"
 require "./outgoing_observer"
 require "./spool"

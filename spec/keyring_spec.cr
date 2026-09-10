@@ -3,7 +3,9 @@ require "./spec_helper"
 describe Tinrelay::Keyring do
   it "writes only encrypted private material with restrictive permissions" do
     root = TinrelaySpec.temporary_root
-    path = File.join(root, "keys", "keyring")
+    directory = File.join(root, "keys")
+    Dir.mkdir(directory, 0o755)
+    path = File.join(directory, "keyring")
     passphrase = "test passphrase is long"
     keyring = Tinrelay::Keyring.create(path, "http://localhost:8787", "alpha", passphrase)
     contents = File.read(path)
@@ -11,6 +13,7 @@ describe Tinrelay::Keyring do
     owner = keyring.owner(passphrase)
     contents.should_not contain(owner.key.secret_key)
     File.read(keyring.owner_path).should_not contain(owner.key.secret_key)
+    (File.info(directory).permissions.value & 0o777).should eq(0o700)
     (File.info(path).permissions.value & 0o777).should eq(0o600)
     (File.info(keyring.owner_path).permissions.value & 0o777).should eq(0o600)
     loaded = Tinrelay::Keyring.load(path, passphrase)

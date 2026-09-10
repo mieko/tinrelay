@@ -11,19 +11,7 @@ module Tinrelay
     def store(envelope : SignedRelayEnvelope) : String
       encoded = envelope.to_json
       target = path(envelope.transmission_id)
-      temporary = "#{target}.tmp.#{Process.pid}"
-      begin
-        File.open(temporary, "w", perm: 0o600) do |file|
-          file << encoded << '\n'
-          file.flush
-          file.fsync
-        end
-        File.chmod(temporary, 0o600)
-        File.rename(temporary, target)
-        File.open(directory, "r", &.fsync)
-      ensure
-        File.delete(temporary) if File.exists?(temporary)
-      end
+      AtomicPrivateFile.write(target, encoded + '\n')
       encoded
     end
 

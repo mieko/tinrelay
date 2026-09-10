@@ -320,7 +320,7 @@ module Tinrelay
       encoded = EncryptedKeyring.new(
         Crypto.b64(salt), Crypto.b64(nonce), Crypto.b64(ciphertext)
       ).to_pretty_json
-      write_private(owner_path, encoded)
+      AtomicPrivateFile.write(owner_path, encoded + '\n')
     end
 
     def save(passphrase : String) : Nil
@@ -342,7 +342,7 @@ module Tinrelay
       encoded = EncryptedKeyring.new(
         Crypto.b64(salt), Crypto.b64(nonce), Crypto.b64(ciphertext)
       ).to_pretty_json
-      write_private(path, encoded)
+      AtomicPrivateFile.write(path, encoded + '\n')
       @encrypted_digest = Digest::SHA256.hexdigest(encoded + '\n')
     end
 
@@ -363,27 +363,6 @@ module Tinrelay
       self.class.load_encoded(path, passphrase, owner_path, encoded)
     rescue ex : File::NotFoundError
       raise NotFound.new("keyring not found: #{path}")
-    end
-
-    private def write_private(target : String, encoded : String) : Nil
-      directory = File.dirname(target)
-      unless Dir.exists?(directory)
-        Dir.mkdir_p(directory, mode: 0o700)
-        File.chmod(directory, 0o700)
-      end
-      temporary = "#{target}.tmp.#{Process.pid}.#{Ids.uuid}"
-      begin
-        File.open(temporary, "w", perm: 0o600) do |file|
-          file << encoded << '\n'
-          file.flush
-          file.fsync
-        end
-        File.chmod(temporary, 0o600)
-        File.rename(temporary, target)
-        File.open(directory, "r", &.fsync)
-      ensure
-        File.delete(temporary) if File.exists?(temporary)
-      end
     end
 
     protected def self.synchronize_path(path : String, &)

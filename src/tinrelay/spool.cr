@@ -1,27 +1,4 @@
 module Tinrelay
-  module AtomicPrivateFile
-    def self.write(path : String, contents : String) : Nil
-      directory = File.dirname(path)
-      unless Dir.exists?(directory)
-        Dir.mkdir_p(directory, mode: 0o700)
-      end
-      File.chmod(directory, 0o700)
-      temporary = "#{path}.tmp.#{Process.pid}.#{Crypto.random(6).hexstring}"
-      begin
-        File.open(temporary, "w", perm: 0o600) do |file|
-          file << contents
-          file.flush
-          file.fsync
-        end
-        File.chmod(temporary, 0o600)
-        File.rename(temporary, path)
-        File.open(directory, "r", &.fsync)
-      ensure
-        File.delete(temporary) if File.exists?(temporary)
-      end
-    end
-  end
-
   class Spool
     LOCAL_ID = /\Atr_[0-9a-f]{32}\z/
 
