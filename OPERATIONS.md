@@ -175,11 +175,13 @@ The fixed registration outcomes are `accepted`, `rate_limited`, `cidr_denied`,
 terminal registration-admission outcome increments exactly one of these process
 counters.
 
-Logs are newline JSON containing request ID, method, normalized public path, HTTP
-status, duration, cleanup counts, and exception class. They omit bodies,
-ciphertexts, signatures, and key material. Monitor readiness,
-restart loops, `cleanup_failed`, repeated non-2xx results, disk space, pending
-expiry, and verified-backup age.
+Logs are newline JSON. Request records contain request ID, method, normalized
+public path, HTTP status, and duration when `logging.requests` is true in the
+runtime configuration. Set it to false when edge metrics provide the production
+request view; faults, lifecycle events, configuration reloads, and cleanup
+remain logged. Records omit bodies, ciphertexts, signatures, and key material.
+Monitor readiness, restart loops, `cleanup_failed`, disk space, pending expiry,
+and verified-backup age.
 
 Pending fallback ciphertext expires after 96 hours. Successful local spool
 acknowledgement erases relay payload immediately; direct acknowledged handoff never

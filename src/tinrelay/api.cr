@@ -26,13 +26,15 @@ module Tinrelay
     getter page : BootstrapPage
     getter registration_allowances : RegistrationAllowances
     getter client_address_policy : ClientAddressPolicy
+    getter? request_logging : Bool
     @registration_deny_cidrs : Array(IPNetwork)
     @rate_limit_exclusions : Set(String)
 
     def initialize(@page, @registration_allowances,
                    registration_deny_cidrs : Array(IPNetwork),
                    @client_address_policy,
-                   rate_limit_exclusions : Array(String))
+                   rate_limit_exclusions : Array(String),
+                   @request_logging)
       @registration_deny_cidrs = registration_deny_cidrs.dup
       @rate_limit_exclusions = Set.new(rate_limit_exclusions)
     end
@@ -139,11 +141,13 @@ module Tinrelay
           }.to_json)
           status = error(context, 500, "internal", "internal server error")
         ensure
-          STDERR.puts({
-            event: "request", request_id: request_id(context), method: context.request.method,
-            path: safe_log_path(context.request.path), status: status,
-            duration_ms: (Time.instant - started).total_milliseconds.round.to_i,
-          }.to_json)
+          if runtime_snapshot.request_logging?
+            STDERR.puts({
+              event: "request", request_id: request_id(context), method: context.request.method,
+              path: safe_log_path(context.request.path), status: status,
+              duration_ms: (Time.instant - started).total_milliseconds.round.to_i,
+            }.to_json)
+          end
         end
       end
     end
@@ -712,7 +716,8 @@ module Tinrelay
         candidate.try(&.registration_deny_cidrs) || [] of IPNetwork,
         candidate.try(&.client_address_policy) ||
         ClientAddressPolicy.new("direct", [] of String),
-        candidate.try(&.rate_limit_exclusions) || [] of String
+        candidate.try(&.rate_limit_exclusions) || [] of String,
+        candidate.try(&.logging.requests) != false
       )
     end
 

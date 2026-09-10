@@ -51,6 +51,7 @@ module TinrelaydReloadProcessSpec
               (trusted_ingress.empty? ? "direct" : "trusted_proxy"),
         trusted_ingress_cidrs: trusted_ingress,
       },
+      logging: {requests: false},
     }.to_json)
     File.rename(temporary, path)
   end
@@ -147,6 +148,9 @@ describe "tinrelayd runtime configuration process" do
       response.body.should contain("http://localhost:#{port}/")
       response.body.should contain("<span>Second  Mark</span>")
       HTTP::Client.get("#{origin}/readyz").status_code.should eq(200)
+      log = File.read(errors_path)
+      log.should contain(%("event":"configuration_reload_failed"))
+      log.should_not contain(%("event":"request"))
     ensure
       process.signal(Signal::TERM)
       process.wait

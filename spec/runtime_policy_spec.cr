@@ -58,6 +58,7 @@ module TinrelayRuntimePolicySpec
         mode:                  "trusted_proxy",
         trusted_ingress_cidrs: ["198.51.100.0/24"],
       },
+      logging: {requests: false},
     }.to_json)
   end
 
@@ -140,6 +141,7 @@ describe "tinrelayd runtime policy" do
       snapshot.registration_deny_cidrs.should be_empty
       snapshot.client_address_policy.mode.should eq(Tinrelay::ClientAddressMode::Direct)
       snapshot.client_address_policy.trusted_ingress_cidrs.should be_empty
+      snapshot.request_logging?.should be_true
     ensure
       api.close
       FileUtils.rm_r(root)
@@ -185,6 +187,7 @@ describe "tinrelayd runtime policy" do
       policy = current.client_address_policy
       policy.mode.should eq(Tinrelay::ClientAddressMode::TrustedProxy)
       policy.trusted_ingress_cidrs.size.should eq(1)
+      current.request_logging?.should be_false
 
       File.write(path, {
         site: {

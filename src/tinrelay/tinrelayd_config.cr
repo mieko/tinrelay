@@ -192,15 +192,27 @@ module Tinrelay
       end
     end
 
+    class Logging
+      include JSON::Serializable
+      include JSON::Serializable::Strict
+
+      getter requests : Bool = true
+
+      def initialize(@requests = true)
+      end
+    end
+
     include JSON::Serializable
     include JSON::Serializable::Strict
 
     getter site : Site
     getter registration : Registration = Registration.new
     getter client_address : ClientAddress = ClientAddress.new
+    getter logging : Logging = Logging.new
 
     def initialize(@site, @registration = Registration.new,
-                   @client_address = ClientAddress.new)
+                   @client_address = ClientAddress.new,
+                   @logging = Logging.new)
     end
 
     def registration_allowances : RegistrationAllowances
