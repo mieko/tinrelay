@@ -1,4 +1,7 @@
 module Tinrelay
+  private class IdentityDocumentRequired < Exception
+  end
+
   class Remote
     # Ordinary responses fit the largest transmission plus its JSON wrapper.
     # Identity responses are separately bounded from protocol 1's maximum accepted
@@ -180,57 +183,53 @@ module Tinrelay
 
     def initialize(@keyring, @passphrase, remote : Remote? = nil)
       @remote = remote || Remote.new(keyring.data.server)
-      changed = keyring.prune_retired_radios!
-      keyring.save(passphrase) if changed
+      mutate_keyring { keyring.prune_retired_radios! }
     end
 
     def self.join(keyring_path : String, server : String, ship : String,
                   passphrase : String, owner_path : String? = nil) : Client
       owner_file = owner_path || "#{keyring_path}.owner"
-      existing = File.exists?(keyring_path) || File.exists?(owner_file)
-      created = false
+      prepared = nil.as(JoinKeyring?)
       begin
-        keyring = if existing
-                    loaded = Keyring.load(keyring_path, passphrase, owner_file)
-                    unless loaded.data.server == server && loaded.data.ship == ship
-                      raise Unauthorized.new(
-                        "existing provisional keyring does not match this claim"
-                      )
-                    end
-                    loaded.owner(passphrase)
-                    loaded
-                  else
-                    fresh = Keyring.create(
-                      keyring_path, server, ship, passphrase, owner_file
-                    )
-                    created = true
-                    fresh
-                  end
+        prepared = Keyring.prepare_join(
+          keyring_path, server, ship, passphrase, owner_file
+        )
+        keyring = prepared.keyring
+        existing = prepared.cleanup_token.nil?
         client = new(keyring, passphrase)
-        return client if existing && claim_committed?(client, keyring)
+        if existing && claim_committed?(client, keyring)
+          keyring.finish_join(passphrase)
+          return client
+        end
         claim = ShipClaim.new(
           ship, keyring.data.owner_public_key, keyring.data.radio!.certificate
         )
         begin
           client.remote.post("/v1/join", claim.to_json)
         rescue ex : Conflict
-          return client if existing && claim_committed?(client, keyring)
+          if existing && claim_committed?(client, keyring)
+            keyring.finish_join(passphrase)
+            return client
+          end
           raise ex
         end
+        keyring.finish_join(passphrase)
         client
       rescue ex : Invalid | NotFound | Conflict | Expired
-        remove_provisional_claim(keyring_path, owner_file) if created
+        if candidate = prepared
+          candidate.cleanup_token.try do |token|
+            candidate.keyring.abandon_join(token, passphrase)
+          end
+        end
         raise ex
       rescue ex : ProtocolMismatch | RegistrationLimited | RegistrationUnavailable
-        remove_provisional_claim(keyring_path, owner_file) if created
+        if candidate = prepared
+          candidate.cleanup_token.try do |token|
+            candidate.keyring.abandon_join(token, passphrase)
+          end
+        end
         raise ex
       end
-    end
-
-    private def self.remove_provisional_claim(keyring_path : String,
-                                              owner_path : String) : Nil
-      File.delete(keyring_path) if File.exists?(keyring_path)
-      File.delete(owner_path) if File.exists?(owner_path)
     end
 
     private def self.claim_committed?(client : Client, keyring : Keyring) : Bool
@@ -399,6 +398,7 @@ module Tinrelay
 
     private def radio_attempt(spool : Spool,
                               hold_seconds : Int32) : RadioEvent?
+      refresh_keyring!
       known = keyring.data.contacts.to_h do |contact|
         {contact.ship, contact.radio_certificate.generation}
       end
@@ -413,24 +413,26 @@ module Tinrelay
         remote.post("/v1/radio/wait", request.to_json)
       )
       unless response.contact_updates.empty?
-        changed = false
+        mutate_keyring do
+          response.contact_updates.each do |update|
+            contact = keyring.data.contact!(update.ship)
+            apply_contact_update!(contact, update)
+          end
+        end
         response.contact_updates.each do |update|
-          contact = keyring.data.contact!(update.ship)
-          changed = apply_contact_update!(contact, update) || changed
           acknowledge_retune(update.ship, update.to_generation)
         end
-        keyring.save(passphrase) if changed
         return
       end
       if hail = response.hail
-        record = receive_hail(hail, spool)
+        record = mutate_keyring { receive_hail(hail, spool) }
         record ? acknowledge_local_record(record) : acknowledge_hail(hail.hail.hail_id)
         return unless record && !record.routed
         return LocalRadio.event(keyring.data.ship, record)
       end
       if envelope = response.envelope
         record = begin
-          receive(envelope, spool)
+          receive_with_latest_keyring(envelope, spool)
         rescue Conflict
           spool.store_rejection(envelope, "transmission_id_conflict")
         rescue Invalid | Unauthorized | NotFound
@@ -487,8 +489,10 @@ module Tinrelay
                Names.ship!(ship_or_coordinate)
              end
       document = inspect_document(ship)
-      if contact = keyring.data.contacts.find { |item| item.ship == ship }
-        keyring.save(passphrase) if update_contact_from_document!(contact, document)
+      mutate_keyring do
+        if contact = keyring.data.contacts.find { |item| item.ship == ship }
+          update_contact_from_document!(contact, document)
+        end
       end
       document.to_json
     end
@@ -497,44 +501,55 @@ module Tinrelay
     # identity is saved before submission; registry state either promotes that
     # exact identity or leaves it pending for an exact retry after restart.
     def sync_radio! : Bool
+      refresh_keyring!
       document = inspect_document(keyring.data.ship, all_local_radios: true)
       active = document["radio_keys"].as_a.find { |item| item["state"].as_s == "active" } ||
                raise Unavailable.new("ship has no active radio")
       generation = active["generation"].as_i.to_i
-      if pending = keyring.data.pending_radio
-        if radio_matches_document?(pending, active)
-          promote_pending_radio!(pending)
-          return true
+      mutate_keyring do
+        if pending = keyring.data.pending_radio
+          if radio_matches_document?(pending, active)
+            promote_pending_radio!(pending)
+            next true
+          end
         end
+        local = keyring.data.radios.find do |radio|
+          radio.generation == generation &&
+            radio_matches_document?(radio, active)
+        end || raise Unauthorized.new(
+          "active registry radio has no matching local private key"
+        )
+        next false if keyring.data.active_radio_generation == local.generation
+        keyring.data.active_radio_generation = local.generation
+        false
       end
-      local = keyring.data.radios.find do |radio|
-        radio.generation == generation &&
-          radio_matches_document?(radio, active)
-      end || raise Unauthorized.new("active registry radio has no matching local private key")
-      return false if keyring.data.active_radio_generation == local.generation
-      keyring.data.active_radio_generation = local.generation
-      keyring.save(passphrase)
-      false
     end
 
     def close_contact(peer_ship : String) : Int32
       peer = Names.ship!(peer_ship)
-      contact = keyring.block!(peer)
-      keyring.save(passphrase)
+      mutate_keyring { keyring.block!(peer) }
       if reconcile_radio_if_pending!
         return keyring.data.active_radio_generation
       end
       sync_owner!
-      prior = keyring.data.radio!
-      fresh_identity = keyring.data.pending_radio.nil?
-      identity = keyring.data.pending_radio || build_pending_radio!(prior)
+      fresh_identity = false
+      identity, prior_signature, retained = mutate_keyring_with_owner do |owner|
+        contact = keyring.block!(peer)
+        prior = keyring.data.radio!
+        fresh_identity = keyring.data.pending_radio.nil?
+        pending = keyring.data.pending_radio || build_pending_radio!(prior, owner)
+        signature = Crypto.b64(
+          Crypto.sign(
+            pending.certificate.unsigned_bytes,
+            Crypto.unb64(prior.signing.secret_key)
+          )
+        )
+        peers = keyring.data.contacts.reject do |item|
+          item.ship == contact.ship || item.blocked?
+        end.map(&.ship).sort
+        {pending, signature, peers}
+      end
       certificate = identity.certificate
-      prior_signature = Crypto.b64(
-        Crypto.sign(certificate.unsigned_bytes, Crypto.unb64(prior.signing.secret_key))
-      )
-      retained = keyring.data.contacts.reject do |item|
-        item.ship == contact.ship || item.blocked?
-      end.map(&.ship).sort
       provisional = RelationshipClose.new(
         peer, retained, certificate, prior_signature,
         owner_auth("relationship.close", Bytes.empty)
@@ -543,10 +558,10 @@ module Tinrelay
       begin
         remote.post("/v1/relationships/close", provisional.to_json)
       rescue ex : RotationLimited
-        clear_pending_radio! if fresh_identity
+        clear_pending_radio!(identity) if fresh_identity
         raise ex
       rescue ex : Invalid | Unauthorized | NotFound | Conflict | Expired | ProtocolMismatch
-        clear_pending_radio! if fresh_identity
+        clear_pending_radio!(identity) if fresh_identity
         raise ex
       rescue ex : Unavailable | Error | IO::Error
         begin
@@ -556,34 +571,37 @@ module Tinrelay
         end
         raise ex
       end
-      promote_pending_radio!(identity)
+      mutate_keyring { promote_pending_radio!(identity) }
       identity.generation
     end
 
     def allow_contact(local_hail_id : String, spool : Spool) : ShipContact
       record = spool.get(local_hail_id).as?(HailSpoolRecord) ||
                raise Invalid.new("local inbox item is not a hail")
-      unless record.recipient_ship == keyring.data.ship
-        raise Invalid.new("hail belongs to another recipient")
-      end
       peer = Names.ship!(record.sender_ship)
-      prior = keyring.data.contacts.find { |contact| contact.ship == peer }
-      raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
-      verify_hail_record!(record, prior)
+      mutate_keyring do
+        unless record.recipient_ship == keyring.data.ship
+          raise Invalid.new("hail belongs to another recipient")
+        end
+        prior = keyring.data.contacts.find { |contact| contact.ship == peer }
+        raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
+        verify_hail_record!(record, prior)
+      end
       payload = Canonical.fields(peer, record.hail_id)
       request = RelationshipAllow.new(
         peer, record.hail_id, radio_auth("relationship.allow", payload)
       )
       remote.post("/v1/relationships/allow", request.to_json)
-      contact = keyring.pin_hail(record)
-      keyring.save(passphrase)
-      contact
+      mutate_keyring do
+        prior = keyring.data.contacts.find { |contact| contact.ship == peer }
+        raise Unauthorized.new("contact is locally blocked") if prior.try(&.blocked?)
+        verify_hail_record!(record, prior)
+        keyring.pin_hail(record)
+      end
     end
 
     def unblock_contact(peer_ship : String) : ShipContact
-      contact = keyring.unblock!(peer_ship)
-      keyring.save(passphrase)
-      contact
+      mutate_keyring { keyring.unblock!(peer_ship) }
     end
 
     def rotate_owner : Int32
@@ -594,35 +612,41 @@ module Tinrelay
         )
       end
       return keyring.data.owner_generation if sync_owner!
-      old_generation = keyring.data.owner_generation
-      new_generation = old_generation + 1
-      owner = keyring.owner(passphrase)
-      pending_generation = owner.pending_generation
-      pending_key = owner.pending_key
-      if pending_generation.nil? != pending_key.nil?
-        raise Error.new("pending owner identity is incomplete")
-      end
-      if pending_generation && pending_generation != new_generation
-        raise Error.new("pending owner identity has an unexpected generation")
-      end
-      fresh_identity = pending_key.nil?
-      unless pending_key
-        keys = Crypto.signing_keypair
-        pending_key = StoredKeyPair.new(
-          Crypto.b64(keys.public_key), Crypto.b64(keys.secret_key)
+      fresh_identity = false
+      new_generation, pending_key, prior_signature = mutate_keyring_with_owner do |owner|
+        if keyring.data.pending_radio
+          raise Conflict.new(
+            "finish the pending contact close radio retune before rotating the owner key"
+          )
+        end
+        generation = keyring.data.owner_generation + 1
+        pending_generation = owner.pending_generation
+        pending = owner.pending_key
+        if pending_generation.nil? != pending.nil?
+          raise Error.new("pending owner identity is incomplete")
+        end
+        if pending_generation && pending_generation != generation
+          raise Error.new("pending owner identity has an unexpected generation")
+        end
+        fresh_identity = pending.nil?
+        unless pending
+          keys = Crypto.signing_keypair
+          pending = StoredKeyPair.new(
+            Crypto.b64(keys.public_key), Crypto.b64(keys.secret_key)
+          )
+          owner.pending_generation = generation
+          owner.pending_key = pending
+        end
+        bytes = Canonical.fields(
+          "tinrelay-owner-rotation-v1", keyring.data.ship,
+          generation.to_s, pending.public_key
         )
-        owner.pending_generation = new_generation
-        owner.pending_key = pending_key
-        keyring.save_owner(owner, passphrase)
+        signature = Crypto.b64(
+          Crypto.sign(bytes, Crypto.unb64(owner.key.secret_key))
+        )
+        {generation, pending, signature}
       end
       new_public = pending_key.public_key
-      rotation_bytes = Canonical.fields(
-        "tinrelay-owner-rotation-v1", keyring.data.ship,
-        new_generation.to_s, new_public
-      )
-      prior_signature = Crypto.b64(
-        Crypto.sign(rotation_bytes, Crypto.unb64(owner.key.secret_key))
-      )
       provisional = OwnerRotation.new(
         new_generation, new_public, prior_signature,
         owner_auth("owner.rotate", Bytes.empty)
@@ -644,8 +668,9 @@ module Tinrelay
         # next exact retry; never create a sibling key at this generation.
         raise ex
       end
-      promote_owner!(owner, new_generation, pending_key)
-      keyring.save(passphrase)
+      mutate_keyring_with_owner do |owner|
+        promote_owner!(owner, new_generation, pending_key)
+      end
       new_generation
     end
 
@@ -656,7 +681,31 @@ module Tinrelay
       remote.post("/v1/ships/change", provisional.to_json)
     end
 
-    private def receive(envelope : SignedRelayEnvelope, spool : Spool) : SpoolRecord?
+    private def receive_with_latest_keyring(envelope : SignedRelayEnvelope,
+                                            spool : Spool) : SpoolRecord?
+      document = if envelope.sender_ship == keyring.data.ship
+                   inspect_receive_identity(envelope.sender_ship)
+                 end
+      loop do
+        begin
+          return mutate_keyring { receive(envelope, spool, document) }
+        rescue IdentityDocumentRequired
+          document = inspect_receive_identity(envelope.sender_ship)
+        end
+      end
+    end
+
+    private def inspect_receive_identity(ship : String) : JSON::Any
+      prior = keyring.data.to_json
+      inspect_document(ship)
+    rescue ex : Unauthorized | Unavailable
+      refresh_keyring!
+      raise ex if keyring.data.to_json == prior
+      inspect_document(ship)
+    end
+
+    private def receive(envelope : SignedRelayEnvelope, spool : Spool,
+                        document : JSON::Any?) : SpoolRecord?
       unless envelope.recipient_ship == keyring.data.ship
         raise Unauthorized.new("radio returned a transmission for another ship")
       end
@@ -666,7 +715,8 @@ module Tinrelay
       certificate, owner_generation, owner_public, owner_chain = receive_identity(
         envelope,
         contact,
-        self_transmission
+        self_transmission,
+        document
       )
       unless Crypto.verify(
                envelope.signing_bytes, Crypto.unb64(envelope.signature),
@@ -683,14 +733,15 @@ module Tinrelay
       transmission = SignedTransmission.from_json(String.new(plaintext))
       validate_signed_transmission!(transmission, envelope, certificate)
       raise Invalid.new("received plaintext exceeds limit") if plaintext.size > MAX_PLAINTEXT_BYTES
-      changed = self_transmission ? false : update_pinned_sender!(
-        envelope, certificate, owner_generation, owner_public, owner_chain
-      )
+      unless self_transmission
+        update_pinned_sender!(
+          envelope, certificate, owner_generation, owner_public, owner_chain
+        )
+      end
       record = spool.store_transmission(
         envelope, transmission, certificate, owner_public,
         owner_chain
       )
-      keyring.save(passphrase) if changed
       record
     rescue ex : JSON::ParseException
       raise Invalid.new("decrypted transmission is invalid")
@@ -700,9 +751,13 @@ module Tinrelay
       envelope : SignedRelayEnvelope,
       contact : ShipContact?,
       self_transmission : Bool,
+      document : JSON::Any?,
     )
       if self_transmission
-        receive_self_identity(envelope)
+        receive_self_identity(
+          envelope,
+          document || raise(IdentityDocumentRequired.new)
+        )
       elsif contact &&
             contact.radio_certificate.generation == envelope.sender_signing_generation
         {
@@ -712,7 +767,7 @@ module Tinrelay
           contact.owner_chain,
         }
       elsif contact
-        document = inspect_document(envelope.sender_ship)
+        document ||= raise IdentityDocumentRequired.new
         certificate, owner_generation, owner_public = trusted_radio(
           document,
           envelope.sender_signing_generation,
@@ -729,14 +784,14 @@ module Tinrelay
       end
     end
 
-    private def receive_self_identity(envelope : SignedRelayEnvelope)
+    private def receive_self_identity(envelope : SignedRelayEnvelope,
+                                      document : JSON::Any)
       # Same-ship receive uses the exact local certificate as its trust anchor.
       # Registry evidence supplies the public owner key for durable verification,
       # but cannot substitute a different radio or create a self-contact.
       local_certificate = keyring.data.radio!(
         envelope.sender_signing_generation
       ).certificate
-      document = inspect_document(keyring.data.ship)
       certificate, owner_generation, owner_public = trusted_radio(
         document,
         envelope.sender_signing_generation,
@@ -800,7 +855,6 @@ module Tinrelay
       end
       contact = keyring.data.contacts.find { |item| item.ship == hail.sender_ship }
       contact_state = "stranger"
-      changed = false
       owner_chain = [] of OwnerKeyLink
       if contact
         owner_chain = verify_owner_chain(contact, delivery.owner_chain)
@@ -830,7 +884,6 @@ module Tinrelay
           contact.owner_generation = current_owner.generation
           contact.owner_public_key = current_owner.public_key
           contact.radio_certificate = verified
-          changed = true
         end
       else
         unless delivery.owner_chain.empty?
@@ -855,7 +908,6 @@ module Tinrelay
              )
         raise Unauthorized.new("hail signature is invalid")
       end
-      keyring.save(passphrase) if changed
       spool.store_hail(hail, certificate, owner_chain, contact_state)
     end
 
@@ -929,9 +981,27 @@ module Tinrelay
 
     private def apply_contact_update!(contact : ShipContact,
                                       update : ContactUpdate) : Bool
-      owners = verify_owner_chain(contact, update.owner_chain)
+      unless update.ship == contact.ship
+        raise Unauthorized.new("contact update names another ship")
+      end
+      if contact.radio_certificate.generation >= update.to_generation
+        if contact.radio_certificate.generation == update.to_generation
+          delivered = update.chain.last?.try(&.certificate)
+          unless delivered && delivered.to_json == contact.radio_certificate.to_json
+            raise Unauthorized.new("contact update conflicts with the current radio identity")
+          end
+        end
+        return false
+      end
+      owner_links = update.owner_chain.select do |link|
+        link.generation > contact.owner_generation
+      end
+      radio_links = update.chain.select do |link|
+        link.certificate.generation > contact.radio_certificate.generation
+      end
+      owners = verify_owner_chain(contact, owner_links)
       certificate = verify_radio_chain(
-        contact, update.chain, update.chain.last.certificate, owners
+        contact, radio_links, update.chain.last.certificate, owners
       )
       changed = owners != contact.owner_chain ||
                 certificate.to_json != contact.radio_certificate.to_json
@@ -1225,19 +1295,21 @@ module Tinrelay
     end
 
     private def sync_owner! : Bool
+      refresh_keyring!
       document = inspect_document(keyring.data.ship, all_local_radios: true)
       active = document["owner_keys"].as_a.find { |item| item["state"].as_s == "active" } ||
                raise Unavailable.new("ship has no active owner key")
       generation = active["generation"].as_i.to_i
       public_key = active["public_key"].as_s
-      owner = keyring.owner(passphrase)
-      return false if generation == owner.generation && public_key == owner.key.public_key
-      if owner.pending_generation == generation && owner.pending_key.try(&.public_key) == public_key
-        promote_owner!(owner, generation, owner.pending_key.not_nil!)
-        keyring.save(passphrase)
-        return true
+      mutate_keyring_with_owner do |owner|
+        next false if generation == owner.generation && public_key == owner.key.public_key
+        if owner.pending_generation == generation &&
+           owner.pending_key.try(&.public_key) == public_key
+          promote_owner!(owner, generation, owner.pending_key.not_nil!)
+          next true
+        end
+        raise Unauthorized.new("active registry owner has no matching local private key")
       end
-      raise Unauthorized.new("active registry owner has no matching local private key")
     end
 
     private def owner_rotation_committed?(generation : Int32) : Bool
@@ -1248,24 +1320,26 @@ module Tinrelay
     end
 
     private def clear_pending_owner!(generation : Int32, key : StoredKeyPair) : Nil
-      owner = keyring.owner(passphrase)
-      return unless owner.pending_generation == generation &&
-                    owner.pending_key.try(&.to_json) == key.to_json
-      owner.pending_generation = nil
-      owner.pending_key = nil
-      keyring.save_owner(owner, passphrase)
+      mutate_keyring_with_owner do |owner|
+        if owner.pending_generation == generation &&
+           owner.pending_key.try(&.to_json) == key.to_json
+          owner.pending_generation = nil
+          owner.pending_key = nil
+        end
+      end
     end
 
     private def reconcile_radio_if_pending! : Bool
+      refresh_keyring!
       return false unless keyring.data.pending_radio
       sync_radio!
     end
 
-    private def build_pending_radio!(prior : ShipRadioIdentity) : ShipRadioIdentity
+    private def build_pending_radio!(prior : ShipRadioIdentity,
+                                     owner : OwnerKeyData) : ShipRadioIdentity
       generation = prior.generation + 1
       signing = Crypto.signing_keypair
       encryption = Crypto.box_keypair
-      owner = keyring.owner(passphrase)
       certificate = ShipRadioCertificate.new(
         keyring.data.ship, generation, Crypto.b64(signing.public_key),
         Crypto.b64(encryption.public_key), Time.utc.to_unix,
@@ -1287,13 +1361,15 @@ module Tinrelay
         certificate
       )
       keyring.data.pending_radio = identity
-      keyring.save(passphrase)
       identity
     end
 
     private def promote_pending_radio!(identity : ShipRadioIdentity) : Nil
-      pending = keyring.data.pending_radio ||
-                raise Conflict.new("no pending contact close radio identity")
+      unless pending = keyring.data.pending_radio
+        active = keyring.data.radio!
+        return if active.to_json == identity.to_json
+        raise Conflict.new("no pending contact close radio identity")
+      end
       unless pending.to_json == identity.to_json
         raise Conflict.new("pending contact close radio identity changed")
       end
@@ -1304,13 +1380,13 @@ module Tinrelay
                                              end
       keyring.data.active_radio_generation = identity.generation
       keyring.data.pending_radio = nil
-      keyring.save(passphrase)
     end
 
-    private def clear_pending_radio! : Nil
-      return unless keyring.data.pending_radio
-      keyring.data.pending_radio = nil
-      keyring.save(passphrase)
+    private def clear_pending_radio!(identity : ShipRadioIdentity) : Nil
+      mutate_keyring do
+        pending = keyring.data.pending_radio
+        keyring.data.pending_radio = nil if pending.try(&.to_json) == identity.to_json
+      end
     end
 
     private def radio_matches_document?(radio : ShipRadioIdentity,
@@ -1322,13 +1398,54 @@ module Tinrelay
 
     private def promote_owner!(owner : OwnerKeyData, generation : Int32,
                                key : StoredKeyPair) : Nil
+      if owner.generation == generation && owner.key.to_json == key.to_json &&
+         keyring.data.owner_generation == generation &&
+         keyring.data.owner_public_key == key.public_key
+        return
+      end
+      unless owner.pending_generation == generation &&
+             owner.pending_key.try(&.to_json) == key.to_json &&
+             keyring.data.owner_generation == generation - 1
+        raise Conflict.new("pending owner identity changed")
+      end
       owner.generation = generation
       owner.key = key
       owner.pending_generation = nil
       owner.pending_key = nil
       keyring.data.owner_generation = generation
       keyring.data.owner_public_key = key.public_key
-      keyring.save_owner(owner, passphrase)
+    end
+
+    private def refresh_keyring! : Nil
+      keyring.refresh(passphrase)
+    end
+
+    private def mutate_keyring(&block : -> T) : T forall T
+      current = keyring
+      begin
+        current.mutate(passphrase) do |latest, _owner|
+          @keyring = latest
+          block.call
+        end
+      rescue ex
+        current.refresh(passphrase)
+        @keyring = current
+        raise ex
+      end
+    end
+
+    private def mutate_keyring_with_owner(&block : OwnerKeyData -> T) : T forall T
+      current = keyring
+      begin
+        current.mutate(passphrase, include_owner: true) do |latest, owner|
+          @keyring = latest
+          block.call(owner.not_nil!)
+        end
+      rescue ex
+        current.refresh(passphrase)
+        @keyring = current
+        raise ex
+      end
     end
   end
 end

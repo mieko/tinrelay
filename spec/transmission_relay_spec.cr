@@ -30,6 +30,7 @@ module TinrelayRelaySpec
       radio.certificate,
       label
     )
+    sender.keyring.save(sender.passphrase)
   end
 
   def self.capture(sender : Tinrelay::Client, origin : String,
