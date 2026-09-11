@@ -67,8 +67,9 @@ module Tinrelay
   end
 
   class API
-    MAX_REQUEST_BYTES = 64 * 1024
-    ACCEPTANCE_TARGET = 250.milliseconds
+    MAX_REQUEST_BYTES             = 64 * 1024
+    ACCEPTANCE_TARGET             = 250.milliseconds
+    RADIO_WAIT_HEARTBEAT_INTERVAL = 25.seconds
     getter config : ServerConfig
     getter database : Database
     getter store : Store
@@ -78,7 +79,8 @@ module Tinrelay
     getter hail_window : SubmissionWindow
     @runtime_snapshot : Atomic(RuntimeSnapshot)
 
-    def initialize(@config)
+    def initialize(@config,
+                   @radio_wait_heartbeat_interval = RADIO_WAIT_HEARTBEAT_INTERVAL)
       @database = Database.new(config.database_path, config.database_connections)
       @store = Store.new(database, config.permanent_metadata_limit)
       snapshot = begin
@@ -143,6 +145,9 @@ module Tinrelay
           )
         rescue ex : Unavailable
           status = error(context, 503, "unavailable", ex.message || "unavailable")
+        rescue ex : HTTP::Server::ClientError
+          status = 499
+          raise ex
         rescue ex
           STDERR.puts({
             event:      "request_failed",
@@ -387,7 +392,17 @@ module Tinrelay
 
     private def radio_wait(context : HTTP::Server::Context) : Int32
       request = parse_body(context, RadioWaitRequest)
-      response = wait(request)
+      streamed = false
+      response = wait(request) do
+        unless streamed
+          context.response.status_code = 200
+          context.response.content_type = "application/json; charset=utf-8"
+          context.response.headers["Cache-Control"] = "no-store"
+          streamed = true
+        end
+        context.response.print(' ')
+        context.response.flush
+      end
       outcome = if response.envelope
                   "transmission"
                 elsif response.hail
@@ -397,10 +412,15 @@ module Tinrelay
                 else
                   "timeout"
                 end
-      status = json(context, 200, response.to_json)
+      status = if streamed
+                 context.response.print(response.to_json)
+                 200
+               else
+                 json(context, 200, response.to_json)
+               end
       metrics.radio_wait(outcome)
       status
-    rescue ex : IO::Error
+    rescue ex : IO::Error | HTTP::Server::ClientError
       metrics.radio_wait("disconnect")
       raise ex
     rescue ex
@@ -421,7 +441,7 @@ module Tinrelay
       }.to_json)
     end
 
-    private def wait(request : RadioWaitRequest) : RadioWaitResponse
+    private def wait(request : RadioWaitRequest, &) : RadioWaitResponse
       deadline = Time.instant + request.hold_seconds.seconds
       response = store.wait_once(request)
       return response unless response.empty? && request.hold_seconds > 0
@@ -435,12 +455,14 @@ module Tinrelay
           return response unless response.empty?
           remaining = deadline - Time.instant
           return response if remaining <= Time::Span.zero
-          case event = handoffs.wait(waiter, remaining)
+          wait_for = Math.min(remaining, @radio_wait_heartbeat_interval)
+          case event = handoffs.wait(waiter, wait_for)
           when SignedRelayEnvelope
             envelope = event
             return RadioWaitResponse.new(envelope: envelope)
           when :timeout
-            return response
+            return response if Time.instant >= deadline
+            yield
           end
         end
       ensure

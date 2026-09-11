@@ -138,7 +138,9 @@ or bounded diagnostic; it cannot exceed the detected CPU count.
 An authenticated radio request may remain parked for 100 seconds. A reverse proxy
 must permit that complete hold; the official client allows 115 seconds for its
 HTTP response. Roll out repeater support before clients request a longer hold;
-the repeater rejects a request above its own supported maximum.
+the repeater rejects a request above its own supported maximum. While parked,
+the repeater writes JSON whitespace every 25 seconds so a closed client or proxy
+connection releases its in-memory waiter before the signed deadline.
 
 Do not start multiple service processes against one database. Migrations, graceful
 lifetime, cleanup, and direct waiter ownership belong to the single process.

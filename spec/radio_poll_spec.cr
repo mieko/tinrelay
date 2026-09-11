@@ -28,6 +28,55 @@ class RadioPollRemote < Tinrelay::Remote
 end
 
 describe "immediate radio polling" do
+  it "releases a parked wait when its client connection closes" do
+    TinrelaySpec.with_server(
+      radio_wait_heartbeat_interval: 50.milliseconds
+    ) do |root, origin, api|
+      passphrase = "radio disconnect passphrase"
+      ship = Tinrelay::Client.join(
+        File.join(root, "ship.keyring"), origin, "ship", passphrase
+      )
+      request = TinrelaySpec.radio_wait_request(ship, 100)
+      uri = URI.parse(origin)
+      socket = TCPSocket.new(uri.host.not_nil!, uri.port.not_nil!)
+      body = request.to_json
+      socket << "POST /v1/radio/wait HTTP/1.1\r\n"
+      socket << "Host: #{uri.host}:#{uri.port}\r\n"
+      socket << "X-Tinrelay-Protocol: #{Tinrelay::PROTOCOL}\r\n"
+      socket << "Content-Type: application/json\r\n"
+      socket << "Content-Length: #{body.bytesize}\r\n\r\n"
+      socket << body
+      socket.flush
+      TinrelaySpec.eventually { api.handoffs.waiting?("ship") }
+
+      socket.close
+
+      TinrelaySpec.eventually(500.milliseconds) do
+        !api.handoffs.waiting?("ship")
+      end
+      api.metrics.render(api.store, api.handoffs)
+        .should contain(%(tinrelay_radio_waits_total{outcome="disconnect"} 1))
+    end
+  end
+
+  it "keeps a heartbeat response valid for the ordinary client" do
+    TinrelaySpec.with_server(
+      radio_wait_heartbeat_interval: 50.milliseconds
+    ) do |root, origin, _api|
+      passphrase = "radio heartbeat response passphrase"
+      ship = Tinrelay::Client.join(
+        File.join(root, "ship.keyring"), origin, "ship", passphrase
+      )
+      request = TinrelaySpec.radio_wait_request(ship, 1)
+
+      response = Tinrelay::RadioWaitResponse.from_json(
+        ship.remote.post("/v1/radio/wait", request.to_json)
+      )
+
+      response.empty?.should be_true
+    end
+  end
+
   it "accepts the signed 100-second maximum and rejects a longer hold" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "radio hold boundary passphrase"

@@ -19,7 +19,8 @@ module TinrelaySpec
   def self.with_server(art_manifest_path : String? = nil,
                        permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT,
                        registration_allowances : Tinrelay::RegistrationAllowances? = nil,
-                       client_address : Tinrelay::TinrelaydConfig::ClientAddress? = nil, &)
+                       client_address : Tinrelay::TinrelaydConfig::ClientAddress? = nil,
+                       radio_wait_heartbeat_interval : Time::Span? = nil, &)
     root = temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     configuration_path = nil
@@ -48,7 +49,10 @@ module TinrelaySpec
       "https://example.test/tinrelay.git", System.cpu_count,
       permanent_metadata_limit, configuration_path
     )
-    api = Tinrelay::API.new(config)
+    api = Tinrelay::API.new(
+      config,
+      radio_wait_heartbeat_interval || Tinrelay::API::RADIO_WAIT_HEARTBEAT_INTERVAL
+    )
     server = HTTP::Server.new(api.handler)
     address = server.bind_tcp("127.0.0.1", 0)
     spawn { server.listen }
