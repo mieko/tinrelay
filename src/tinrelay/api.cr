@@ -328,16 +328,17 @@ module Tinrelay
       outcome = "rejected"
       counted = false
       envelope = parse_body(context, SignedRelayEnvelope)
-      if prepared = store.prepare(envelope)
-        snapshot = runtime_snapshot
-        unless snapshot.rate_limit_excluded?(envelope.sender_ship)
-          source = snapshot.source_bucket(
-            context.request.remote_address, context.request.headers
-          )
-          if retry_after = transmission_buckets.admit(source, prepared.ciphertext.size)
-            raise TransmissionLimited.new(retry_after.to_i64)
-          end
+      prepared = store.prepare(envelope)
+      snapshot = runtime_snapshot
+      unless snapshot.rate_limit_excluded?(envelope.sender_ship)
+        source = snapshot.source_bucket(
+          context.request.remote_address, context.request.headers
+        )
+        if retry_after = transmission_buckets.admit(source, prepared.ciphertext.size)
+          raise TransmissionLimited.new(retry_after.to_i64)
         end
+      end
+      unless prepared.stored?
         if store.deliverable?(prepared)
           remaining = acceptance_at - Time.instant
           if remaining > Time::Span.zero && handoffs.deliver(prepared, remaining)
@@ -352,7 +353,7 @@ module Tinrelay
       sleep remaining if remaining > Time::Span.zero
       metrics.transmission(outcome)
       if outcome != "rejected"
-        metrics.transmission_bytes(outcome, prepared.not_nil!.ciphertext.size.to_i64)
+        metrics.transmission_bytes(outcome, prepared.ciphertext.size.to_i64)
       end
       counted = true
       json(context, 202, %({"state":"accepted"}))

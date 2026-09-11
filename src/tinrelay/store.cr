@@ -14,8 +14,9 @@ module Tinrelay
     getter signature : Bytes
     getter digest : Bytes
     getter accepted_at : Int64
+    getter? stored : Bool
 
-    def initialize(@envelope, @ciphertext, @signature, @digest, @accepted_at)
+    def initialize(@envelope, @ciphertext, @signature, @digest, @accepted_at, @stored : Bool)
     end
   end
 
@@ -198,7 +199,7 @@ module Tinrelay
     end
 
     def prepare(envelope : SignedRelayEnvelope,
-                now : Int64 = Time.utc.to_unix) : PreparedRelayEnvelope?
+                now : Int64 = Time.utc.to_unix) : PreparedRelayEnvelope
       validate_envelope_shape!(envelope)
       ciphertext = Crypto.unb64(envelope.ciphertext, "ciphertext")
       if ciphertext.size > MAX_CIPHERTEXT_BYTES
@@ -206,7 +207,7 @@ module Tinrelay
       end
       signature = Crypto.unb64(envelope.signature, "relay envelope signature")
       envelope_digest = Digest::SHA256.digest(envelope.signing_bytes + signature)
-      disposition = database.db.transaction do |transaction|
+      stored = database.db.transaction do |transaction|
         connection = transaction.connection
         if connection.query_one?(
              "SELECT 1 FROM transmissions WHERE id = ?",
@@ -221,7 +222,7 @@ module Tinrelay
           unless Crypto.constant_time_equal?(stored_digest, envelope_digest)
             raise Conflict.new("transmission id was reused with different contents")
           end
-          next :accepted
+          next true
         end
 
         validate_new_envelope_time!(envelope, now)
@@ -235,11 +236,10 @@ module Tinrelay
           "SELECT state FROM ships WHERE name = ?", envelope.sender_ship, as: String
         ) || raise Unauthorized.new("sender ship is not registered")
         raise Unavailable.new("sender ship is not active") unless sender_state == "active"
-        :new
+        false
       end.not_nil!
-      return nil unless disposition == :new
       PreparedRelayEnvelope.new(
-        envelope, ciphertext, signature, envelope_digest, now
+        envelope, ciphertext, signature, envelope_digest, now, stored
       )
     end
 
@@ -323,7 +323,7 @@ module Tinrelay
     def accept(envelope : SignedRelayEnvelope,
                now : Int64 = Time.utc.to_unix) : Nil
       prepared = prepare(envelope, now)
-      persist(prepared) if prepared
+      persist(prepared) unless prepared.stored?
     end
 
     def deliverable?(prepared : PreparedRelayEnvelope) : Bool

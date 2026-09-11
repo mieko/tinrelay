@@ -220,11 +220,13 @@ destination resolution, including discarded attempts. IPv4 sources use `/32`; IP
 sources use `/64`. Each source starts with 128 KiB and 32 messages, then refills at
 2 KiB/s and one message/s. A refused attempt spends nothing and receives HTTP 429
 `transmission_limited` with `Retry-After` set to the larger concurrent byte/message
-deficit. A recognized identical stored-envelope retry is accepted without spending
-new credit; changed contents under the same ID still conflict. Direct, fallback, and
-discarded accepted outcomes return no earlier than a common 250 ms local acceptance
-target. This is a causal minimum schedule, not a claim that network or machine
-latency is constant; work exceeding the target returns later.
+deficit. Every valid transmission attempt, including an exact retry of a recognized
+stored envelope, spends the same normalized source-address credit. After admission,
+a recognized stored retry returns the existing generic acceptance without redelivery;
+changed contents under the same ID still conflict before admission. Direct, fallback,
+and discarded accepted outcomes return no earlier than a common 250 ms local
+acceptance target. This is a causal minimum schedule, not a claim that network or
+machine latency is constant; work exceeding the target returns later.
 
 Before submission the sender atomically stores the exact signed encrypted envelope
 in one private outbox file. Confirmed acceptance and terminal non-retryable rejection

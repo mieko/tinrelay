@@ -117,6 +117,35 @@ module TinrelayRelaySpec
       envelope.to_json
     )
   end
+
+  def self.trust_forwarded_sources(root : String, api : Tinrelay::API) : Nil
+    path = File.join(root, "tinrelayd.json")
+    config = Tinrelay::TinrelaydConfig.load(path, false).not_nil!
+    policy = Tinrelay::TinrelaydConfig::ClientAddress.new(
+      "trusted_proxy", ["127.0.0.0/8"]
+    )
+    File.write(
+      path,
+      Tinrelay::TinrelaydConfig.new(
+        config.site, config.registration, policy, config.logging
+      ).to_json
+    )
+    api.reload_configuration
+  end
+
+  def self.leave_two_attempts(api : Tinrelay::API, source : String,
+                              envelope : Tinrelay::SignedRelayEnvelope) : Nil
+    started = Time.instant
+    ciphertext_size = Tinrelay::Crypto.unb64(envelope.ciphertext).size
+    api.transmission_buckets.admit(
+      source,
+      Tinrelay::TransmissionTokenBuckets::BYTE_CAPACITY - 2 * ciphertext_size,
+      started
+    ).should be_nil
+    29.times do
+      api.transmission_buckets.admit(source, 0, started).should be_nil
+    end
+  end
 end
 
 describe "transmission relay transitions" do
@@ -254,7 +283,7 @@ describe "transmission relay transitions" do
     end
   end
 
-  it "does not charge a recognized exact retransmission" do
+  it "charges a recognized exact retransmission without losing its outbox envelope" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "retransmission rate passphrase"
       alpha = Tinrelay::Client.join(
@@ -264,13 +293,27 @@ describe "transmission relay transitions" do
         root, origin, "beta", passphrase, alpha
       )
       envelope = TinrelayRelaySpec.capture(
-        beta, origin, "steward@alpha", "one accepted envelope"
+        beta, origin, "steward@alpha", "x" * (10 * 1024)
       )
+      outbox = Tinrelay::Outbox.new(File.join(root, "retry-outbox"))
+      outbox.store(envelope)
       TinrelayRelaySpec.post(origin, envelope).status_code.should eq(202)
 
-      while api.transmission_buckets.admit("127.0.0.1/32", 1).nil?
+      ciphertext_size = Tinrelay::Crypto.unb64(envelope.ciphertext).size
+      api.transmission_buckets.admit(
+        "127.0.0.1/32",
+        Tinrelay::TransmissionTokenBuckets::BYTE_CAPACITY - ciphertext_size
+      ).should be_nil
+      limited = expect_raises(Tinrelay::TransmissionLimited) do
+        beta.retry(outbox, envelope.transmission_id)
       end
-      TinrelayRelaySpec.post(origin, envelope).status_code.should eq(202)
+      limited.retry_after_seconds.should be > 0
+      limited.transmission_id.should eq(envelope.transmission_id)
+      outbox.list.map(&.transmission_id).should eq([envelope.transmission_id])
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?",
+        envelope.transmission_id
+      ).as(Int64).should eq(1_i64)
 
       changed = Tinrelay::SignedRelayEnvelope.from_json(envelope.to_json)
       changed.signature = Tinrelay::Crypto.b64(
@@ -279,30 +322,97 @@ describe "transmission relay transitions" do
       TinrelayRelaySpec.post(origin, changed).status_code.should eq(409)
 
       new_envelope = TinrelayRelaySpec.capture(
-        beta, origin, "steward@alpha", "new source-limited envelope"
+        beta, origin, "steward@alpha", "y" * (10 * 1024)
       )
       TinrelayRelaySpec.post(origin, new_envelope).status_code.should eq(429)
     end
   end
 
+  it "charges equivalent originals and retries across relay storage outcomes" do
+    direct_address = Tinrelay::TinrelaydConfig::ClientAddress.new
+    TinrelaySpec.with_server(client_address: direct_address) do |root, origin, api|
+      passphrase = "storage-blind retry limit passphrase"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+      gamma = TinrelaySpec.admit_contact(root, origin, "gamma", passphrase, beta)
+      TinrelayRelaySpec.trust_forwarded_sources(root, api)
+
+      durable = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "durable source attempt"
+      )
+      durable_source = "2001:db8:1::/64"
+      TinrelayRelaySpec.leave_two_attempts(api, durable_source, durable)
+      2.times do
+        TinrelayRelaySpec.post(origin, durable, "2001:db8:1::1").status_code.should eq(202)
+      end
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", durable.transmission_id
+      ).as(Int64).should eq(1_i64)
+      durable_limited = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "d" * (10 * 1024)
+      )
+      TinrelayRelaySpec.post(
+        origin, durable_limited, "2001:db8:1::2"
+      ).status_code.should eq(429)
+
+      direct = TinrelayRelaySpec.capture(
+        beta, origin, "steward@gamma", "direct source attempt"
+      )
+      direct_source = "2001:db8:2::/64"
+      TinrelayRelaySpec.leave_two_attempts(api, direct_source, direct)
+      spool = Tinrelay::Spool.new(File.join(root, "storage-blind-inbox"))
+      received = Channel(Tinrelay::RadioEvent).new(1)
+      spawn { received.send(gamma.radio_wait(spool, hold_seconds: 5)) }
+      TinrelaySpec.eventually { api.handoffs.waiting?("gamma") }
+      TinrelayRelaySpec.post(
+        origin, direct, "2001:db8:2::1"
+      ).status_code.should eq(202)
+      event = TinrelaySpec.receive(received)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", direct.transmission_id
+      ).as(Int64).should eq(0_i64)
+      spool.routed(event.local_id)
+      TinrelayRelaySpec.post(
+        origin, direct, "2001:db8:2::2"
+      ).status_code.should eq(202)
+      direct_limited = TinrelayRelaySpec.capture(
+        beta, origin, "steward@gamma", "r" * (10 * 1024)
+      )
+      TinrelayRelaySpec.post(
+        origin, direct_limited, "2001:db8:2::3"
+      ).status_code.should eq(429)
+
+      discarded = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "discarded source attempt"
+      )
+      discarded.recipient_ship = "not-claimed"
+      TinrelayRelaySpec.resign(beta, discarded)
+      discarded_source = "2001:db8:3::/64"
+      TinrelayRelaySpec.leave_two_attempts(api, discarded_source, discarded)
+      2.times do
+        TinrelayRelaySpec.post(
+          origin, discarded, "2001:db8:3::1"
+        ).status_code.should eq(202)
+      end
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?", discarded.transmission_id
+      ).as(Int64).should eq(0_i64)
+      discarded_limited = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "x" * (10 * 1024)
+      )
+      TinrelayRelaySpec.post(
+        origin, discarded_limited, "2001:db8:3::2"
+      ).status_code.should eq(429)
+    end
+  end
+
   it "isolates normalized source buckets through trusted-proxy admission" do
-    policy = Tinrelay::TinrelaydConfig::ClientAddress.new(
-      "trusted_proxy", ["127.0.0.0/8"]
-    )
     direct = Tinrelay::TinrelaydConfig::ClientAddress.new
     TinrelaySpec.with_server(client_address: direct) do |root, origin, api|
       passphrase = "trusted proxy transmission limit passphrase"
       alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
       beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
-      config_path = File.join(root, "tinrelayd.json")
-      config = Tinrelay::TinrelaydConfig.load(config_path, false).not_nil!
-      File.write(
-        config_path,
-        Tinrelay::TinrelaydConfig.new(
-          config.site, config.registration, policy, config.logging
-        ).to_json
-      )
-      api.reload_configuration
+      TinrelayRelaySpec.trust_forwarded_sources(root, api)
       source_a = "2001:db8:1:2::/64"
       last_credit = TinrelayRelaySpec.capture(
         beta, origin, "steward@alpha", "last credit from source A"

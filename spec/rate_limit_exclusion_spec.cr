@@ -161,6 +161,10 @@ describe "authenticated ship rate-limit exclusions" do
       end
 
       transmission = alpha.send("steward@beta", "excluded transmission")
+      retry_outbox = Tinrelay::Outbox.new(File.join(root, "excluded-retry-outbox"))
+      retry_outbox.store(transmission)
+      alpha.retry(retry_outbox, transmission.transmission_id)
+      retry_outbox.list.should be_empty
       hail = alpha.hail("gamma")
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?",
