@@ -3,8 +3,7 @@ module Tinrelay
     @mutex = Mutex.new
     @attempts = {} of String => Array(Int64)
 
-    def initialize(@limit : Int32 = Store::MAX_TRANSMISSIONS_PER_HOUR,
-                   @period_seconds : Int64 = 3600)
+    def initialize(@limit : Int32, @period_seconds : Int64)
     end
 
     def allow?(ship : String, now : Int64 = Time.utc.to_unix) : Bool

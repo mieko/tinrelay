@@ -56,6 +56,20 @@ module TinrelayRelaySpec
     yield
     Time.instant - started
   end
+
+  def self.post(origin : String, envelope : Tinrelay::SignedRelayEnvelope,
+                source : String? = nil)
+    headers = HTTP::Headers{
+      "Content-Type"        => "application/json",
+      "X-Tinrelay-Protocol" => Tinrelay::PROTOCOL.to_s,
+    }
+    headers[Tinrelay::ClientAddressPolicy::HEADER] = source if source
+    HTTP::Client.post(
+      "#{origin}/v1/transmissions",
+      headers,
+      envelope.to_json
+    )
+  end
 end
 
 describe "transmission relay transitions" do
@@ -144,7 +158,7 @@ describe "transmission relay transitions" do
     end
   end
 
-  it "counts an authenticated discarded attempt before destination resolution" do
+  it "admits only authenticated, size-valid attempts before destination resolution" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "all attempt rate passphrase"
       alpha = Tinrelay::Client.join(
@@ -153,9 +167,27 @@ describe "transmission relay transitions" do
       beta = TinrelaySpec.admit_contact(
         root, origin, "beta", passphrase, alpha
       )
-      (Tinrelay::Store::MAX_TRANSMISSIONS_PER_HOUR - 1).times do
-        api.submission_window.allow?("beta").should be_true
+
+      31.times do
+        api.transmission_buckets.admit("127.0.0.1/32", 1).should be_nil
       end
+
+      oversized = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "oversized attempt"
+      )
+      oversized.ciphertext = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.random(Tinrelay::Store::MAX_CIPHERTEXT_BYTES + 1)
+      )
+      TinrelayRelaySpec.resign(beta, oversized)
+      TinrelayRelaySpec.post(origin, oversized).status_code.should eq(400)
+
+      forged = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "unauthenticated attempt"
+      )
+      forged.signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.random(Tinrelay::Crypto::SIGNATURE_BYTES)
+      )
+      TinrelayRelaySpec.post(origin, forged).status_code.should eq(401)
 
       discarded = TinrelayRelaySpec.capture(
         beta, origin, "steward@alpha", "discarded attempt"
@@ -163,13 +195,100 @@ describe "transmission relay transitions" do
       discarded.recipient_ship = "not-claimed"
       discarded.recipient_encryption_generation = 1
       TinrelayRelaySpec.resign(beta, discarded)
-      response = beta.remote.post("/v1/transmissions", discarded.to_json)
-      JSON.parse(response)["state"].as_s.should eq("accepted")
+      TinrelayRelaySpec.post(origin, discarded).status_code.should eq(202)
 
-      limited = beta.send("steward@alpha", "must be rate limited opaquely")
-      api.database.db.scalar(
-        "SELECT COUNT(*) FROM transmissions WHERE id = ?", limited.transmission_id
-      ).as(Int64).should eq(0)
+      limited = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "must be source limited"
+      )
+      response = TinrelayRelaySpec.post(origin, limited)
+      response.status_code.should eq(429)
+      response.headers["Retry-After"].should eq("1")
+      JSON.parse(response.body)["error"].as_s.should eq("transmission_limited")
+    end
+  end
+
+  it "does not charge a recognized exact retransmission" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "retransmission rate passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, "beta", passphrase, alpha
+      )
+      envelope = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "one accepted envelope"
+      )
+      TinrelayRelaySpec.post(origin, envelope).status_code.should eq(202)
+
+      while api.transmission_buckets.admit("127.0.0.1/32", 1).nil?
+      end
+      TinrelayRelaySpec.post(origin, envelope).status_code.should eq(202)
+
+      changed = Tinrelay::SignedRelayEnvelope.from_json(envelope.to_json)
+      changed.signature = Tinrelay::Crypto.b64(
+        Tinrelay::Crypto.random(Tinrelay::Crypto::SIGNATURE_BYTES)
+      )
+      TinrelayRelaySpec.post(origin, changed).status_code.should eq(409)
+
+      new_envelope = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "new source-limited envelope"
+      )
+      TinrelayRelaySpec.post(origin, new_envelope).status_code.should eq(429)
+    end
+  end
+
+  it "isolates normalized source buckets through trusted-proxy admission" do
+    policy = Tinrelay::TinrelaydConfig::ClientAddress.new(
+      "trusted_proxy", ["127.0.0.0/8"]
+    )
+    direct = Tinrelay::TinrelaydConfig::ClientAddress.new
+    TinrelaySpec.with_server(client_address: direct) do |root, origin, api|
+      passphrase = "trusted proxy transmission limit passphrase"
+      alpha = TinrelaySpec.admit(root, origin, "alpha", passphrase)
+      beta = TinrelaySpec.admit_contact(root, origin, "beta", passphrase, alpha)
+      config_path = File.join(root, "tinrelayd.json")
+      config = Tinrelay::TinrelaydConfig.load(config_path, false).not_nil!
+      File.write(
+        config_path,
+        Tinrelay::TinrelaydConfig.new(
+          config.site, config.registration, policy, config.logging
+        ).to_json
+      )
+      api.reload_configuration
+      source_a = "2001:db8:1:2::/64"
+      last_credit = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "last credit from source A"
+      )
+      limited = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "x" * (10 * 1024)
+      )
+      started = Time.instant
+      first_size = Tinrelay::Crypto.unb64(last_credit.ciphertext).size
+      api.transmission_buckets.admit(
+        source_a,
+        Tinrelay::TransmissionTokenBuckets::BYTE_CAPACITY - first_size,
+        started
+      ).should be_nil
+      30.times do
+        api.transmission_buckets.admit(source_a, 0, started).should be_nil
+      end
+      TinrelayRelaySpec.post(
+        origin, last_credit, "2001:db8:1:2::5"
+      ).status_code.should eq(202)
+
+      limited_response = TinrelayRelaySpec.post(
+        origin, limited, "2001:db8:1:2::99"
+      )
+      limited_response.status_code.should eq(429)
+      limited_response.headers["Retry-After"].to_i.should be >= 4
+
+      independent = TinrelayRelaySpec.capture(
+        beta, origin, "steward@alpha", "different source remains independent"
+      )
+      TinrelayRelaySpec.post(
+        origin, independent, "2001:db8:1:3::5"
+      ).status_code.should eq(202)
     end
   end
 

@@ -18,11 +18,12 @@ module TinrelaySpec
 
   def self.with_server(art_manifest_path : String? = nil,
                        permanent_metadata_limit : Int64 = DEFAULT_METADATA_LIMIT,
-                       registration_allowances : Tinrelay::RegistrationAllowances? = nil, &)
+                       registration_allowances : Tinrelay::RegistrationAllowances? = nil,
+                       client_address : Tinrelay::TinrelaydConfig::ClientAddress? = nil, &)
     root = temporary_root
     template = File.expand_path("../templates/common-bootstrap.md", __DIR__)
     configuration_path = nil
-    if art_manifest_path || registration_allowances
+    if art_manifest_path || registration_allowances || client_address
       configuration_path = File.join(root, "tinrelayd.json")
       registration = registration_allowances.try do |allowances|
         Tinrelay::TinrelaydConfig::Registration.new(
@@ -36,7 +37,8 @@ module TinrelaySpec
           Tinrelay::TinrelaydConfig::Site.new(
             "TinRelay", "https://tinrelay.space", "Tin Relay", art_manifest_path
           ),
-          registration
+          registration,
+          client_address || Tinrelay::TinrelaydConfig::ClientAddress.new
         ).to_json
       )
     end

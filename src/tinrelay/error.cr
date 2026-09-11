@@ -31,6 +31,25 @@ module Tinrelay
     end
   end
 
+  class TransmissionLimited < Unavailable
+    getter retry_after_seconds : Int64
+    getter transmission_id : String?
+    getter sender_ship : String?
+
+    def initialize(@retry_after_seconds, @transmission_id = nil, @sender_ship = nil)
+      retry_command = if transmission_id && sender_ship
+                        "; exact encrypted envelope retained; retry with: " +
+                          "tinrelay --ship #{sender_ship} outbox retry #{transmission_id}"
+                      else
+                        ""
+                      end
+      super(
+        "relay transmission limit reached; try again in " +
+        "#{retry_after_seconds} seconds#{retry_command}"
+      )
+    end
+  end
+
   class RotationLimited < Unavailable
     getter retry_after_seconds : Int64
 

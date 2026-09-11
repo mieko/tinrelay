@@ -235,7 +235,7 @@ module Tinrelay
                 recipient_ship: envelope.recipient_ship,
                 created_at: envelope.created_at,
                 expires_at: envelope.expires_at,
-                state: "acceptance_unknown"}.to_json)
+                state: "retained"}.to_json)
         end
       when "retry"
         id = argv.shift? || raise Invalid.new("outbox retry requires a transmission id")

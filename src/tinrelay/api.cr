@@ -60,6 +60,10 @@ module Tinrelay
     rescue Invalid
       {bucket: nil, cidr_denied: false}
     end
+
+    def source_bucket(peer : Socket::Address?, headers : HTTP::Headers) : String
+      LiteralIP.source_bucket(client_address_policy.resolve(peer, headers))
+    end
   end
 
   class API
@@ -70,7 +74,7 @@ module Tinrelay
     getter store : Store
     getter handoffs : DirectHandoff
     getter metrics : Metrics
-    getter submission_window : SubmissionWindow
+    getter transmission_buckets : TransmissionTokenBuckets
     getter hail_window : SubmissionWindow
     @runtime_snapshot : Atomic(RuntimeSnapshot)
 
@@ -86,7 +90,7 @@ module Tinrelay
       @runtime_snapshot = Atomic(RuntimeSnapshot).new(snapshot)
       @handoffs = DirectHandoff.new
       @metrics = Metrics.new
-      @submission_window = SubmissionWindow.new
+      @transmission_buckets = TransmissionTokenBuckets.new
       @hail_window = SubmissionWindow.new(Store::MAX_HAILS_PER_DAY, 24 * 60 * 60)
     end
 
@@ -123,6 +127,12 @@ module Tinrelay
           status = error(context, 409, "conflict", ex.message || "conflict")
         rescue ex : Expired
           status = error(context, 410, "expired", ex.message || "expired")
+        rescue ex : TransmissionLimited
+          context.response.headers["Retry-After"] = ex.retry_after_seconds.to_s
+          status = error(
+            context, 429, "transmission_limited",
+            "relay is receiving too much transmission traffic"
+          )
         rescue ex : RotationLimited
           context.response.headers["Retry-After"] = ex.retry_after_seconds.to_s
           status = json(
@@ -319,9 +329,16 @@ module Tinrelay
       counted = false
       envelope = parse_body(context, SignedRelayEnvelope)
       if prepared = store.prepare(envelope)
-        excluded = runtime_snapshot.rate_limit_excluded?(envelope.sender_ship)
-        if (excluded || submission_window.allow?(envelope.sender_ship)) &&
-           store.deliverable?(prepared)
+        snapshot = runtime_snapshot
+        unless snapshot.rate_limit_excluded?(envelope.sender_ship)
+          source = snapshot.source_bucket(
+            context.request.remote_address, context.request.headers
+          )
+          if retry_after = transmission_buckets.admit(source, prepared.ciphertext.size)
+            raise TransmissionLimited.new(retry_after.to_i64)
+          end
+        end
+        if store.deliverable?(prepared)
           remaining = acceptance_at - Time.instant
           if remaining > Time::Span.zero && handoffs.deliver(prepared, remaining)
             outcome = "direct"

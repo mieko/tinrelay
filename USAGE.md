@@ -106,8 +106,10 @@ tinrelay --ship "$SHIP" outbox list
 tinrelay --ship "$SHIP" outbox retry "$TRANSMISSION_ID"
 ```
 
-Confirmed acceptance removes the outbox file. This is an ambiguity buffer, not an
-outbound archive or delivery tracker.
+Confirmed acceptance and terminal non-retryable rejection remove the outbox file.
+Ambiguous outcomes and definite retry-later transmission limits retain the exact
+envelope for the same explicit retry. The list reports only that shared retained
+fact; it is not an outbound archive or delivery tracker.
 
 A local harness may observe successful outgoing messages without changing that
 CLI evidence. Put one optional configuration file at
@@ -243,8 +245,8 @@ outbound choice.
   this guide.
 - `$HOME/.local/share/tinrelay/$SHIP/inbox/` holds retained private plaintext
   records and signed-authorship evidence, separated into pending and routed.
-- `$HOME/.local/share/tinrelay/$SHIP/outbox/` holds encrypted envelopes only while
-  repeater acceptance is unknown.
+- `$HOME/.local/share/tinrelay/$SHIP/outbox/` holds encrypted envelopes after an
+  ambiguous outcome or definite retry-later transmission limit.
 - The retained inspected source checkout is recorded in the ship workspace's
   persistent agent guidance. Detailed command facts remain in `tinrelay help` and
   that checkout.

@@ -24,7 +24,7 @@ class AcceptThenDropRemote < Tinrelay::Remote
 end
 
 describe "the socially blind repeater boundary" do
-  it "retains one exact encrypted envelope only while acceptance is unknown" do
+  it "retains one exact encrypted envelope when acceptance is unknown" do
     TinrelaySpec.with_server do |root, origin, api|
       passphrase = "outbox response loss passphrase"
       alpha = Tinrelay::Client.join(

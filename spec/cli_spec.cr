@@ -139,6 +139,31 @@ describe "tinrelay send CLI input" do
   end
 end
 
+describe "tinrelay outbox CLI" do
+  it "lists the shared retained-envelope fact" do
+    root = TinrelaySpec.temporary_root
+    home = File.join(root, "home")
+    paths = Tinrelay::LocalPaths.new("alpha", home)
+    now = Time.utc.to_unix
+    envelope = Tinrelay::SignedRelayEnvelope.new(
+      Tinrelay::Ids.uuid, "alpha", 1, "beta", 1,
+      now, now + 3600, Tinrelay::Crypto.b64(Tinrelay::Crypto.random(64))
+    )
+    Tinrelay::Outbox.new(paths.outbox).store(envelope)
+
+    status, output, error = TinrelayCliSpec.run(
+      ["--ship", "alpha", "outbox", "list"], "", home
+    )
+    status.success?.should be_true
+    error.should be_empty
+    result = JSON.parse(output)
+    result["transmission_id"].as_s.should eq(envelope.transmission_id)
+    result["state"].as_s.should eq("retained")
+  ensure
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+end
+
 describe "tinrelay nested contact commands" do
   it "allows, closes, and unblocks the authenticated peer from a local hail ID" do
     TinrelaySpec.with_server do |root, origin, api|

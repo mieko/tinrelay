@@ -97,6 +97,10 @@ module Tinrelay
         retry_after = registration_limit_evidence(body, headers)
         raise RegistrationLimited.new(retry_after) if retry_after
       end
+      if status_code == 429 && path == "/v1/transmissions"
+        retry_after = transmission_limit_evidence(body, headers)
+        raise TransmissionLimited.new(retry_after) if retry_after
+      end
       if status_code == 403 && path == "/v1/join" && registration_forbidden?(body)
         raise RegistrationUnavailable.new
       end
@@ -131,6 +135,18 @@ module Tinrelay
       object = JSON.parse(body).as_h?
       return nil unless object
       return nil unless object["error"]?.try(&.as_s?) == "registration_limited"
+      retry_after
+    rescue JSON::ParseException
+      nil
+    end
+
+    private def transmission_limit_evidence(body : String,
+                                            headers : HTTP::Headers) : Int64?
+      retry_after = headers["Retry-After"]?.try(&.to_i64?)
+      return nil unless retry_after && retry_after > 0
+      object = JSON.parse(body).as_h?
+      return nil unless object
+      return nil unless object["error"]?.try(&.as_s?) == "transmission_limited"
       retry_after
     rescue JSON::ParseException
       nil
@@ -1231,6 +1247,10 @@ module Tinrelay
           )
         end
         raise ex
+      rescue ex : TransmissionLimited
+        raise TransmissionLimited.new(
+          ex.retry_after_seconds, envelope.transmission_id, envelope.sender_ship
+        )
       rescue ex : Error | IO::Error
         raise AcceptanceUnknown.new(envelope.transmission_id, envelope.sender_ship, ex.message)
       end

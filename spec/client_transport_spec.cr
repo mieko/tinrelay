@@ -145,6 +145,28 @@ describe Tinrelay::Remote do
     end
   end
 
+  it "recognizes transmission limiting only from its exact bounded evidence" do
+    headers = HTTP::Headers{"Retry-After" => "37"}
+    body = %({"error":"transmission_limited","message":"foreign"})
+    TinrelayClientTransportSpec.with_response(429, body, headers) do |origin|
+      error = expect_raises(Tinrelay::TransmissionLimited) do
+        Tinrelay::Remote.new(origin).post("/v1/transmissions", %({}))
+      end
+      error.retry_after_seconds.should eq(37)
+      error.message.should eq(
+        "relay transmission limit reached; try again in 37 seconds"
+      )
+    end
+
+    TinrelayClientTransportSpec.with_response(429, %({"error":"busy"}), headers) do |origin|
+      error = expect_raises(Tinrelay::Unavailable) do
+        Tinrelay::Remote.new(origin).post("/v1/transmissions", %({}))
+      end
+      error.should_not be_a(Tinrelay::TransmissionLimited)
+      error.message.should eq("relay rate limit reached")
+    end
+  end
+
   it "reports join policy denial without treating it as authentication failure" do
     TinrelayClientTransportSpec.with_response(
       403, %({"error":"registration_forbidden","message":"foreign"})

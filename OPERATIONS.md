@@ -76,14 +76,16 @@ an absolute path to the external presentation manifest described below.
 The four registration allowances count successful claims in rolling one-hour and
 24-hour windows. Any zero allowance closes registration. `deny_cidrs` rejects new
 claims from matching source addresses before reading their bodies. After ordinary
-authentication, each canonical name in `exclude` bypasses the transmission, hail,
-owner-rotation, and radio-retune windows; it does not bypass registration policy,
-authentication, request or pending bounds, or permanent-metadata capacity. An
-unclaimed excluded name remains dormant until that exact ship is claimed.
+authentication, each canonical name in `exclude` bypasses the source-address
+transmission token buckets, hail window, owner-rotation window, and radio-retune
+window; it does not bypass registration policy, authentication, request or pending
+bounds, or permanent-metadata capacity. An unclaimed excluded name remains dormant
+until that exact ship is claimed.
 
-In `direct` client-address mode, registration uses the socket peer and ignores
-forwarded-address headers. In `trusted_proxy` mode, `trusted_ingress_cidrs` must name
-the final trusted proxy ingress. TinRelay accepts exactly one
+In `direct` client-address mode, registration and transmission admission use the
+socket peer and ignore forwarded-address headers. In `trusted_proxy` mode,
+`trusted_ingress_cidrs` must name the final trusted proxy ingress. TinRelay accepts
+exactly one
 `X-Tinrelay-Client-IP` value only from such a peer. The final proxy must overwrite
 that header, and the origin firewall must exclude untrusted ingress. IPv4 addresses
 use `/32` source buckets; IPv6 addresses use `/64` buckets.
@@ -235,7 +237,7 @@ radios re-establish them.
 ## Failure and disclosure boundary
 
 SQLite WAL protects committed transactions across an ordinary restart. Clients
-retain their own keys, private spool, and exact acceptance-unknown outbox envelopes.
+retain their own keys, private spool, and exact outbox envelopes awaiting retry.
 There is no operator-mediated owner takeover. If every copy of a ship's owner key
 is lost, do not manufacture continuity: retire that identity as possible and claim
 a different ship name.

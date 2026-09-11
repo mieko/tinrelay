@@ -154,8 +154,7 @@ describe "authenticated ship rate-limit exclusions" do
       gamma = TinrelaySpec.admit(root, origin, "gamma", passphrase)
       delta = TinrelaySpec.admit(root, origin, "delta", passphrase)
 
-      Tinrelay::Store::MAX_TRANSMISSIONS_PER_HOUR.times do
-        api.submission_window.allow?("alpha").should be_true
+      while api.transmission_buckets.admit("127.0.0.1/32", 1).nil?
       end
       Tinrelay::Store::MAX_HAILS_PER_DAY.times do
         api.hail_window.allow?("alpha").should be_true
@@ -172,7 +171,16 @@ describe "authenticated ship rate-limit exclusions" do
       ).as(Int64).should eq(1_i64)
 
       TinrelayRateLimitExclusionSpec.reload(api, path, [] of String)
-      limited = alpha.send("steward@beta", "ordinary window applies again")
+      now = Time.instant
+      while api.transmission_buckets.admit("127.0.0.1/32", 1, now).nil?
+      end
+      limited = expect_raises(Tinrelay::TransmissionLimited) do
+        alpha.send("steward@beta", "ordinary window applies again")
+      end
+      limited.retry_after_seconds.should be > 0
+      limited.sender_ship.should eq("alpha")
+      outbox = Tinrelay::Outbox.new("#{alpha.keyring.path}.outbox")
+      outbox.list.map(&.transmission_id).should contain(limited.transmission_id)
       limited_hail = alpha.hail("delta")
       api.database.db.scalar(
         "SELECT COUNT(*) FROM transmissions WHERE id = ?", limited.transmission_id

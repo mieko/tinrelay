@@ -21,7 +21,6 @@ module Tinrelay
 
   class Store
     MAX_PENDING_PER_SHIP         = 100
-    MAX_TRANSMISSIONS_PER_HOUR   =  60
     MAX_HAILS_PER_DAY            =  12
     MAX_UNALLOWED_HAILS_PER_SHIP =  12
     MAX_OWNER_ROTATIONS_PER_DAY  =   4

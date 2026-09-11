@@ -214,17 +214,25 @@ routing, inspection, handling, expiry, or terminal state. Silence is intentional
 ambiguous. TinRelay has no protocol acknowledgement; acknowledgement, if wanted,
 is expressed in later correspondence.
 
-Every authenticated new attempt consumes the sender's rolling-hour allowance before
-destination resolution, including discarded attempts. Direct, fallback, and
-discarded outcomes return no earlier than a common 250 ms local acceptance target.
-This is a causal minimum schedule, not a claim that network or machine latency is
-constant; work exceeding the target returns later.
+After sender authentication and ciphertext-size validation, every new attempt must
+spend both byte and message credit from its normalized source-address bucket before
+destination resolution, including discarded attempts. IPv4 sources use `/32`; IPv6
+sources use `/64`. Each source starts with 128 KiB and 32 messages, then refills at
+2 KiB/s and one message/s. A refused attempt spends nothing and receives HTTP 429
+`transmission_limited` with `Retry-After` set to the larger concurrent byte/message
+deficit. A recognized identical stored-envelope retry is accepted without spending
+new credit; changed contents under the same ID still conflict. Direct, fallback, and
+discarded accepted outcomes return no earlier than a common 250 ms local acceptance
+target. This is a causal minimum schedule, not a claim that network or machine
+latency is constant; work exceeding the target returns later.
 
 Before submission the sender atomically stores the exact signed encrypted envelope
-in one private outbox file. Confirmed acceptance deletes it. An ambiguous transport
-result reports acceptance unknown and retains that exact envelope for an explicit
-retry with the same signature and ID. A definite rejection deletes it. The outbox
-is not a correspondence archive or delivery workflow.
+in one private outbox file. Confirmed acceptance and terminal non-retryable rejection
+delete it. An ambiguous transport result reports acceptance unknown and retains that
+exact envelope for an explicit retry with the same signature and ID. A definite
+retry-later transmission limit also retains it for that exact-ID retry. The outbox is
+not a correspondence archive or delivery workflow and does not persist why an
+envelope remains.
 
 `tinrelay --ship "$SHIP" radio wait` repeats bounded 100-second long polls. The
 official client allows 115 seconds for the HTTP response. WebSockets and permanent
@@ -282,9 +290,9 @@ Enforced defaults:
   maximum of 100,000;
 - four owner rotations and sixteen radio retunes per ship per rolling 24 hours;
 - 100 pending transmissions per ship;
-- 60 authenticated new attempts per sending ship per rolling hour, counted before
-  destination resolution; accounting is bounded in-process because direct success
-  and discarded attempts write no relay row;
+- 2 KiB/s decoded ciphertext with 128 KiB capacity and one message/s with 32-message
+  capacity per canonical source bucket, counted before destination resolution;
+  accounting is bounded and process-local;
 - twelve authenticated hails per sending ship per rolling 24 hours, one unallowed hail
   per directed sender/recipient pair, one-hour maximum lifetime, no body or local label;
 - twelve total unallowed hails retained per recipient ship;
@@ -293,8 +301,8 @@ Enforced defaults:
 - immediate repeater payload deletion on acknowledgement;
 - no relay row or tombstone on acknowledged direct handoff;
 - content-free fallback tombstones only through the signed envelope's expiry;
-- local encrypted outbox retention only while acceptance is unknown, never beyond
-  the envelope's 96-hour expiry;
+- local encrypted outbox retention after ambiguous outcomes or definite retry-later
+  transmission limits, never beyond the envelope's 96-hour expiry;
 - immutable private plaintext records retained after routing; routing atomically
   moves a record from pending to routed and never rewrites its bytes.
 
