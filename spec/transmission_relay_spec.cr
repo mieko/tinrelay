@@ -13,6 +13,16 @@ class RelayCaptureRemote < Tinrelay::Remote
   end
 end
 
+class DropAcceptedTransmissionRemote < Tinrelay::Remote
+  def post(path : String, body : String) : String
+    response = super
+    if path == "/v1/transmissions"
+      raise IO::Error.new("synthetic accepted response loss")
+    end
+    response
+  end
+end
+
 module TinrelayRelaySpec
   def self.admit(root : String, origin : String, ship : String,
                  passphrase : String) : Tinrelay::Client
@@ -39,6 +49,43 @@ module TinrelayRelaySpec
     Tinrelay::Client.new(sender.keyring, sender.passphrase, remote)
       .send(coordinate, body)
     remote.captured.not_nil!
+  end
+
+  def self.signed_envelope(sender : Tinrelay::Client,
+                           recipient : Tinrelay::Client,
+                           created_at : Int64,
+                           expires_at : Int64,
+                           body : String) : Tinrelay::SignedRelayEnvelope
+    sender_radio = sender.keyring.data.radio!
+    recipient_radio = recipient.keyring.data.radio!
+    transmission_id = Tinrelay::Ids.uuid
+    transmission = Tinrelay::SignedTransmission.new(
+      transmission_id, sender.keyring.data.ship, sender_radio.generation,
+      recipient.keyring.data.ship, recipient_radio.generation,
+      created_at, "steward", body, "caller"
+    )
+    transmission.signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(
+        transmission.signing_bytes,
+        Tinrelay::Crypto.unb64(sender_radio.signing.secret_key)
+      )
+    )
+    ciphertext = Tinrelay::Crypto.seal(
+      transmission.to_json.to_slice,
+      Tinrelay::Crypto.unb64(recipient_radio.encryption.public_key)
+    )
+    envelope = Tinrelay::SignedRelayEnvelope.new(
+      transmission_id, sender.keyring.data.ship, sender_radio.generation,
+      recipient.keyring.data.ship, recipient_radio.generation,
+      created_at, expires_at, Tinrelay::Crypto.b64(ciphertext)
+    )
+    envelope.signature = Tinrelay::Crypto.b64(
+      Tinrelay::Crypto.sign(
+        envelope.signing_bytes,
+        Tinrelay::Crypto.unb64(sender_radio.signing.secret_key)
+      )
+    )
+    envelope
   end
 
   def self.resign(sender : Tinrelay::Client, envelope : Tinrelay::SignedRelayEnvelope) : Nil
@@ -411,6 +458,117 @@ describe "transmission relay transitions" do
       expect_raises(Tinrelay::Invalid, /within 96 hours/) do
         api.store.prepare(too_long)
       end
+    end
+  end
+
+  it "admits an absent exact retry after action skew until signed expiry" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "delayed exact retry passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, "beta", passphrase, alpha
+      )
+      now = Time.utc.to_unix
+      created_at = now - Tinrelay::Store::AUTH_SKEW_SECONDS - 1
+      envelope = TinrelayRelaySpec.signed_envelope(
+        beta, alpha, created_at,
+        created_at + Tinrelay::FALLBACK_LIFETIME_SECONDS,
+        "delayed but still live"
+      )
+      outbox = Tinrelay::Outbox.new(File.join(root, "delayed-outbox"))
+      outbox.store(envelope)
+
+      beta.retry(outbox, envelope.transmission_id)
+      outbox.list.should be_empty
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?",
+        envelope.transmission_id
+      ).as(Int64).should eq(1_i64)
+      TinrelayRelaySpec.post(origin, envelope).status_code.should eq(202)
+
+      overlong = TinrelayRelaySpec.signed_envelope(
+        beta, alpha, created_at,
+        created_at + Tinrelay::FALLBACK_LIFETIME_SECONDS + 1,
+        "overlong exact retry"
+      )
+      TinrelayRelaySpec.post(origin, overlong).status_code.should eq(400)
+
+      future_within_skew = now + 60
+      beyond_relay_window = TinrelayRelaySpec.signed_envelope(
+        beta, alpha, future_within_skew,
+        future_within_skew + Tinrelay::FALLBACK_LIFETIME_SECONDS,
+        "beyond relay window"
+      )
+      TinrelayRelaySpec.post(origin, beyond_relay_window).status_code.should eq(400)
+
+      expired = TinrelayRelaySpec.signed_envelope(
+        beta, alpha,
+        now - Tinrelay::FALLBACK_LIFETIME_SECONDS - 1,
+        now - 1, "expired exact retry"
+      )
+      outbox.store(expired)
+      expect_raises(Tinrelay::Invalid) do
+        beta.retry(outbox, expired.transmission_id)
+      end
+      outbox.list.should be_empty
+
+      future_created_at = now + Tinrelay::Store::AUTH_SKEW_SECONDS + 60
+      future = TinrelayRelaySpec.signed_envelope(
+        beta, alpha, future_created_at, future_created_at + 3600,
+        "future exact retry"
+      )
+      TinrelayRelaySpec.post(origin, future).status_code.should eq(400)
+    end
+  end
+
+  it "replays an aged ambiguous direct handoff without a second pointer" do
+    TinrelaySpec.with_server do |root, origin, api|
+      passphrase = "delayed direct retry passphrase"
+      alpha = Tinrelay::Client.join(
+        File.join(root, "alpha.keyring"), origin, "alpha", passphrase
+      )
+      beta = TinrelaySpec.admit_contact(
+        root, origin, "beta", passphrase, alpha
+      )
+      now = Time.utc.to_unix
+      created_at = now - Tinrelay::Store::AUTH_SKEW_SECONDS - 1
+      envelope = TinrelayRelaySpec.signed_envelope(
+        beta, alpha, created_at,
+        created_at + Tinrelay::FALLBACK_LIFETIME_SECONDS,
+        "aged direct retry"
+      )
+      outbox = Tinrelay::Outbox.new(File.join(root, "direct-outbox"))
+      outbox.store(envelope)
+      spool = Tinrelay::Spool.new(File.join(root, "direct-inbox"))
+      received = Channel(Tinrelay::RadioEvent).new(1)
+      spawn { received.send(alpha.radio_wait(spool, hold_seconds: 5)) }
+      TinrelaySpec.eventually { api.handoffs.waiting?("alpha") }
+
+      unreliable = Tinrelay::Client.new(
+        beta.keyring, passphrase, DropAcceptedTransmissionRemote.new(origin)
+      )
+      failure = expect_raises(Tinrelay::AcceptanceUnknown) do
+        unreliable.retry(outbox, envelope.transmission_id)
+      end
+      failure.transmission_id.should eq(envelope.transmission_id)
+      event = TinrelaySpec.receive(received)
+      api.database.db.scalar(
+        "SELECT COUNT(*) FROM transmissions WHERE id = ?",
+        envelope.transmission_id
+      ).as(Int64).should eq(0_i64)
+      outbox.list.map(&.transmission_id).should eq([envelope.transmission_id])
+      spool.routed(event.local_id)
+
+      beta.retry(outbox, envelope.transmission_id)
+      outbox.list.should be_empty
+      alpha.radio_poll(spool).should be_nil
+      spool.next_unrouted.should be_nil
+      api.database.db.query_one(
+        "SELECT state, ciphertext IS NULL FROM transmissions WHERE id = ?",
+        envelope.transmission_id, as: {String, Int64}
+      ).should eq({"collected", 1_i64})
     end
   end
 

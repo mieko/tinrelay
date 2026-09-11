@@ -769,10 +769,13 @@ module Tinrelay
     end
 
     private def validate_new_envelope_time!(envelope : SignedRelayEnvelope, now : Int64) : Nil
-      unless (envelope.created_at - now).abs <= AUTH_SKEW_SECONDS
+      if envelope.created_at > now + AUTH_SKEW_SECONDS
         raise Invalid.new("transmission creation time is outside the authentication window")
       end
-      unless envelope.expires_at.in?((now + 1)..(now + MAX_PENDING_SECONDS))
+      signed_lifetime = envelope.expires_at.to_i128 - envelope.created_at.to_i128
+      unless envelope.expires_at > now &&
+             envelope.expires_at <= now + MAX_PENDING_SECONDS &&
+             signed_lifetime.in?(1_i128..MAX_PENDING_SECONDS.to_i128)
         raise Invalid.new("transmission expiry must be within 96 hours")
       end
     end
