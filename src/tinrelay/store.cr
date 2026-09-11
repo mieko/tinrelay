@@ -49,8 +49,10 @@ module Tinrelay
           MAX_PERMANENT_METADATA_LIMIT.to_s
         )
       end
-      @pending_write_mutex = Mutex.new
-      @permanent_write_mutex = Mutex.new
+      # WAL keeps reads concurrent, but a deferred read transaction cannot
+      # become a writer after another connection commits. Admit one writer
+      # before any Store transaction that may mutate state.
+      @write_mutex = Mutex.new
       @claim_commit_mutex = Mutex.new
     end
 
@@ -80,7 +82,7 @@ module Tinrelay
       @claim_commit_mutex.synchronize do
         raise RegistrationUnavailable.new unless policy_current.call
         raise RegistrationUnavailable.new if allowances.closed?
-        @permanent_write_mutex.synchronize do
+        @write_mutex.synchronize do
           accepted_at = now || Time.utc.to_unix
           database.db.transaction do |transaction|
             connection = transaction.connection
@@ -122,6 +124,12 @@ module Tinrelay
 
     def synchronize_claim_commit(&)
       @claim_commit_mutex.synchronize { yield }
+    end
+
+    private def write_transaction(& : DB::Transaction -> T) : T? forall T
+      @write_mutex.synchronize do
+        database.db.transaction { |transaction| yield transaction }
+      end
     end
 
     def permanent_metadata_usage : Int64
@@ -275,7 +283,7 @@ module Tinrelay
     def persist_hail(hail : Hail,
                      now : Int64 = Time.utc.to_unix) : Bool
       signature = Crypto.unb64(hail.signature, "hail signature")
-      @pending_write_mutex.synchronize do
+      @write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
           active = connection.query_one?(
@@ -333,10 +341,7 @@ module Tinrelay
     end
 
     def persist(prepared : PreparedRelayEnvelope) : Bool
-      # SQLite cannot reliably upgrade several concurrent read transactions into
-      # writers. Serialize only pending-record transactions; public rendering,
-      # verification, reads, and direct in-memory handoff stay concurrent.
-      @pending_write_mutex.synchronize do
+      @write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
           if stored_digest = connection.query_one?(
@@ -381,7 +386,7 @@ module Tinrelay
     def acknowledge(request : TransmissionAck,
                     now : Int64 = Time.utc.to_unix) : Int64?
       require_uuid!(request.transmission_id, "transmission id")
-      database.db.transaction do |transaction|
+      write_transaction do |transaction|
         connection = transaction.connection
         verify_radio_action(connection, request.auth, "transmission.ack", request.payload, now)
         row = connection.query_one?(
@@ -411,7 +416,7 @@ module Tinrelay
     def acknowledge_hail(request : HailAck,
                          now : Int64 = Time.utc.to_unix) : Nil
       require_uuid!(request.hail_id, "hail id")
-      database.db.transaction do |transaction|
+      write_transaction do |transaction|
         connection = transaction.connection
         verify_radio_action(connection, request.auth, "hail.ack", request.payload, now)
         connection.exec(
@@ -456,7 +461,7 @@ module Tinrelay
       end
       raise Invalid.new("closed peer cannot be retained") if retained.includes?(peer)
       certificate = request.certificate
-      @permanent_write_mutex.synchronize do
+      @write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
           verify_owner_action(
@@ -545,7 +550,7 @@ module Tinrelay
     def acknowledge_retune(request : RetuneAck,
                            now : Int64 = Time.utc.to_unix) : Nil
       owner_ship = Names.ship!(request.owner_ship)
-      database.db.transaction do |transaction|
+      write_transaction do |transaction|
         connection = transaction.connection
         verify_radio_action(
           connection,
@@ -556,10 +561,10 @@ module Tinrelay
         )
         connection.query_one?(
           <<-SQL, owner_ship, request.auth.ship, request.to_generation, now,
-            SELECT 1 FROM relationship_transitions
-             WHERE owner_ship = ? AND peer_ship = ? AND to_generation = ?
-               AND expires_at > ?
-          SQL
+              SELECT 1 FROM relationship_transitions
+               WHERE owner_ship = ? AND peer_ship = ? AND to_generation = ?
+                 AND expires_at > ?
+            SQL
           as: Int64
         ) || raise NotFound.new("retune transition is unavailable")
         ship_a, ship_b = relationship_pair(owner_ship, request.auth.ship)
@@ -579,7 +584,7 @@ module Tinrelay
                            now : Int64 = Time.utc.to_unix) : Nil
       peer = Names.ship!(request.peer_ship)
       require_uuid!(request.hail_id, "hail id")
-      @permanent_write_mutex.synchronize do
+      @write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
           verify_radio_action(
@@ -618,7 +623,7 @@ module Tinrelay
     def rotate_owner(rotation : OwnerRotation,
                      now : Int64 = Time.utc.to_unix,
                      exempt_from_rotation_limit : Bool = false) : Nil
-      @permanent_write_mutex.synchronize do
+      @write_mutex.synchronize do
         database.db.transaction do |transaction|
           connection = transaction.connection
           verify_owner_action(
@@ -672,7 +677,7 @@ module Tinrelay
       unless change.operation.in?({"freeze", "activate", "revoke"})
         raise Invalid.new("ship operation must be freeze, activate, or revoke")
       end
-      database.db.transaction do |transaction|
+      write_transaction do |transaction|
         connection = transaction.connection
         verify_owner_action(connection, change.auth, "ship.change", change.payload, now)
         current = connection.scalar(
@@ -708,7 +713,7 @@ module Tinrelay
     end
 
     def cleanup(now : Int64 = Time.utc.to_unix)
-      database.db.transaction do |transaction|
+      write_transaction do |transaction|
         connection = transaction.connection
         connection.exec(
           "DELETE FROM registration_events WHERE accepted_at <= ?",
@@ -721,12 +726,12 @@ module Tinrelay
           break if remaining == 0
           selected = connection.query_all(
             <<-SQL, state, now, remaining, as: Int64
-              SELECT rowid
-                FROM transmissions
-               WHERE state = ? AND expires_at <= ?
-               ORDER BY expires_at, rowid
-               LIMIT ?
-            SQL
+                SELECT rowid
+                  FROM transmissions
+                 WHERE state = ? AND expires_at <= ?
+                 ORDER BY expires_at, rowid
+                 LIMIT ?
+              SQL
           )
           expired = selected.size.to_i64 if state == "pending"
           transmission_rowids.concat(selected)

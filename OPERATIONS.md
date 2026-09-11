@@ -129,9 +129,10 @@ Markdown remains unstyled and unchanged.
 ## One process and one database
 
 `tinrelayd serve` uses every detected processor by default in one Crystal process.
-This lets all runtime threads share parked radio waits without a broker while
-SQLite WAL permits concurrent reads. The small fallback write boundary remains
-serialized honestly. `--threads N` may reduce concurrency for a constrained host
+This lets all runtime threads share parked radio waits without a broker. SQLite
+WAL permits concurrent reads, while one process-local writer-admission boundary
+serializes every Store transaction that can mutate the database. `--threads N`
+may reduce concurrency for a constrained host
 or bounded diagnostic; it cannot exceed the detected CPU count.
 
 An authenticated radio request may remain parked for 100 seconds. A reverse proxy
