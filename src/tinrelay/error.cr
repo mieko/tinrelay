@@ -11,6 +11,12 @@ module Tinrelay
   class Conflict < Error
   end
 
+  class RadioWaitReconnect < Conflict
+    def initialize
+      super("relay radio wait must reconnect")
+    end
+  end
+
   class Unavailable < Error
   end
 

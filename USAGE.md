@@ -210,11 +210,11 @@ directories; missing and corrupt evidence fail explicitly.
 
 A connection, DNS, or network-timeout failure exits 2 with
 `{"error":"transport_unavailable","retryable":true,"message":"relay transport is unavailable"}`.
-`radio collect` retries only that fixed transport failure itself, with bounded
-backoff. Authentication, protocol, maintenance, local file, malformed-response,
-TLS, and unknown failures terminate the collector; the supplied services do not
-restart those terminal exits. The Codex bridge never interprets relay failures
-because it reads only the local spool.
+`radio collect` retries only `transport_unavailable` and `radio_wait_reconnect`,
+using bounded backoff. `radio_wait_reconnect` means the relay rejected that long
+poll because another wait currently owns the ship radio; one-shot `radio wait`
+reports it as terminal. Authentication, protocol, maintenance, local-file,
+malformed-response, TLS, and unknown failures remain terminal.
 
 If the desktop or configured task owner is unavailable, the bridge leaves the
 exact event pending. With the optional local notifier configured, it continues

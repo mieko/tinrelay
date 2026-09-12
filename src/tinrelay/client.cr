@@ -112,11 +112,13 @@ module Tinrelay
       when 400      then raise Invalid.new("relay rejected an invalid request")
       when 401, 403 then raise Unauthorized.new("relay authentication failed")
       when 404      then raise NotFound.new("relay object is unavailable")
-      when 409      then raise Conflict.new("relay reported a state conflict")
-      when 410      then raise Expired.new("relay object has expired")
-      when 429      then raise Unavailable.new("relay rate limit reached")
-      when 503      then raise Unavailable.new("relay is unavailable")
-      else               raise Error.new("relay returned HTTP #{status_code}")
+      when 409
+        raise RadioWaitReconnect.new if path == "/v1/radio/wait"
+        raise Conflict.new("relay reported a state conflict")
+      when 410 then raise Expired.new("relay object has expired")
+      when 429 then raise Unavailable.new("relay rate limit reached")
+      when 503 then raise Unavailable.new("relay is unavailable")
+      else          raise Error.new("relay returned HTTP #{status_code}")
       end
     end
 

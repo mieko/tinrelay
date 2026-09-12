@@ -615,7 +615,7 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "retries only transport outages inside the long-lived collector" do
+  it "retries transport outages inside the long-lived collector" do
     root = TinrelaySpec.temporary_root
     port = TinrelayCodexBridgeProcessSpec.available_port
     origin = "http://127.0.0.1:#{port}"
@@ -645,6 +645,70 @@ describe "tinrelay-codex-bridge process contract" do
       running.signal(Signal::TERM) if running.running?
     end
     server.try(&.close)
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
+  it "keeps a radio-wait reconnect terminal for one-shot waiting" do
+    root = TinrelaySpec.temporary_root
+    server = TinrelayCodexBridgeProcessSpec::FixedResponseServer.new(
+      409, %({"error":"conflict","message":"foreign"})
+    )
+    TinrelayCodexBridgeProcessSpec.prepare_ship(
+      root, "http://127.0.0.1:#{server.port}"
+    )
+
+    status, output, error = run_current_client(
+      root, ["radio", "wait", "--ship", "fixture"]
+    )
+
+    status.exit_code.should eq(2)
+    output.should be_empty
+    server.requests.should eq(1)
+    report = JSON.parse(error)
+    report["error"].as_s.should eq("radio_wait_reconnect")
+    report["message"].as_s.should eq("relay radio wait must reconnect")
+    report["retryable"]?.should be_nil
+  ensure
+    server.try(&.close)
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
+  it "retries a radio-wait reconnect inside continuous collection" do
+    root = TinrelaySpec.temporary_root
+    port = TinrelayCodexBridgeProcessSpec.available_port
+    origin = "http://127.0.0.1:#{port}"
+    TinrelayCodexBridgeProcessSpec.prepare_ship(root, origin)
+    conflict = TinrelayCodexBridgeProcessSpec::FixedResponseServer.new(
+      409, %({"error":"conflict","message":"foreign"}), port
+    )
+    process, _, error_path = TinrelayCodexBridgeProcessSpec.start_client(
+      root, ["radio", "collect", "--ship", "fixture"], "wait-reconnect"
+    )
+
+    eventually do
+      File.read(error_path).includes?(%("error":"radio_wait_reconnect"))
+    end
+    process.running?.should be_true
+    conflict.requests.should eq(1)
+    conflict.close
+    conflict = nil
+    terminal = TinrelayCodexBridgeProcessSpec::FixedResponseServer.new(
+      401, %({"error":"ignored"}), port
+    )
+
+    process.wait(5.seconds).exit_code.should eq(2)
+    terminal.requests.should eq(1)
+    reports = File.read_lines(error_path).map { |line| JSON.parse(line) }
+    reports[0]["error"].as_s.should eq("radio_wait_reconnect")
+    reports[0]["retryable"].as_bool.should be_true
+    reports[0]["message"].as_s.should eq("relay radio wait must reconnect")
+    reports[1]["error"].as_s.should eq("unauthorized")
+  ensure
+    process.try do |running|
+      running.signal(Signal::TERM) if running.running?
+    end
+    conflict.try(&.close)
+    terminal.try(&.close)
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 

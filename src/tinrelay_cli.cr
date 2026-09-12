@@ -158,8 +158,11 @@ module Tinrelay
             retry_delay = 1
             puts({state: "collected", local_id: event.local_id, kind: event.kind}.to_json)
             STDOUT.flush
-          rescue ex : TransportUnavailable
-            report_transport_unavailable(ex)
+          rescue ex : TransportUnavailable | RadioWaitReconnect
+            case ex
+            when TransportUnavailable then report_transport_unavailable(ex)
+            when RadioWaitReconnect   then report_radio_wait_reconnect(ex)
+            end
             sleep retry_delay.seconds
             retry_delay = Math.min(retry_delay * 2, 30)
           end
@@ -255,6 +258,14 @@ module Tinrelay
     private def self.report_transport_unavailable(ex : TransportUnavailable) : Nil
       STDERR.puts({
         error: "transport_unavailable", retryable: true,
+        message: ex.message,
+      }.to_json)
+      STDERR.flush
+    end
+
+    private def self.report_radio_wait_reconnect(ex : RadioWaitReconnect) : Nil
+      STDERR.puts({
+        error: "radio_wait_reconnect", retryable: true,
         message: ex.message,
       }.to_json)
       STDERR.flush
