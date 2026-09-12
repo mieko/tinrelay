@@ -85,7 +85,7 @@ describe "local radio status" do
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 
-  it "validates a routed ID before constructing or reading a path" do
+  it "rejects a traversal-shaped routed ID without changing the spool" do
     root = TinrelaySpec.temporary_root
     spool = Tinrelay::Spool.new(File.join(root, "inbox"))
     canary = File.join(spool.root, "escape.json")

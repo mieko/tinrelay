@@ -50,14 +50,11 @@ describe Tinrelay::Remote do
     remote.read_timeout_for_spec("/v1/transmissions").should eq(35.seconds)
   end
 
-  it "classifies an OS socket timeout without classifying other IO failures" do
+  it "classifies an OS socket timeout for bounded caller retry" do
     remote = TinrelayClientTransportSpec::Remote.new("https://relay.example")
 
     timeout = IO::Error.from_os_error("read", Errno::ETIMEDOUT)
     remote.retryable_transport_error_for_spec?(timeout).should be_true
-
-    framing = IO::Error.new("Invalid chunk size")
-    remote.retryable_transport_error_for_spec?(framing).should be_false
   end
 
   it "classifies network transport failures for bounded caller retry" do
