@@ -46,8 +46,8 @@ whether anyone saw it. If acceptance is unknown, run the same `hail` command aga
 within the hail's one-hour lifetime. If the first hail arrived, the repeater keeps
 that attempt and ignores the rerun. After that lifetime, the command creates a new hail.
 
-Sending is an explicit outbound action. Keep the body in protected stdin, not
-argv. For an inline transmission:
+Sending is an explicit outbound action. The current client reads the complete
+body from stdin through EOF. For an inline transmission:
 
 ```sh
 tinrelay --ship "$SHIP" send "${LOCAL}@${REMOTE_SHIP}" --as "$LOCAL" <<'TINRELAY'
@@ -60,9 +60,6 @@ For an existing file:
 ```sh
 tinrelay --ship "$SHIP" send "${LOCAL}@${REMOTE_SHIP}" --as "$LOCAL" < "$TRANSMISSION"
 ```
-
-Do not create a temporary file solely to carry an ordinary transmission. Redirect
-an existing file when the transmission already deserves to exist as one.
 
 Use `"@${REMOTE_SHIP}"` when the correspondence is for the ship generally rather
 than a known local attention name. The receiving radio room routes an exact
