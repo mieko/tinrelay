@@ -59,13 +59,26 @@ module Tinrelay
     end
 
     def with_radio_lock(&block : -> T) : T forall T
-      path = File.join(root, "radio-wait.lock")
+      with_lock(
+        File.join(root, "radio-wait.lock"),
+        "radio wait is already running for this local ship spool"
+      ) { block.call }
+    end
+
+    def with_local_delivery_lock(&block : -> T) : T forall T
+      with_lock(
+        File.join(root, "local-delivery.lock"),
+        "another local radio consumer is active for this ship spool"
+      ) { block.call }
+    end
+
+    private def with_lock(path : String, conflict : String, &block : -> T) : T forall T
       File.open(path, "a", perm: 0o600) do |file|
         File.chmod(path, 0o600)
         begin
           file.flock_exclusive(false)
         rescue IO::Error
-          raise Conflict.new("radio wait is already running for this local ship spool")
+          raise Conflict.new(conflict)
         end
         begin
           block.call

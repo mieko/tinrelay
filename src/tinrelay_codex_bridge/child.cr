@@ -14,6 +14,11 @@ module TinrelayCodexBridge
       process = Process.new(
         @config.tinrelay,
         args,
+        # The bridge process holds the local-delivery lock across native delivery.
+        # Its owned TinRelay child is the only process allowed to select under it.
+        env: ENV.to_h.merge({
+          "TINRELAY_LOCAL_DELIVERY_OWNER" => "tinrelay-codex-bridge-v1",
+        }),
         input: Process::Redirect::Close,
         output: stdout_write,
         error: stderr_write,

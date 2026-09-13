@@ -36,11 +36,22 @@ module TinrelayCodexBridge
         rescue IO::Error
           raise AlreadyRunning.new("bridge_already_running")
         end
-        @child.version
-        loop do
-          @control.check
-          @reporter.emit("listening")
-          deliver(@child.wait_event)
+        delivery_path = @config.local_delivery_lock_path
+        Dir.mkdir_p(File.dirname(delivery_path), mode: 0o700)
+        File.open(delivery_path, "a", perm: 0o600) do |delivery_lock|
+          delivery_lock.close_on_exec = true
+          File.chmod(delivery_path, 0o600)
+          begin
+            delivery_lock.flock_exclusive(false)
+          rescue IO::Error
+            raise Blocked.new("local_delivery_already_owned")
+          end
+          @child.version
+          loop do
+            @control.check
+            @reporter.emit("listening")
+            deliver(@child.wait_event)
+          end
         end
       end
     rescue ex : AlreadyRunning

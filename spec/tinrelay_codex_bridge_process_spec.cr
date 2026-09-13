@@ -787,6 +787,78 @@ describe "tinrelay-codex-bridge process contract" do
     FileUtils.rm_r(root) if root && Dir.exists?(root)
   end
 
+  it "keeps a manual local waiter from selecting a bridge-owned event" do
+    root = "/tmp/trcb-owner-#{Process.pid}-#{Random.rand(1_000_000)}"
+    Dir.mkdir_p(root)
+    paths = Tinrelay::LocalPaths.new("fixture", root)
+    spool = Tinrelay::Spool.new(paths.spool)
+    record = Tinrelay::RejectedTransmissionSpoolRecord.new(
+      local_id: "tr_0123456789abcdef0123456789abcdef",
+      received_at: 10_i64,
+      relay_transmission_id: "11111111-1111-4111-8111-111111111111",
+      rejection_reason: "unusable_envelope"
+    )
+    Tinrelay::AtomicPrivateFile.write(
+      File.join(spool.pending, "#{record.local_id}.json"),
+      record.to_pretty_json + "\n"
+    )
+    harness = TinrelayCodexBridgeProcessSpec::Harness.new(
+      root, TinrelayCodexBridgeProcessSpec::CLIENT_BINARY
+    )
+    release = Channel(Nil).new(1)
+    harness.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+      turn = harness.peer.accept_start(connection, request)
+      release.receive
+      harness.peer.finish(turn, connection, routed: false)
+      nil
+    end
+    bridge = harness.start
+    eventually { harness.peer.starts.size == 1 }
+
+    status, output, error = run_current_client(
+      root, ["radio", "wait", "--local", "--ship", "fixture"]
+    )
+
+    status.exit_code.should eq(2)
+    output.should be_empty
+    failure = JSON.parse(error)
+    failure["error"].as_s.should eq("conflict")
+    spool.status(record.local_id)[:state].should eq("pending")
+    spool.routed(record.local_id)
+    release.send(nil)
+    eventually { bridge.running? && harness.peer.runtime == "idle" }
+    harness.peer.starts.size.should eq(1)
+
+    bridge.signal(Signal::TERM)
+    bridge.wait(3.seconds).success?.should be_true
+    second = Tinrelay::RejectedTransmissionSpoolRecord.new(
+      local_id: "tr_abcdef0123456789abcdef0123456789",
+      received_at: 11_i64,
+      relay_transmission_id: "22222222-2222-4222-8222-222222222222",
+      rejection_reason: "unusable_envelope"
+    )
+    Tinrelay::AtomicPrivateFile.write(
+      File.join(spool.pending, "#{second.local_id}.json"),
+      second.to_pretty_json + "\n"
+    )
+    status, output, error = run_current_client(
+      root, ["radio", "wait", "--local", "--ship", "fixture"]
+    )
+    status.success?.should be_true
+    error.should be_empty
+    Tinrelay::RadioEvent.from_json(output).local_id.should eq(second.local_id)
+  ensure
+    release.try(&.send(nil))
+    bridge.try do |running|
+      if running.running?
+        running.signal(Signal::TERM)
+        running.wait(3.seconds)
+      end
+    end
+    harness.try(&.close)
+    FileUtils.rm_r(root) if root && Dir.exists?(root)
+  end
+
   it "carries a real collected spool event through the real bridge child" do
     TinrelaySpec.with_server do |server_root, origin, api|
       root = "/tmp/trxb-#{Process.pid}-#{Random.rand(1_000_000)}"

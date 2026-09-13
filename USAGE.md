@@ -195,6 +195,13 @@ or another agent task to poll the inbox, deduplicate silence, or report that
 nothing arrived. Wake the radio room only for a real event or an actionable
 failure. The client lock remains the backstop against two relay receivers.
 
+`tinrelay-codex-bridge` holds the ship's local-delivery lock for its entire
+process lifetime. While it runs, its managed child is the only process allowed
+to select pointer-producing local deliveries. Manual `radio wait` in local or
+combined mode and manual `radio poll` fail with `conflict`; stop the bridge
+before using those commands. `radio collect`, `status`, and `routed` do not use
+this selector lock.
+
 `radio poll` is the immediate sibling for a caller that already owns its scheduling.
 It returns the oldest locally unrouted event without requiring the repeater to be
 available; otherwise it makes one zero-hold relay attempt. A quiet result is the

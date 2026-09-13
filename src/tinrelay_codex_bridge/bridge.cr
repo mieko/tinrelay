@@ -122,6 +122,10 @@ module TinrelayCodexBridge
     def lock_path
       File.join(home, ".local", "share", "tinrelay-codex-bridge", "locks", "#{ship}.lock")
     end
+
+    def local_delivery_lock_path
+      File.join(home, ".local", "share", "tinrelay", ship, "inbox", "local-delivery.lock")
+    end
   end
 
   class Event

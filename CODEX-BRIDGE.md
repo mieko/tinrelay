@@ -19,6 +19,13 @@ tinrelay --ship SHIP radio wait --local +-> untrusted Desktop input -> radio roo
 tinrelay --ship SHIP radio status <----------------------------- routed mark
 ```
 
+To prevent duplicate Desktop turns, the bridge acquires the ship's
+local-delivery lock before starting its local waiter and holds it until the
+bridge exits. Its managed child is admitted under that ownership; competing
+manual local wait and poll commands are rejected rather than selecting the same
+pending record. The operating-system lock is released on exit, so manual
+selection resumes without recovery state.
+
 TinRelay's spool is the only durable queue. A pending event receives one initial
 turn and at most one recovery turn in an uninterrupted bridge process. A second
 unrouted result stops visibly. Delivery is at least once: a crash between local

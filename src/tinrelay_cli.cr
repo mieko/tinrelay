@@ -150,11 +150,11 @@ module Tinrelay
       when "collect"
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        receiver = client(paths, passphrase_file)
+        collector = client(paths, passphrase_file)
         retry_delay = 1
         loop do
           begin
-            event = receiver.radio_collect(spool)
+            event = collector.radio_collect(spool)
             retry_delay = 1
             puts({state: "collected", local_id: event.local_id, kind: event.kind}.to_json)
             STDOUT.flush
@@ -171,16 +171,22 @@ module Tinrelay
         local = !!argv.delete("--local")
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        event = if local
-                  LocalRadio.wait(ship, spool)
-                else
-                  client(paths, passphrase_file).radio_wait(spool)
-                end
+        waiter = client(paths, passphrase_file) unless local
+        event = with_local_delivery(spool) do
+          if local
+            LocalRadio.wait(ship, spool)
+          else
+            waiter.not_nil!.radio_wait(spool)
+          end
+        end
         puts event.to_json
       when "poll"
         spool = Spool.new(paths.spool)
         no_extra!(argv)
-        event = client(paths, passphrase_file).radio_poll(spool)
+        poller = client(paths, passphrase_file)
+        event = with_local_delivery(spool) do
+          poller.radio_poll(spool)
+        end
         puts(event ? event.to_json : %({"state":"quiet"}))
       when "routed"
         id = argv.shift? || raise Invalid.new("radio routed requires a local transmission id")
@@ -195,6 +201,14 @@ module Tinrelay
         puts spool.status(id).to_json
       else
         raise Invalid.new("radio requires collect, wait, poll, status, or routed")
+      end
+    end
+
+    private def self.with_local_delivery(spool : Spool, &block : -> T) : T forall T
+      if ENV["TINRELAY_LOCAL_DELIVERY_OWNER"]? == "tinrelay-codex-bridge-v1"
+        block.call
+      else
+        spool.with_local_delivery_lock { block.call }
       end
     end
 
