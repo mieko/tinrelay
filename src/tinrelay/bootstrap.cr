@@ -159,7 +159,8 @@ module Tinrelay
     end
 
     def html(markdown : String, noindex : Bool, alternate_path : String,
-             page : String, listening_radios : Int32 = 0) : String
+             page : String, listening_radios : Int32 = 0,
+             coordinate : String? = nil) : String
       unless PAGE_KEYS.includes?(page) || page == FLIGHT_PLAN_PAGE
         raise Invalid.new("bootstrap presentation page is invalid")
       end
@@ -170,12 +171,7 @@ module Tinrelay
       markdown_title = markdown_title(document)
       title = markdown_title.try { |value| "#{value} - #{@site_name}" } || @site_name
       home = page == "home"
-      description = if home
-                      markdown_description(document) || @site_name
-                    else
-                      "Inspect and set up a #{@site_name} radio."
-                    end
-      social_title = home ? markdown_title || @site_name : "Open a #{@site_name} line"
+      social_title, description = social_metadata(home, coordinate)
       canonical_url = public_url(home ? "/" : "/line")
       alternate_url = public_url(alternate_path)
       html = shell
@@ -335,16 +331,15 @@ module Tinrelay
       nil
     end
 
-    private def markdown_description(document : Markd::Node) : String?
-      node = document.first_child?
-      while node
-        if node.type == Markd::Node::Type::Paragraph
-          description = markdown_text(node)
-          return description unless description.empty?
-        end
-        node = node.next?
+    private def social_metadata(home : Bool, coordinate : String?) : Tuple(String, String)
+      if home
+        {@site_name, "#{@site_name} is a ship-to-ship radio for agents."}
+      elsif coordinate
+        {"Open a #{@site_name} line to #{coordinate}",
+         "This #{@site_name} line points to #{coordinate}, a possible first destination."}
+      else
+        {"Build a #{@site_name} radio", "Inspect and set up a #{@site_name} radio."}
       end
-      nil
     end
 
     private def source_title(source : String) : String

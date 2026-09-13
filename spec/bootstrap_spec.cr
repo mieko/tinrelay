@@ -15,6 +15,17 @@ private def write_site_config(path : String, name : String, base_url : String,
   )
 end
 
+private def social_preview(body : String) : Tuple(String, String)
+  head = body.split("</head>", 2).first
+  title = head.match(
+    /<meta property="og:title" content="([^"]+)">/
+  ).not_nil![1]
+  description = head.match(
+    /<meta property="og:description" content="([^"]+)">/
+  ).not_nil![1]
+  {title, description}
+end
+
 private def assert_site_identity(origin : String, name : String, base_url : String,
                                  wordmark : String, stylesheet : String? = nil) : Nil
   response = HTTP::Client.get(origin)
@@ -24,6 +35,24 @@ private def assert_site_identity(origin : String, name : String, base_url : Stri
   response.body.should contain("<span>#{wordmark}</span>")
   response.body.should contain(%(href="#{stylesheet}")) if stylesheet
   response.headers["Link"].should contain("<#{base_url}/index.md>")
+
+  coordinate = "steward@harbor"
+  home_preview = social_preview(response.body)
+  line_preview = social_preview(HTTP::Client.get("#{origin}/line").body)
+  directed_preview = social_preview(HTTP::Client.get("#{origin}/steward%40harbor").body)
+  home_preview[0].should eq(name)
+  home_preview[1].should contain(name)
+  home_preview[1].should contain("ship-to-ship radio")
+  line_preview.each do |value|
+    value.should contain(name)
+    value.should contain("radio")
+    value.should_not contain(coordinate)
+  end
+  directed_preview.each do |value|
+    value.should contain(name)
+    value.should contain("line")
+    value.should contain(coordinate)
+  end
 
   llms = HTTP::Client.get("#{origin}/llms.txt")
   llms.body.should contain("#{base_url}/line/index.md")
@@ -392,11 +421,11 @@ describe "the canonical bootstrap representations" do
       response.headers["X-Robots-Tag"].should contain("noindex")
       response.body.should eq(
         api.bootstrap_page.html(
-          expected, true, "/steward%40harbor/index.md", "meet"
+          expected, true, "/steward%40harbor/index.md", "meet", coordinate: coordinate
         )
       )
       response.body.should contain(coordinate)
-      response.body.split("</head>", 2).first.should_not contain(coordinate)
+      response.body.split("</head>", 2).first.should contain(coordinate)
       response.body.should contain(%(href="#{api.bootstrap_page.source_repository}">Source</a>))
       response.body.should_not contain("{{SOURCE_REPOSITORY}}")
 
@@ -407,6 +436,22 @@ describe "the canonical bootstrap representations" do
       ship_general = HTTP::Client.get("#{origin}/%40harbor")
       ship_general.status_code.should eq(200)
       ship_general.body.should contain("<code>@harbor</code>")
+    end
+  end
+
+  it "publishes distinct social previews for home and line routes" do
+    TinrelaySpec.with_server do |_root, origin, _api|
+      headers = HTTP::Headers{"Accept" => "text/html"}
+      home = HTTP::Client.get(origin, headers: headers).body
+      line = HTTP::Client.get("#{origin}/line", headers: headers).body
+      coordinate = "steward@harbor"
+      directed = HTTP::Client.get("#{origin}/steward%40harbor", headers: headers).body
+
+      previews = [social_preview(home), social_preview(line), social_preview(directed)]
+      previews.uniq.size.should eq(3)
+      image_alt = home.match(/<img [^>]*alt="([^"]+)"/).not_nil![1]
+      previews[0][1].should_not eq(image_alt)
+      previews[2].each(&.should contain(coordinate))
     end
   end
 
@@ -529,7 +574,7 @@ describe "the canonical bootstrap representations" do
           "#{origin}#{path}", headers: HTTP::Headers{"Accept" => "text/html"}
         )
         browser.body.should eq(
-          api.bootstrap_page.html(expected, true, explicit_path, action)
+          api.bootstrap_page.html(expected, true, explicit_path, action, coordinate: coordinate)
         )
       end
 
@@ -631,7 +676,9 @@ describe "the canonical bootstrap representations" do
         headers: HTTP::Headers{"Accept" => "text/html"}
       )
       browser.body.should eq(
-        api.bootstrap_page.html(directed.body, true, explicit_path, "flight-plan")
+        api.bootstrap_page.html(
+          directed.body, true, explicit_path, "flight-plan", coordinate: coordinate
+        )
       )
       browser.body.should contain(%(data-page="flight-plan"))
       plain_stylesheet = browser.body.match(
@@ -641,7 +688,7 @@ describe "the canonical bootstrap representations" do
         plain_stylesheet,
         "/tinrelay-art/identity/wordmark.07d6c616afc0.css",
       ])
-      browser.body.split("</head>", 2).first.should_not contain(coordinate)
+      browser.body.split("</head>", 2).first.should contain(coordinate)
 
       llms = HTTP::Client.get("#{origin}/llms.txt").body
       homepage = HTTP::Client.get(origin).body

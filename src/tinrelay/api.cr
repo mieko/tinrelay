@@ -570,7 +570,8 @@ module Tinrelay
       wants_markdown = explicit_markdown || markdown_requested?(context.request)
       page_key = action || "meet"
       body = wants_markdown ? markdown : page.html(
-        markdown, private_page, alternate, page_key, handoffs.waiting_count
+        markdown, private_page, alternate, page_key, handoffs.waiting_count,
+        coordinate: coordinate
       )
       content_type = wants_markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8"
       context.response.headers["Cache-Control"] = "no-store"
