@@ -10,20 +10,25 @@ module TinrelayCodexBridge
     OPEN_IT_COOLDOWN_SECONDS = 5 * 60
     NOT_TODAY_SECONDS        = 24 * 60 * 60
 
-    @ipc : IPC? = nil
-
     def initialize(@config : Config, @control = Control.new, @reporter = Reporter.new)
       @child = Child.new(@config, @control)
       @notifier = Notifier.new(@config, @control)
+      @pending_target = PendingTarget.new(@config.pending_target_path)
+      @desktop_control = CodexBridge::Control.new
+      @control.desktop = @desktop_control
+      @desktop = CodexBridge::Client.new(@config.codex_home, @desktop_control)
     end
 
     def check
       @child.version
-      connection = connect
-      connection.wait_idle if connection.lifecycle.runtime != "active"
-      @reporter.emit("ready", "desktop_delivery_available")
-    ensure
-      @ipc.try(&.close)
+      case result = @desktop.check(@config.task)
+      when CodexBridge::Ready
+        @reporter.emit("ready", "desktop_delivery_available")
+      when CodexBridge::Retryable
+        raise DeliveryUnavailable.new(product_reason(result.reason))
+      when CodexBridge::Incompatible
+        raise Blocked.new(product_reason(result.reason))
+      end
     end
 
     def run
@@ -49,8 +54,13 @@ module TinrelayCodexBridge
           @child.version
           loop do
             @control.check
+            pending_target = @pending_target.load
+            if pending_target && @child.routed?(pending_target.local_id)
+              @pending_target.clear(pending_target.local_id)
+              next
+            end
             @reporter.emit("listening")
-            deliver(@child.wait_event)
+            deliver(@child.wait_event, pending_target)
           end
         end
       end
@@ -59,84 +69,36 @@ module TinrelayCodexBridge
     rescue ex : Blocked
       @notifier.fault(ex.message || "bridge_blocked") if @notifier.configured?
       raise ex
-    ensure
-      @ipc.try(&.close)
     end
 
-    private def connect : IPC
-      @ipc.try(&.close)
-      @ipc = nil
-      @control.check
-      begin
-        socket = open_socket
-      rescue IO::Error
-        raise DeliveryUnavailable.new("codex_socket_unavailable")
-      end
-      begin
-        connection = IPC.new(socket, @config.task, @control)
-        @ipc = connection
-        connection.subscribe
-        connection
-      rescue Disconnected
-        socket.close
-        raise DeliveryUnavailable.new("codex_handshake_unavailable")
-      rescue ex
-        socket.close
-        raise ex
-      end
-    end
-
-    private def open_socket : CodexTransport
-      {% if flag?(:win32) %}
-        File.open(@config.socket_path, "r+", blocking: false)
-      {% else %}
-        UNIXSocket.new(@config.socket_path)
-      {% end %}
-    end
-
-    private def connection
-      @ipc || connect
-    end
-
-    private def idle_connection
-      loop do
-        begin
-          ipc = connection
-          ipc.wait_idle
-          return ipc
-        rescue Disconnected
-          @ipc = nil
+    private def deliver(event, pending_target : PendingTargetBinding?)
+      if pending_target && pending_target.local_id != event.id
+        unless @child.routed?(pending_target.local_id)
+          raise Blocked.new("pending_target_conflict")
         end
+        @pending_target.clear(pending_target.local_id)
+        pending_target = nil
       end
-    end
-
-    private def observe(id)
+      if @child.routed?(event)
+        @pending_target.clear(event.id) if pending_target
+        return
+      end
+      target = pending_target || @pending_target.bind(event.id, @config.task)
       loop do
         begin
-          connection.wait_terminal(id)
-          return
-        rescue Disconnected
-          @ipc = nil
-        end
-      end
-    end
-
-    private def deliver(event)
-      return if @child.routed?(event)
-      loop do
-        begin
-          deliver_through_desktop(event)
-          return
+          deliver_through_desktop(event, target.task_id)
+          break
         rescue ex : DeliveryUnavailable
           @reporter.emit("waiting_for_radio_room", ex.message, local_id: event.id)
           unless @notifier.configured?
-            return if wait_for_radio_room(event)
+            break if wait_for_radio_room(event, target.task_id)
             next
           end
           seconds = unavailable_cooldown(event)
-          return if wait_for_radio_room(event, seconds)
+          break if wait_for_radio_room(event, target.task_id, seconds)
         end
       end
+      @pending_target.clear(event.id)
     end
 
     private def unavailable_cooldown(event) : Int32
@@ -163,65 +125,18 @@ module TinrelayCodexBridge
       end
     end
 
-    private def wait_for_radio_room(event, cooldown_seconds : Int32? = nil)
+    private def wait_for_radio_room(event, target_task_id,
+                                    cooldown_seconds : Int32? = nil)
       started = Time.instant
       deadline = cooldown_seconds.try { |seconds| Time.instant + seconds.seconds }
       loop do
         begin
-          deliver_through_desktop(event)
+          deliver_through_desktop(event, target_task_id)
           return true
         rescue DeliveryUnavailable
-          disconnect
           return false if deadline.try { |value| Time.instant >= value }
           @control.pause(retry_seconds(Time.instant - started))
         end
-      end
-    end
-
-    private def reconcile_submission(event, client_user_message_id : String) : String?
-      started = Time.instant
-      next_reminder = started
-      @reporter.emit(
-        "waiting_for_submission_resolution",
-        "submission_outcome_unknown",
-        local_id: event.id
-      )
-      loop do
-        begin
-          ipc = connection
-          ipc.load_complete_history
-          match = ipc.lifecycle.client_message_match(client_user_message_id)
-          case match.state
-          when ClientMessageState::Accepted
-            turn_id = match.turn_id.not_nil!
-            @reporter.emit(
-              "accepted",
-              "accepted_after_reconnect",
-              local_id: event.id,
-              turn_id: turn_id
-            )
-            return turn_id
-          when ClientMessageState::Absent
-            @reporter.emit("submission_not_observed", local_id: event.id)
-            return nil
-          when ClientMessageState::Provisional
-            @reporter.emit(
-              "waiting_for_submission_resolution",
-              "submission_provisional",
-              local_id: event.id
-            )
-          end
-        rescue ex : DeliveryUnavailable | Disconnected
-          disconnect
-          @reporter.emit("waiting_for_radio_room", ex.message, local_id: event.id)
-        end
-
-        now = Time.instant
-        if @notifier.configured? && now >= next_reminder
-          seconds = unavailable_cooldown(event)
-          next_reminder = Time.instant + seconds.seconds
-        end
-        @control.pause(retry_seconds(Time.instant - started))
       end
     end
 
@@ -233,46 +148,156 @@ module TinrelayCodexBridge
       IDLE_RETRY_SECONDS
     end
 
-    private def disconnect
-      @ipc.try(&.close)
-      @ipc = nil
+    private def logical_message_id(event, ordinal)
+      "tinrelay-turn:#{event.id}:#{ordinal}"
     end
 
-    private def deliver_through_desktop(event)
-      attempts = 0
-      client_user_message_id = "tinrelay-turn:#{event.id}"
+    private def delivery(event, target_task_id, ordinal)
+      CodexBridge::Delivery.new(
+        task_id: target_task_id,
+        instruction: Event::INSTRUCTION,
+        attachments: [event.attachment],
+        logical_message_id: logical_message_id(event, ordinal),
+        mode: CodexBridge::DeliveryMode::Queue
+      )
+    end
+
+    private def reconcile(event, target_task_id, ordinal)
+      id = logical_message_id(event, ordinal)
+      started = Time.instant
       loop do
-        ipc = idle_connection
-        return if @child.routed?(event)
-        raise Blocked.new("recovery_exhausted") if attempts == 2
-        begin
-          id = ipc.start(event, client_user_message_id)
-        rescue Busy
-          # Refresh through idle_connection so a disconnect immediately after
-          # the busy rejection follows the ordinary reconnect path.
-          ipc.lifecycle.invalidate
-          next
-        rescue Disconnected
-          # Every request for one TinRelay event has one logical message ID.
-          # A delayed turn therefore remains recognizable after an absent
-          # history snapshot or bridge restart.
-          disconnect
-          return if @child.routed?(event)
-          if recovered_id = reconcile_submission(event, client_user_message_id)
-            attempts += 1
-            @reporter.emit(
-              "waiting_for_routing",
-              local_id: event.id,
-              turn_id: recovered_id
-            )
-            observe(recovered_id)
-          end
-          next
+        case result = @desktop.reconcile(target_task_id, id)
+        when CodexBridge::LogicalMessageObserved, CodexBridge::LogicalMessageNotObserved
+          return result
+        when CodexBridge::LogicalMessageProvisional
+          @reporter.emit(
+            "waiting_for_submission_resolution",
+            "submission_provisional",
+            local_id: event.id
+          )
+          @control.pause(retry_seconds(Time.instant - started))
+        when CodexBridge::Retryable
+          reason = product_reason(result.reason)
+          @reporter.emit("waiting_for_radio_room", reason, local_id: event.id)
+          raise DeliveryUnavailable.new(reason)
+        when CodexBridge::Incompatible
+          raise Blocked.new(product_reason(result.reason))
         end
-        attempts += 1
-        @reporter.emit("accepted", local_id: event.id, turn_id: id)
-        @reporter.emit("waiting_for_routing", local_id: event.id, turn_id: id)
-        observe(id)
+      end
+    end
+
+    private def submit(event, target_task_id, ordinal) : String?
+      uncertain = false
+      started = Time.instant
+      loop do
+        case result = @desktop.deliver(delivery(event, target_task_id, ordinal))
+        when CodexBridge::Accepted
+          @reporter.emit(
+            "accepted",
+            uncertain ? "accepted_after_reconnect" : nil,
+            local_id: event.id,
+            turn_id: result.turn_id
+          )
+          return result.turn_id
+        when CodexBridge::Ambiguous
+          uncertain = true
+          report_ambiguous(event, result.reason)
+          return if @child.routed?(event)
+          if {"submission_not_observed", "submission_provisional"}.includes?(result.reason)
+            @control.pause(retry_seconds(Time.instant - started))
+            if result.reason == "submission_provisional"
+              case recovered = reconcile(event, target_task_id, ordinal)
+              when CodexBridge::LogicalMessageObserved
+                @reporter.emit(
+                  "accepted",
+                  "accepted_after_reconnect",
+                  local_id: event.id,
+                  turn_id: recovered.turn_id
+                )
+                return recovered.turn_id
+              when CodexBridge::LogicalMessageNotObserved
+                @reporter.emit("submission_not_observed", local_id: event.id)
+              end
+            end
+          else
+            raise DeliveryUnavailable.new(product_reason(result.reason))
+          end
+        when CodexBridge::Retryable
+          raise DeliveryUnavailable.new(product_reason(result.reason))
+        when CodexBridge::Incompatible
+          raise Blocked.new(product_reason(result.reason))
+        end
+      end
+    end
+
+    private def report_ambiguous(event, reason)
+      @reporter.emit(
+        "waiting_for_submission_resolution",
+        reason == "submission_not_observed" ? "submission_outcome_unknown" : reason,
+        local_id: event.id
+      )
+      if reason == "submission_not_observed"
+        @reporter.emit("submission_not_observed", local_id: event.id)
+      end
+    end
+
+    private def observe(event, target_task_id, turn_id)
+      @reporter.emit("waiting_for_routing", local_id: event.id, turn_id: turn_id)
+      case result = @desktop.observe_until_terminal(target_task_id, turn_id)
+      when CodexBridge::Terminal
+        result
+      when CodexBridge::Retryable
+        raise DeliveryUnavailable.new(product_reason(result.reason))
+      when CodexBridge::Incompatible
+        raise Blocked.new(product_reason(result.reason))
+      end
+    end
+
+    private def observe_recovered(event, target_task_id, observed)
+      @reporter.emit(
+        "accepted",
+        "accepted_after_reconnect",
+        local_id: event.id,
+        turn_id: observed.turn_id
+      )
+      observe(event, target_task_id, observed.turn_id)
+    end
+
+    private def deliver_through_desktop(event, target_task_id)
+      return if @child.routed?(event)
+
+      second = reconcile(event, target_task_id, 2)
+      if second.is_a?(CodexBridge::LogicalMessageObserved)
+        observe_recovered(event, target_task_id, second)
+        return if @child.routed?(event)
+        raise Blocked.new("recovery_exhausted")
+      end
+
+      first = reconcile(event, target_task_id, 1)
+      if first.is_a?(CodexBridge::LogicalMessageObserved)
+        observe_recovered(event, target_task_id, first)
+      else
+        turn_id = submit(event, target_task_id, 1) || return
+        observe(event, target_task_id, turn_id)
+      end
+      return if @child.routed?(event)
+
+      second_turn_id = submit(event, target_task_id, 2) || return
+      observe(event, target_task_id, second_turn_id)
+      return if @child.routed?(event)
+      raise Blocked.new("recovery_exhausted")
+    end
+
+    private def product_reason(reason)
+      case reason
+      when "codex_transport_unavailable"
+        "codex_socket_unavailable"
+      when "duplicate_logical_message_id"
+        "duplicate_client_message_id"
+      when /^history_(.+)$/
+        "ipc_retryable_rejection:thread-follower-load-complete-history:#{$1}"
+      else
+        reason
       end
     end
   end

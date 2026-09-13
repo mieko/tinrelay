@@ -30,7 +30,7 @@ module TinrelayCodexBridge
     executable = "tinrelay"
     notify_command = nil.as(String?)
     radio_room_name = nil.as(String?)
-    codex_home = ENV["CODEX_HOME"]? || File.join(ENV["HOME"], ".codex")
+    codex_home = ENV["CODEX_HOME"]? || Path.home.join(".codex").to_s
     parser = OptionParser.new do |p|
       p.on("--ship SHIP", "Local ship") { |v| ship = v }
       p.on("--radio-room-task UUID", "Existing local task") { |v| task = v }

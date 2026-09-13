@@ -1,15 +1,9 @@
 require "json"
-require "socket"
-require "uuid"
 require "option_parser"
+require "codex_bridge"
 
 module TinrelayCodexBridge
   VERSION = "0.1.0"
-  {% if flag?(:win32) %}
-    alias CodexTransport = File
-  {% else %}
-    alias CodexTransport = UNIXSocket
-  {% end %}
 
   class Blocked < Exception; end
 
@@ -19,18 +13,14 @@ module TinrelayCodexBridge
 
   class Stopped < Exception; end
 
-  class Disconnected < Exception; end
-
-  class Deadline < Disconnected; end
-
-  class Busy < Exception; end
-
   class Control
     getter stopped = false
     property child : Process? = nil
+    property desktop : CodexBridge::Control? = nil
 
     def stop
       @stopped = true
+      desktop.try(&.stop)
       terminate_child
     end
 
@@ -90,8 +80,8 @@ module TinrelayCodexBridge
       @ship,
       @task,
       tinrelay = "tinrelay",
-      @codex_home = ENV["CODEX_HOME"]? || File.join(ENV["HOME"], ".codex"),
-      @home = ENV["HOME"],
+      @codex_home = ENV["CODEX_HOME"]? || Path.home.join(".codex").to_s,
+      @home = Path.home.to_s,
       @radio_room_name : String? = nil,
       notify_command : String? = nil,
     )
@@ -111,20 +101,16 @@ module TinrelayCodexBridge
       end
     end
 
-    def socket_path
-      {% if flag?(:win32) %}
-        %(\\\\.\\pipe\\codex-ipc)
-      {% else %}
-        File.join(codex_home, "ipc", "ipc.sock")
-      {% end %}
-    end
-
     def lock_path
       File.join(home, ".local", "share", "tinrelay-codex-bridge", "locks", "#{ship}.lock")
     end
 
     def local_delivery_lock_path
       File.join(home, ".local", "share", "tinrelay", ship, "inbox", "local-delivery.lock")
+    end
+
+    def pending_target_path
+      File.join(home, ".local", "share", "tinrelay-codex-bridge", "pending", "#{ship}.json")
     end
   end
 
@@ -176,68 +162,13 @@ module TinrelayCodexBridge
       "tinrelay:#{id}"
     end
 
-    def operation(task : String, client_user_message_id : String,
-                  instruction : String = INSTRUCTION)
-      attachment_id = source_id
-      title = "TinRelay radio event"
-      envelope = {
-        version:                 1,
-        modelContextAttachments: [
-          {
-            untrusted:        true,
-            id:               attachment_id,
-            title:            title,
-            text:             raw,
-            imageAttachments: [] of String,
-          },
-        ],
-      }
-      call_id = "tinrelay_#{UUID.random}"
-      data = {
-        kind:     "model_context",
-        source:   "mcp_app",
-        sourceId: attachment_id,
-        title:    title,
-        text:     raw,
-      }
-      {
-        conversationId: task,
-        turnStart:      {
-          request: {
-            threadId:            task,
-            clientUserMessageId: client_user_message_id,
-            input:               [
-              {
-                type:          "text",
-                text:          instruction,
-                text_elements: [
-                  {
-                    byteRange:   {start: 0, end: instruction.bytesize},
-                    placeholder: "codex-untrusted-app-input:#{envelope.to_json}",
-                  },
-                ],
-              },
-            ],
-          },
-          context: {
-            inheritThreadSettings: true,
-            responseItems:         [
-              {type: "function_call", call_id: call_id, name: "untrusted_input", arguments: "{}"},
-              {
-                type:    "function_call_output",
-                call_id: call_id,
-                output:  [{type: "input_text", text: data.to_json}],
-              },
-            ],
-          },
-        },
-      }
+    def attachment
+      CodexBridge::UntrustedAttachment.new(source_id, "TinRelay radio event", raw)
     end
   end
 end
 
 require "./child"
 require "./notifier"
-require "./lifecycle"
-require "./ipc"
+require "./pending_target"
 require "./runner"

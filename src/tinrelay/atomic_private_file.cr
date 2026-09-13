@@ -1,3 +1,5 @@
+require "random/secure"
+
 module Tinrelay
   module AtomicPrivateFile
     def self.write(path : String, contents : String) : Nil
@@ -6,7 +8,7 @@ module Tinrelay
         Dir.mkdir_p(directory, mode: 0o700)
       end
       File.chmod(directory, 0o700)
-      temporary = "#{path}.tmp.#{Process.pid}.#{Crypto.random(6).hexstring}"
+      temporary = "#{path}.tmp.#{Process.pid}.#{Random::Secure.hex(6)}"
       begin
         File.open(temporary, "w", perm: 0o600) do |file|
           file << contents

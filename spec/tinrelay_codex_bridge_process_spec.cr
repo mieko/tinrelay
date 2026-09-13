@@ -15,6 +15,7 @@ module TinrelayCodexBridgeProcessSpec
   BRIDGE_SOURCE  = File.join(REPO, "src", "tinrelay_codex_bridge_cli.cr")
   CLIENT_SOURCE  = File.join(REPO, "src", "tinrelay_cli.cr")
   TASK           = "11111111-2222-3333-4444-555555555555"
+  OTHER_TASK     = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
   ROOM           = "TinRelay Radio Room"
   @@binaries_ready = false
 
@@ -176,12 +177,17 @@ module TinrelayCodexBridgeProcessSpec
       id
     end
 
-    def record_start(request : JSON::Any)
-      id = "turn-#{starts.size}"
-      self.runtime = "active"
+    def record_start(request : JSON::Any, id = "turn-#{starts.size}")
       client_id = request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
+      record_message(id, client_id)
+    end
+
+    def record_message(id : String, client_id : String, status = "inProgress")
+      self.runtime = "active" if status == "inProgress"
       entity = JSON.parse({
-        turnId: id, status: "inProgress", params: {clientUserMessageId: client_id},
+        turnId: id,
+        status: status,
+        items:  [{type: "userMessage", clientId: client_id}],
       }.to_json)
       state["turnHistory"]["history"]["entitiesByKey"].as_h[id] = entity
       self.revision += 1
@@ -192,7 +198,9 @@ module TinrelayCodexBridgeProcessSpec
       self.runtime = "active"
       client_id = request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
       state["turnHistory"]["history"]["entitiesByKey"].as_h[key] = JSON.parse({
-        turnId: nil, status: "inProgress", params: {clientUserMessageId: client_id},
+        turnId: nil,
+        status: "inProgress",
+        items:  [{type: "userMessage", clientId: client_id}],
       }.to_json)
       self.revision += 1
       key
@@ -426,7 +434,7 @@ module TinrelayCodexBridgeProcessSpec
       File.rename(temporary, File.join(root, "fixture.json"))
     end
 
-    def start(command = "run", extra = [] of String)
+    def start(command = "run", extra = [] of String, task = TASK)
       number = processes.size
       stdout = File.join(root, "stdout-#{number}")
       stderr = File.join(root, "stderr-#{number}")
@@ -439,7 +447,7 @@ module TinrelayCodexBridgeProcessSpec
       error = File.open(stderr, "w")
       process = Process.new(
         BINARY,
-        [command, "--ship", "fixture", "--radio-room-task", TASK,
+        [command, "--ship", "fixture", "--radio-room-task", task,
          "--tinrelay", @tinrelay] + extra,
         env: environment,
         output: output,
@@ -450,6 +458,10 @@ module TinrelayCodexBridgeProcessSpec
       managed = ManagedProcess.new(process)
       processes << managed
       managed
+    end
+
+    def pending_target_path
+      File.join(root, ".local", "share", "tinrelay-codex-bridge", "pending", "fixture.json")
     end
 
     def calls(action : String? = nil)
@@ -1016,6 +1028,100 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
+  it "publishes the pending target before submission and clears it after routing" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      binding_seen = Channel(JSON::Any).new(1)
+      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+        binding_seen.send(JSON.parse(File.read(h.pending_target_path)))
+        h.peer.complete_start(connection, request)
+        nil
+      end
+
+      h.start
+      binding = TinrelaySpec.receive(binding_seen)
+      binding.should eq(JSON.parse({local_id: event[:local_id], task_id: TASK}.to_json))
+      eventually { h.calls("wait").size == 2 }
+      File.exists?(h.pending_target_path).should be_false
+    end
+  end
+
+  it "keeps the pending target across restart even if configuration changes" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      submitted = Channel(Nil).new(1)
+      h.peer.on_start = ->(_connection : Connection, _request : JSON::Any) do
+        submitted.send(nil)
+        nil
+      end
+
+      first = h.start
+      TinrelaySpec.receive(submitted)
+      first.signal(Signal::TERM)
+      first.wait(3.seconds).success?.should be_true
+      JSON.parse(File.read(h.pending_target_path))["task_id"].as_s.should eq(TASK)
+
+      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
+        h.peer.complete_start(connection, request)
+        nil
+      end
+      h.start(task: OTHER_TASK)
+      eventually { h.calls("wait").size == 3 }
+      h.peer.starts.size.should eq(2)
+      h.peer.requests.each do |request|
+        next unless params = request["params"]?.try(&.as_h?)
+        if task_id = params["conversationId"]?.try(&.as_s?)
+          task_id.should eq(TASK)
+        end
+      end
+      File.exists?(h.pending_target_path).should be_false
+    end
+  end
+
+  it "clears a routed pending target on restart without contacting Desktop" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      binding = {local_id: event[:local_id], task_id: TASK}.to_json + '\n'
+      Tinrelay::AtomicPrivateFile.write(h.pending_target_path, binding)
+      File.touch(File.join(h.root, "#{event[:local_id]}.routed"))
+
+      process = h.start
+      eventually { !File.exists?(h.pending_target_path) }
+      h.peer.requests.should be_empty
+      process.running?.should be_true
+      process.signal(Signal::TERM)
+      process.wait(3.seconds).success?.should be_true
+    end
+  end
+
+  it "continues with the next event when the bound event routes before selection" do
+    with_bridge_harness do |h|
+      first = TinrelayCodexBridgeProcessSpec.event
+      second = TinrelayCodexBridgeProcessSpec.event(2)
+      h.config["events"] = JSON.parse([first, second].to_json)
+      h.config["route_after_status"] = JSON::Any.new(first[:local_id])
+      h.save
+      binding = {local_id: first[:local_id], task_id: TASK}.to_json + '\n'
+      Tinrelay::AtomicPrivateFile.write(h.pending_target_path, binding)
+
+      process = h.start
+      eventually { h.calls("wait").size == 2 }
+      h.peer.starts.size.should eq(1)
+      response_items = h.peer.starts[0]["params"]["turnStart"]["context"]["responseItems"]
+      raw = JSON.parse(response_items[1]["output"][0]["text"].as_s)["text"].as_s
+      JSON.parse(raw)["local_id"].as_s.should eq(second[:local_id])
+      h.output.should_not contain(%("state":"blocked"))
+      File.exists?(h.pending_target_path).should be_false
+      process.running?.should be_true
+    end
+  end
+
   it "holds its lifetime lock while a turn is pending" do
     with_bridge_harness do |h|
       h.config["events"] = JSON.parse([TinrelayCodexBridgeProcessSpec.event].to_json)
@@ -1147,6 +1253,12 @@ describe "tinrelay-codex-bridge process contract" do
       process = h.start
       h.assert_blocked(process, "recovery_exhausted")
       h.peer.starts.size.should eq(2)
+      h.peer.starts.map do |request|
+        request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
+      end.should eq([
+        "tinrelay-turn:#{TinrelayCodexBridgeProcessSpec.event[:local_id]}:1",
+        "tinrelay-turn:#{TinrelayCodexBridgeProcessSpec.event[:local_id]}:2",
+      ])
       h.calls("wait").size.should eq(1)
     end
   end
@@ -1156,41 +1268,40 @@ describe "tinrelay-codex-bridge process contract" do
       h.config["events"] = JSON.parse([TinrelayCodexBridgeProcessSpec.event].to_json)
       h.save
       h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
-        h.peer.finish(
-          h.peer.accept_start(connection, request),
-          connection,
-          routed: false,
-          terminal: "interrupted"
-        )
+        first_turn = h.peer.accept_start(connection, request)
         h.peer.on_start = ->(next_connection : Connection, next_request : JSON::Any) do
           h.peer.complete_start(next_connection, next_request)
           nil
         end
+        h.peer.finish(first_turn, connection, routed: false, terminal: "interrupted")
         nil
       end
       h.start
       eventually { h.calls("wait").size == 2 }
       h.peer.starts.size.should eq(2)
+      h.peer.starts.map do |request|
+        request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
+      end.should eq([
+        "tinrelay-turn:#{TinrelayCodexBridgeProcessSpec.event[:local_id]}:1",
+        "tinrelay-turn:#{TinrelayCodexBridgeProcessSpec.event[:local_id]}:2",
+      ])
     end
   end
 
-  it "fails closed when two accepted turns materialize for one event ID" do
+  it "fails closed when one logical delivery ID materializes twice" do
     with_bridge_harness do |h|
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
       h.save
       h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
-        h.peer.finish(
-          h.peer.accept_start(connection, request),
-          connection,
-          routed: false,
-          terminal: "interrupted"
-        )
+        original_request = request
         h.peer.on_start = ->(next_connection : Connection, next_request : JSON::Any) do
-          h.peer.record_start(next_request)
+          h.peer.record_start(original_request, "turn-late")
+          h.peer.record_start(next_request, "turn-retry")
           h.peer.disconnect(next_connection)
           nil
         end
+        h.peer.disconnect(connection)
         nil
       end
 
@@ -1200,11 +1311,11 @@ describe "tinrelay-codex-bridge process contract" do
       attempt_ids = h.peer.starts.map do |request|
         request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
       end
-      attempt_ids.uniq.should eq(["tinrelay-turn:#{event[:local_id]}"])
+      attempt_ids.uniq.should eq(["tinrelay-turn:#{event[:local_id]}:1"])
     end
   end
 
-  it "reuses the event ID when complete history does not observe a submission" do
+  it "reuses the first logical delivery ID when history does not observe a submission" do
     with_bridge_harness do |h|
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
@@ -1225,18 +1336,11 @@ describe "tinrelay-codex-bridge process contract" do
       h.peer.starts.size.should eq(2)
       h.peer.starts.map do |request|
         request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
-      end.uniq.should eq(["tinrelay-turn:#{event[:local_id]}"])
-      h.peer.requests.count do |request|
-        request["method"]?.try(&.as_s?) == "thread-follower-load-complete-history"
-      end.should eq(1)
-      h.peer.requests.count do |request|
-        request["method"]?.try(&.as_s?) == "thread-stream-following-changed" &&
-          request["params"]?.try(&.["following"]?.try(&.as_bool?)) == true
-      end.should eq(2)
+      end.uniq.should eq(["tinrelay-turn:#{event[:local_id]}:1"])
     end
   end
 
-  it "regenerates the same event ID after restart during an ambiguous retry" do
+  it "regenerates the first logical delivery ID after restart during an ambiguous retry" do
     with_bridge_harness do |h|
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
@@ -1264,7 +1368,7 @@ describe "tinrelay-codex-bridge process contract" do
       h.peer.starts.size.should eq(3)
       h.peer.starts.map do |request|
         request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
-      end.uniq.should eq(["tinrelay-turn:#{event[:local_id]}"])
+      end.uniq.should eq(["tinrelay-turn:#{event[:local_id]}:1"])
     end
   end
 
@@ -1279,64 +1383,10 @@ describe "tinrelay-codex-bridge process contract" do
         nil
       end
       h.start
-      eventually { h.output.includes?(%("reason":"accepted_after_reconnect")) }
+      eventually { h.output.includes?(%("state":"accepted")) }
       h.peer.starts.size.should eq(1)
       client_id = h.peer.starts[0]["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
-      client_id.should eq("tinrelay-turn:#{event[:local_id]}")
-      h.peer.finish("turn-1")
-      eventually { h.calls("wait").size == 2 }
-      h.peer.starts.size.should eq(1)
-    end
-  end
-
-  it "waits for the promised complete-history snapshot before reconciling" do
-    with_bridge_harness do |h|
-      event = TinrelayCodexBridgeProcessSpec.event
-      h.config["events"] = JSON.parse([event].to_json)
-      h.save
-      prior_state = JSON.parse(h.peer.state.to_json)
-      subscriptions = 0
-      h.peer.on_subscribe = ->(connection : Connection) do
-        subscriptions += 1
-        if subscriptions == 2
-          h.peer.stream(connection, JSON.parse({
-            type:              "snapshot",
-            revision:          h.peer.revision - 1,
-            conversationState: prior_state,
-          }.to_json))
-        else
-          h.peer.stream(connection)
-        end
-        nil
-      end
-      h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
-        h.peer.record_start(request)
-        h.peer.disconnect(connection)
-        nil
-      end
-      history_replied = false
-      snapshot_release = Channel(Nil).new
-      h.peer.on_load_history = ->(connection : Connection, request : JSON::Any) do
-        h.peer.reply(connection, request, {revision: h.peer.revision})
-        history_replied = true
-        spawn do
-          snapshot_release.receive
-          begin
-            h.peer.stream(connection)
-          rescue IO::Error
-          end
-        end
-        nil
-      end
-
-      process = h.start
-      eventually { history_replied }
-      sleep 100.milliseconds
-      stayed_alive = process.running?
-      snapshot_release.send(nil)
-      stayed_alive.should be_true
-      eventually { h.output.includes?(%("reason":"accepted_after_reconnect")) }
-      h.peer.starts.size.should eq(1)
+      client_id.should eq("tinrelay-turn:#{event[:local_id]}:1")
       h.peer.finish("turn-1")
       eventually { h.calls("wait").size == 2 }
       h.peer.starts.size.should eq(1)
@@ -1356,16 +1406,16 @@ describe "tinrelay-codex-bridge process contract" do
       h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
         h.peer.record_start(request)
         h.peer.no_owner = true
-        h.peer.disconnect(connection)
-        nil
-      end
-      h.peer.on_load_history = ->(connection : Connection, request : JSON::Any) do
-        if rejection = history_rejections.shift?
-          h.peer.reply(connection, request, error: rejection)
-        else
-          h.peer.stream(connection)
-          h.peer.reply(connection, request, {revision: h.peer.revision})
+        h.peer.on_load_history = ->(history_connection : Connection, history_request : JSON::Any) do
+          if rejection = history_rejections.shift?
+            h.peer.reply(history_connection, history_request, error: rejection)
+          else
+            h.peer.stream(history_connection)
+            h.peer.reply(history_connection, history_request, {revision: h.peer.revision})
+          end
+          nil
         end
+        h.peer.disconnect(connection)
         nil
       end
 
@@ -1508,7 +1558,7 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "retries a timed-out submission with the same event ID when history is absent" do
+  it "retries a timed-out submission with the same logical ID when history is absent" do
     with_bridge_harness do |h|
       h.config["events"] = JSON.parse([TinrelayCodexBridgeProcessSpec.event].to_json)
       h.save
@@ -1527,9 +1577,8 @@ describe "tinrelay-codex-bridge process contract" do
       h.peer.starts.map do |request|
         request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
       end.uniq.should eq([
-        "tinrelay-turn:#{TinrelayCodexBridgeProcessSpec.event[:local_id]}",
+        "tinrelay-turn:#{TinrelayCodexBridgeProcessSpec.event[:local_id]}:1",
       ])
-      h.peer.connections.size.should eq(2)
     end
   end
 
@@ -1759,17 +1808,27 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "rejects an accepted turn absent from fresh lifecycle history" do
+  it "retries when an accepted turn is temporarily absent from complete history" do
     with_bridge_harness do |h|
-      h.config["events"] = JSON.parse([TinrelayCodexBridgeProcessSpec.event].to_json)
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
       h.save
       h.peer.on_start = ->(connection : Connection, request : JSON::Any) do
         h.peer.reply(connection, request, {result: {turn: {id: "missing"}}})
+        h.peer.on_start = ->(next_connection : Connection, next_request : JSON::Any) do
+          h.peer.complete_start(next_connection, next_request)
+          nil
+        end
         nil
       end
       process = h.start
-      h.assert_blocked(process, "accepted_turn_unresolved")
-      h.peer.starts.size.should eq(1)
+      eventually { h.output.includes?(%("reason":"accepted_turn_not_observed")) }
+      process.running?.should be_true
+      eventually { h.calls("wait").size == 2 }
+      h.peer.starts.size.should eq(2)
+      h.peer.starts.map do |request|
+        request["params"]["turnStart"]["request"]["clientUserMessageId"].as_s
+      end.uniq.should eq(["tinrelay-turn:#{event[:local_id]}:1"])
     end
   end
 
@@ -1795,36 +1854,50 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "requires a snapshot after a lifecycle revision gap" do
+  it "starts only the recovery ordinal after restart observes a terminal initial turn" do
     with_bridge_harness do |h|
-      h.config["events"] = JSON.parse([TinrelayCodexBridgeProcessSpec.event].to_json)
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
       h.save
-      h.peer.runtime = "active"
-      h.start
-      eventually do
-        h.peer.requests.any? do |request|
-          request["method"]?.try(&.as_s?) == "thread-stream-following-changed"
-        end
-      end
-      change = JSON.parse({
-        type:         "patches",
-        baseRevision: 2,
-        revision:     3,
-        patches:      [{
-          op: "replace", path: ["threadRuntimeStatus", "type"], value: "idle",
-        }],
-      }.to_json)
-      h.peer.stream(change: change)
-      eventually do
-        h.peer.requests.count do |request|
-          request["method"]?.try(&.as_s?) == "thread-stream-following-changed"
-        end == 2
-      end
-      h.peer.starts.should be_empty
+      first_id = "tinrelay-turn:#{event[:local_id]}:1"
+      h.peer.record_message("initial-turn", first_id, "interrupted")
       h.peer.runtime = "idle"
-      h.peer.revision = 4
+      binding = {local_id: event[:local_id], task_id: TASK}.to_json + '\n'
+      Tinrelay::AtomicPrivateFile.write(h.pending_target_path, binding)
+
+      h.start
+      eventually { h.calls("wait").size == 2 }
+      h.peer.starts.size.should eq(1)
+      request = h.peer.starts[0]["params"]["turnStart"]["request"]
+      recovery_id = request["clientUserMessageId"].as_s
+      recovery_id.should eq("tinrelay-turn:#{event[:local_id]}:2")
+    end
+  end
+
+  it "observes the recovery ordinal first after restart without another submission" do
+    with_bridge_harness do |h|
+      event = TinrelayCodexBridgeProcessSpec.event
+      h.config["events"] = JSON.parse([event].to_json)
+      h.save
+      h.peer.record_message(
+        "initial-turn",
+        "tinrelay-turn:#{event[:local_id]}:1",
+        "interrupted"
+      )
+      h.peer.record_message("recovery-turn", "tinrelay-turn:#{event[:local_id]}:2")
+      binding = {local_id: event[:local_id], task_id: TASK}.to_json + '\n'
+      Tinrelay::AtomicPrivateFile.write(h.pending_target_path, binding)
+
+      h.start
+      eventually { h.output.includes?(%("turn_id":"recovery-turn")) }
+      h.peer.starts.should be_empty
+      h.peer.turn("recovery-turn").as_h["status"] = JSON::Any.new("completed")
+      h.peer.runtime = "idle"
+      h.peer.revision += 1
+      File.touch(File.join(h.root, "#{event[:local_id]}.routed"))
       h.peer.stream
       eventually { h.calls("wait").size == 2 }
+      h.peer.starts.should be_empty
     end
   end
 

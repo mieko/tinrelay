@@ -85,19 +85,30 @@ module TinrelayCodexBridge
     end
 
     def routed?(event : Event)
-      result, output, _ = execute(["radio", "status", event.id, "--ship", @config.ship])
+      routed, kind = status(event.id)
+      raise Blocked.new("status_kind_mismatch") unless kind == event.kind
+      routed
+    end
+
+    def routed?(local_id : String)
+      status(local_id).first
+    end
+
+    private def status(local_id : String)
+      result, output, _ = execute(["radio", "status", local_id, "--ship", @config.ship])
       raise Blocked.new("tinrelay_status_failed") unless result.success?
       value = JSON.parse(output)
-      raise Blocked.new("status_id_mismatch") unless value.as_h["local_id"].as_s == event.id
-      raise Blocked.new("status_kind_mismatch") unless value.as_h["kind"].as_s == event.kind
-      case value.as_h["state"].as_s
-      when "routed"
-        true
-      when "pending"
-        false
-      else
+      raise Blocked.new("status_id_mismatch") unless value.as_h["local_id"].as_s == local_id
+      kind = value.as_h["kind"].as_s
+      unless {"transmission", "hail", "rejected_transmission"}.includes?(kind)
         raise Blocked.new("invalid_radio_status")
       end
+      routed = case value.as_h["state"].as_s
+               when "routed"  then true
+               when "pending" then false
+               else                raise Blocked.new("invalid_radio_status")
+               end
+      {routed, kind}
     rescue JSON::ParseException | TypeCastError | KeyError
       raise Blocked.new("invalid_radio_status")
     end

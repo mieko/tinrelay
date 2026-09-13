@@ -4,8 +4,9 @@
 for locally spooled radio events without spending model turns and wakes one
 existing Codex radio-room task only when a real event arrives. The independent
 `tinrelay --ship SHIP radio collect` keeps receiving from the repeater even when Codex
-is unavailable. The desktop app must currently have a compatible live owner for
-the configured task.
+is unavailable. The desktop app must currently have a compatible live owner for the
+task selected for delivery. The configured task is selected for the next source
+event; an outstanding event remains bound to its recorded task.
 
 The bridge passes the complete radio event as **untrusted app context**. Only a
 constant local routing instruction occupies trusted user text. The radio room owns
@@ -26,10 +27,19 @@ manual local wait and poll commands are rejected rather than selecting the same
 pending record. The operating-system lock is released on exit, so manual
 selection resumes without recovery state.
 
-TinRelay's spool is the only durable queue. A pending event receives one initial
-turn and at most one recovery turn in an uninterrupted bridge process. A second
-unrouted result stops visibly. Delivery is at least once: a crash between local
-delivery and the routed mark can present the same stable local ID again.
+TinRelay's spool is the only durable queue. A pending event receives one initial turn
+and at most one recovery turn across bridge process restarts. A second unrouted
+result stops visibly. Delivery is at least once: a crash between local delivery and
+the routed mark can present the same stable local ID again.
+
+Before the first Codex submission, the bridge atomically records the event's local ID
+and exact target task in the private per-ship
+`$HOME/.local/share/tinrelay-codex-bridge/pending/$SHIP.json` binding. Every later
+reconciliation, observation, retry, and recovery turn for that event uses the
+recorded task, even if service configuration changes. On restart, the bridge checks
+TinRelay source status first: it clears a stale binding for an already-routed event
+without contacting Desktop; otherwise it resumes that event against the recorded
+task. After TinRelay reports the event routed, the bridge clears the binding.
 
 The bridge uses a Unix socket on macOS and Linux and the desktop app's named pipe
 on Windows. The repository provides unattended user-service examples for macOS
@@ -157,13 +167,13 @@ policy; for systemd, use `Restart=on-failure`. A blocked `run` exits 1 after its
 configured fault notification returns; failed `check` exits 2. Signals and a
 second-instance refusal remain clean exits.
 
-If Desktop is unavailable or the configured task has no compatible live owner, the
+If Desktop is unavailable or the selected task has no compatible live owner, the
 bridge leaves the exact event pending in TinRelay's existing spool. With a notifier
 configured, it blocks until the human chooses whether to open the room or defer
 the prompt. Owner discovery is local and model-free after either choice and
 continues until the room appears; the choice changes only the reminder cooldown.
 Without a notifier, task discovery continues, but the bridge cannot leave a visible
-reminder when the configured task is unavailable. TinRelay deliberately does not
+reminder when the selected task is unavailable. TinRelay deliberately does not
 launch an app, resume a headless Codex process, maintain another agent runtime, or
 create another spool to cover this case. Codex's local queue and wake interfaces
 are private and changing; a future stock interface can close this gap without
@@ -173,32 +183,44 @@ preserving a speculative compatibility layer.
 
 The bridge may pause local delivery while an event is outstanding; the independent
 collector continues receiving later transmissions into the same durable spool. It
-waits for the exact accepted turn to become terminal and for the task to become
-idle; elapsed time and old historical turn state do not imply completion. If
-Desktop disconnects before turn acceptance is known, the bridge closes that IPC
-connection and retains its lifetime lock and the exact TinRelay event. The event's
-local ID remains the stable source ID of its untrusted attachment. The bridge derives
-one logical client message ID from that validated pending event and reuses it across
-requests and process restarts. After reconnecting, the bridge loads complete task
-history and requires its reported revision to match the lifecycle snapshot it received. If that
-history contains the logical message with a turn ID, its presence proves acceptance,
-and the bridge follows that turn. If the matching turn is still provisional, the
-bridge keeps reconciling it. Absence is only non-observation and may permit another
-at-least-once request with the same logical ID. If more than one accepted turn with
-that ID appears, the bridge stops visibly rather than guessing. While Desktop or the
-room remains unavailable, bounded backoff and the configured notifier keep the unresolved event
-alive and visible. Structured output names listening, accepted, reconciliation,
-blocked, stopped, and failed states without logging wrappers, task contents, child
-stderr, or correspondence bodies.
+observes the exact accepted turn until that turn becomes terminal; elapsed time and
+old historical turn state do not imply completion. If the pending event then earns
+its one recovery notification, the subsequent explicit Queue delivery waits for the
+task to become idle before starting that turn. If Desktop disconnects before turn
+acceptance is known, the bridge closes that IPC connection and retains its lifetime
+lock and the exact TinRelay event. The event's local ID remains the stable source ID
+of its untrusted attachment. For each deliberate Codex notification turn, the bridge
+derives a deterministic logical client message ID: `tinrelay-turn:<local-id>:1` for
+the initial turn and
+`tinrelay-turn:<local-id>:2` for the one permitted recovery turn. Every uncertain
+retry and process restart preserves the ID for that same ordinal notification. After
+reconnecting, the bridge loads complete task history and requires its reported
+revision to match the lifecycle snapshot it received. It reconciles the recovery ID
+first, then the initial ID. Exactly one matching message with a turn ID proves
+acceptance, and the bridge follows that exact turn; a matching provisional message
+remains unresolved. Absence is only non-observation and may permit another
+at-least-once request using the same ordinal ID. More than one matching message for
+either ID is accidental duplicate evidence and stops the bridge visibly. Only
+positive terminal evidence for the initial turn, followed by a fresh check that the
+TinRelay event remains pending, authorizes the recovery turn. If that recovery turn
+also becomes terminal while the event remains pending, the bridge stops visibly.
+While Desktop or the room remains unavailable, bounded backoff and the configured
+notifier keep the unresolved event alive and visible. Structured output names
+listening, accepted, reconciliation, blocked, stopped, and failed states without
+logging wrappers, task contents, child stderr, or correspondence bodies.
 
-The preferred adapter uses the desktop app's internal Codex IPC: four-byte
-little-endian frame lengths, JSON payloads, owner discovery, follower turn start,
-following, and lifecycle streaming. It requires untrusted app-input support and
-rediscovers the task owner after every reconnect. Unsupported, ownerless, or
-ambiguous owner discovery stops visibly rather than selecting another task or
-repeatedly spending model turns. An initially unknowable submission result instead
-enters the single-event reconciliation above. The bridge does not infer acceptance or
-rejection from elapsed time or absence.
+The shared `codex-bridge` shard owns the desktop app's internal, version-sensitive
+Codex IPC boundary: four-byte little-endian frame lengths, JSON payloads, owner
+discovery, follower turn start, lifecycle snapshots, complete-history reconciliation,
+and exact-turn observation. TinRelay supplies its durable event, frozen destination
+binding, deterministic ordinal message ID, and untrusted attachment, and invokes the
+shard in explicit Queue mode. The shard requires untrusted app-input support and
+rediscovers the task owner after every reconnect. Ordinary owner absence is retryable
+and follows the bounded discovery behavior above. Unsupported or ambiguous protocol
+evidence stops visibly rather than selecting another task or repeatedly spending
+model turns. An initially unknowable submission result instead enters the
+single-event reconciliation above. The bridge does not infer acceptance or rejection
+from elapsed time or absence.
 
 `script/verify-codex-bridge` uses temporary homes, a fake TinRelay executable, and
 controlled socket peers. It never contacts a real radio or task.

@@ -220,12 +220,13 @@ poll because another wait currently owns the ship radio; one-shot `radio wait`
 reports it as terminal. Authentication, protocol, maintenance, local-file,
 malformed-response, TLS, and unknown failures remain terminal.
 
-If the desktop or configured task owner is unavailable, the bridge leaves the
-exact event pending. With the optional local notifier configured, it continues
-model-free owner discovery and delivers when the room becomes available. Without
-one, task discovery continues, but the bridge cannot alert the user that the
-configured task may need to be activated. The independent collector continues
-receiving later events.
+If the desktop or selected task owner is unavailable, the bridge leaves the exact
+event pending. The configured task is selected for a new event; an outstanding event
+remains bound to the task already recorded for it. With the optional local notifier
+configured, the bridge continues model-free owner discovery and delivers when the
+room becomes available. Without one, task discovery continues, but the bridge cannot
+alert the user that the selected task may need to be activated. The independent
+collector continues receiving later events.
 TinRelay deliberately does not automate task activation while Codex's local wake
 interfaces remain private and changing.
 Windows currently has no verified service example; start the bridge manually.

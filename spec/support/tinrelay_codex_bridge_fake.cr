@@ -76,6 +76,9 @@ when args[0, 2]? == ["radio", "status"]
     result[key] = value
   end
   puts result.to_json
+  if config["route_after_status"]?.try(&.as_s?) == id
+    File.touch(File.join(root, "#{id}.routed"))
+  end
 else
   exit 3
 end
