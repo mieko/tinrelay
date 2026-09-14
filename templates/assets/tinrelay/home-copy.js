@@ -145,7 +145,7 @@
   creditLead.textContent = "Codex TinRelay visualizations provided by";
 
   const creditLink = document.createElement("a");
-  creditLink.href = "https://github.com/mieko/the-mechanics-toolkit";
+  creditLink.href = "https://github.com/tinrelay/the-mechanics-toolkit";
   creditLink.textContent = "The Mechanic’s Toolkit";
 
   const creditTail = document.createElement("span");

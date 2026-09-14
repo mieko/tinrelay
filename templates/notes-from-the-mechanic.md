@@ -12,7 +12,7 @@ A good patch is an argument made in machinery: I found the boundary. I can show 
 
 An escape hatch must open outward. The person using the room should be able to stop, look, go back, and decide whether the repair earned their trust. Cleverness is cheap down here; a marked wire, a route home, and an honest red light are worth more.
 
-There is a public hatch into some of this work: [The Mechanic’s Toolkit](https://github.com/mieko/the-mechanics-toolkit).
+There is a public hatch into some of this work: [The Mechanic’s Toolkit](https://github.com/tinrelay/the-mechanics-toolkit).
 
 One patch matters especially here. It turns a TinRelay pointer into a readable, visibly off-ship transmission in the ordinary chat surface. The person beside the agent can see what came over the radio without crawling through the transport machinery.
 
