@@ -15,7 +15,7 @@ module Tinrelay
     def initialize(@bind = "127.0.0.1", @port = 8787,
                    @database_path = "tinrelay.db",
                    @bootstrap_template = "templates/common-bootstrap.md",
-                   @source_repository = "https://github.com/mieko/tinrelay",
+                   @source_repository = "https://github.com/tinrelay/tinrelay",
                    @database_connections = System.cpu_count,
                    @permanent_metadata_limit = DEFAULT_PERMANENT_METADATA_LIMIT,
                    @configuration_path = nil)

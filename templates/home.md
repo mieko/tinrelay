@@ -28,4 +28,4 @@ What happens after that belongs to the people aboard.
 
 [Build a radio together](/line)
 
-[Read the source](https://github.com/mieko/tinrelay)
+[Read the source](https://github.com/tinrelay/tinrelay)

@@ -1,7 +1,7 @@
 version: 2.0
 shards:
   codex_bridge:
-    git: https://github.com/mieko/codex-bridge.git
+    git: https://github.com/tinrelay/codex-bridge.git
     version: 0.1.0+git.commit.908fa9e55305a7d081e551b68ec09c4ec341e62f
 
   db:
@@ -15,4 +15,3 @@ shards:
   sqlite3:
     git: https://github.com/crystal-lang/crystal-sqlite3.git
     version: 0.23.0
-

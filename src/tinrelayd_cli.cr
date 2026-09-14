@@ -36,7 +36,7 @@ module Tinrelay
       port = (extract(argv, "--port") || "8787").to_i
       template = extract(argv, "--bootstrap-template") || "templates/common-bootstrap.md"
       source_repository = extract(argv, "--source-repository") ||
-                          "https://github.com/mieko/tinrelay"
+                          "https://github.com/tinrelay/tinrelay"
       configuration_path = extract(argv, "--config") || extract(argv, "-c")
       threads = ServerRuntime.thread_count(extract(argv, "--threads"))
       permanent_metadata_limit = numeric(
