@@ -13,21 +13,6 @@ end
 config = JSON.parse(File.read(File.join(root, "fixture.json")))
 
 case
-when args == ["TinRelay Radio Room"]
-  number = File.read_lines(File.join(root, "child_calls.jsonl")).count do |row|
-    JSON.parse(row)["args"].as_a.map(&.as_s) == ["TinRelay Radio Room"]
-  end
-  release = File.join(root, "notify-release-#{number}")
-  loop { break if File.exists?(release); sleep 20.milliseconds }
-  exit 75 if config["notifier_choice"]?.try(&.as_s?) == "not_today"
-  exit 3 if config["notifier_failure"]?.try(&.as_bool?)
-when args.first? == "--fault"
-  number = File.read_lines(File.join(root, "child_calls.jsonl")).count do |row|
-    JSON.parse(row)["args"].as_a.first?.try(&.as_s?) == "--fault"
-  end
-  release = File.join(root, "fault-notify-release-#{number}")
-  loop { break if File.exists?(release); sleep 20.milliseconds }
-  exit 3 if config["fault_notifier_failure"]?.try(&.as_bool?)
 when args == ["version"]
   puts "tinrelay fixture"
 when args[0, 2]? == ["radio", "wait"]
@@ -79,6 +64,17 @@ when args[0, 2]? == ["radio", "status"]
   if config["route_after_status"]?.try(&.as_s?) == id
     File.touch(File.join(root, "#{id}.routed"))
   end
+when args[0, 2]? == ["inbox", "show"]
+  id = args[2]
+  records = config["inbox_records"]?.try(&.as_h)
+  record = records.try(&.[id]?)
+  exit 3 unless record
+  puts record.to_json
+when args[0, 2]? == ["radio", "routed"]
+  exit 3 if config["routed_failure"]?.try(&.as_bool?)
+  id = args[2]
+  File.touch(File.join(root, "#{id}.routed"))
+  puts({state: "routed", id: id}.to_json)
 else
   exit 3
 end

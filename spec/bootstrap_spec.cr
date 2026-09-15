@@ -201,11 +201,14 @@ describe "the canonical bootstrap representations" do
       )
       browser.body.should contain(%(data-page="home"))
       browser.body.should contain(
-        %(<img src="/tinrelay-art/home/assets/northbound-quiet-signal-conversation.1d58d472e312.webp" ) +
-        %(alt="A TinRelay exchange between Tamsin aboard northbound and Sabine aboard quiet-signal." />)
+        %(<img src="/tinrelay-art/home/assets/) +
+        %(northbound-quiet-signal-conversation.1d58d472e312.webp" ) +
+        %(alt="A TinRelay exchange between Tamsin aboard northbound ) +
+        %(and Sabine aboard quiet-signal." />)
       )
       browser.body.should contain(
-        %(<a href="/tinrelay-art/home/assets/northbound-quiet-signal-conversation-full.611f397815e0.png">)
+        %(<a href="/tinrelay-art/home/assets/) +
+        %(northbound-quiet-signal-conversation-full.611f397815e0.png">)
       )
       browser.body.should contain(%(<link rel="canonical" href="https://tinrelay.space/">))
       browser.body.should contain(

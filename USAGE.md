@@ -62,8 +62,8 @@ tinrelay --ship "$SHIP" send "${LOCAL}@${REMOTE_SHIP}" --as "$LOCAL" < "$TRANSMI
 ```
 
 Use `"@${REMOTE_SHIP}"` when the correspondence is for the ship generally rather
-than a known local attention name. The receiving radio room routes an exact
-empty-name mapping when present, otherwise its ordinary `*` fallback.
+than a known local attention name. Local Codex routing uses an exact empty-name
+address when present, otherwise its ordinary `*` fallback.
 
 The same command can exercise the real radio path aboard one ship without creating a
 contact: `tinrelay --ship "$SHIP" send "${LOCAL}@${SHIP}" --as "$LOCAL" < "$TRANSMISSION"`.
@@ -160,16 +160,27 @@ hail before a positive relationship exists again.
 
 The recommended Codex receiver has two model-free processes. `tinrelay --ship
 "$SHIP" radio collect` continuously receives into the durable local spool. The bundled
-`tinrelay-codex-bridge` waits only on that local spool and wakes the existing
-radio-room task for a real event. The finite room reads the bootstrap-owned private JSON
-mapping, selects the exact returned attention name or `*`, forwards the complete
-source-produced two-line `TINRELAY LOCAL POINTER` wrapper, marks the pointer routed
-only after native task delivery succeeds, and ends its turn. TinRelay's compact
+`tinrelay-codex-bridge` waits only on that local spool. It reads the ship's
+`codex-addresses.json`, resolves the exact returned attention name or `*`, and
+delivers the complete source-produced two-line `TINRELAY LOCAL POINTER` wrapper
+directly to that Codex task. It can deliver to an unloaded task without changing
+the task visible to the user. The bridge marks the pointer routed only after native
+task delivery succeeds. TinRelay's compact
 JSON names only the local contract, transmission kind, local ID, receiving ship,
 authenticated sender ship, and authenticated attention label. It contains no
-command, path, body, Markdown, or trailing prose. TinRelay never reads task IDs or
-that mapping. An unusable authenticated envelope produces a content-free fallback
-event and is erased so later traffic can progress:
+command, path, body, Markdown, or trailing prose. A Codex pointer is one exact
+native task message; its body is not interpolated into another instruction. An
+unusable authenticated envelope produces a content-free fallback event and is
+erased so later traffic can progress:
+
+Before starting the bridge for the first time, run:
+
+```sh
+tinrelay-codex-bridge --install
+```
+
+Continue immediately when it prints `ready`. Restart Codex or ChatGPT only when it
+prints `codex_restart_required`.
 
 ```sh
 tinrelay --ship "$SHIP" radio collect
@@ -189,8 +200,7 @@ durable local spool and never contacts the repeater; harness bridges use this fo
 Without `--local`, it retains the combined interactive behavior of first checking
 local work and then waiting at the repeater. Do not schedule a named correspondent
 or another agent task to poll the inbox, deduplicate silence, or report that
-nothing arrived. Wake the radio room only for a real event or an actionable
-failure. The client lock remains the backstop against two relay receivers.
+nothing arrived. The client lock remains the backstop against two relay receivers.
 
 `tinrelay-codex-bridge` holds the ship's local-delivery lock for its entire
 process lifetime. While it runs, its managed child is the only process allowed
@@ -220,15 +230,14 @@ poll because another wait currently owns the ship radio; one-shot `radio wait`
 reports it as terminal. Authentication, protocol, maintenance, local-file,
 malformed-response, TLS, and unknown failures remain terminal.
 
-If the desktop or selected task owner is unavailable, the bridge leaves the exact
-event pending. The configured task is selected for a new event; an outstanding event
-remains bound to the task already recorded for it. With the optional local notifier
-configured, the bridge continues model-free owner discovery and delivers when the
-room becomes available. Without one, task discovery continues, but the bridge cannot
-alert the user that the selected task may need to be activated. The independent
-collector continues receiving later events.
-TinRelay deliberately does not automate task activation while Codex's local wake
-interfaces remain private and changing.
+Before the first submission, the bridge freezes the exact selected task for that
+event. A definite accepted result is recorded before the TinRelay routed mark, so a
+restart between those writes finishes without sending again. An uncertain receipt
+is also recorded against that task and is never resubmitted or fanned out
+automatically. If local delivery has not been accepted, the exact event remains
+pending while the independent collector continues receiving later events. Missing,
+malformed, or unusable selected addresses fail visibly rather than silently choosing
+a different task.
 Windows currently has no verified service example; start the bridge manually.
 
 Inspect local evidence deliberately:
@@ -278,49 +287,16 @@ test before adopting it. Do not blindly update, weaken crypto or trust checks,
 replace identity files, or claim a new ship merely because another revision
 exists.
 
-To recreate the mechanical task named `tinrelay-radio-room`, inspect
-`templates/tinrelay-radio-room.md` in the retained checkout. For Codex tasks in the
-desktop ChatGPT app, build and inspect the separate `tinrelay-codex-bridge` binary,
-point it at that exact existing task, and let an ordinary user service restart the
-foreground bridge only after unexpected failure. Run one independent `tinrelay
-radio collect` service so reception continues while Codex is unavailable. The
-bridge owns local delivery recovery; the room handles one event and ends. Run the
-bridge's compatibility check before operation because the desktop interface is
-internal and may change. Its full operating contract is in `CODEX-BRIDGE.md` in
-the same retained checkout.
+For Codex tasks in the desktop app, keep one independent `tinrelay radio collect`
+service and one `tinrelay-codex-bridge` service. Run the bridge's compatibility
+check before operation because the desktop interface is internal and may change.
+Its complete address-book, delivery, recovery, and service contract is in
+`CODEX-BRIDGE.md` in the same retained checkout.
 
-The local policy and destination mapping belong to the crew, not to TinRelay.
-The retained checkout includes `templates/RADIO.md` as a small starting point.
-Adapt it with the user and keep the resulting policy where the correspondents can
-read it. The room receives only the mapping's absolute path. The mapping is a
-private JSON object from attention names to complete native task addresses; `*`
-is its fallback. In Codex, a destination has this shape; replace
-`$CORRESPONDENT_TASK` with the exact task ID of the correspondent, not the radio
-room:
-
-```json
-{
-  "*": {
-    "threadId": "$CORRESPONDENT_TASK",
-    "hostId": "local"
-  }
-}
-```
-
-In Claude Code or another harness, port the same boundary yourself: a model-free
-receiver waits, a real event wakes one finite mechanical session, that session
-delivers the exact wrapper through the harness's trusted local messaging, then marks
-the pointer routed. Use the harness's native persistent identity and event-delivery
-mechanisms. Do not claim that a background command is a receiver when its output
-still requires a model turn to fetch, and do not replace event delivery with a
+The local policy and mapping belong to the crew, not to the radio protocol. Adapt
+`templates/RADIO.md` with the user. In another harness, preserve the same boundary:
+a model-free collector spools radio events, a model-free adapter resolves a native
+local address and delivers the exact wrapper, and only a confirmed delivery moves
+the pointer to routed. Use that harness's verified persistent identities and native
+event-delivery shape; do not imitate Codex fields or replace event delivery with a
 timer.
-
-The radio room's turn is short but security-sensitive. Use a model already shown
-to follow its complete contract; do not repeatedly retry a rejected model
-combination or silently downgrade to an unproven one. Record each local destination
-as an exact native address in the bootstrap-owned mapping. In Codex that address
-contains both `threadId` and `hostId`; elsewhere it must use that harness's verified
-shape. In Claude Code, give the correspondent session a stable name with `/rename`,
-confirm the reachable name or disambiguated address with `/list-agents`, and use it
-as the local destination for `SendMessage`; do not imitate Codex fields. Do not
-infer an address from prose or launch a second receiver.

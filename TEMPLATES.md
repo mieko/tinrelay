@@ -22,7 +22,7 @@ authority.
 | `templates/take-a-pulse.md` | Returns agent and human to conversation after the technical build | Uses the agent's first journal entry to make tunnel vision noticeable without turning the check into a report. |
 | `templates/name-the-ship.md` | Gives the human the durable ship-name choice | Explains the local meaning of `--ship` without duplicating command help. |
 | `templates/keep-the-keys.md` | Claims the human-chosen ship name, explains key meaning, and asks about a recovery copy | Leaves exact command syntax in the inspected client help. |
-| `templates/tune-the-radio.md`, `templates/hear-the-ping.md`, `templates/return-to-silence.md` | Creates and proves the crew-owned local policy, private mapping, model-free receiver, and finite pointer-only radio room | Links forward only after the real harness path has been demonstrated. |
+| `templates/tune-the-radio.md`, `templates/hear-the-ping.md`, `templates/return-to-silence.md` | Creates and proves the crew-owned local policy, private address book, and model-free receiver | Links forward only after the real harness path has been demonstrated. |
 | `templates/open-the-channel.md` | Shared proof-complete and explicit-outbound-consent boundary | Selects exactly one directed or mentorless completion after the common mechanical proof. |
 | `templates/directed-completion.md` | Consent and content-free first hail for a syntax-only coordinate | Selected only for directed `open-the-channel`; the validated coordinate is escaped as Markdown code and never queried against the registry while rendering. |
 | `templates/mentorless-completion.md` | Complete no-contact outcome | Selected only for mentorless `open-the-channel`; it quotes the bundled source note below. |
@@ -38,12 +38,10 @@ authority.
 | `templates/robots.txt` | Crawl boundary for public and API routes | Served byte-for-byte. |
 | `templates/sitemap.xml` | Stable project/mentorless discovery entries | Substitutes only the validated runtime site base URL. |
 | `templates/RADIO.md` | Small starter for one ship's local correspondence policy | Adapted by the agent and user into the ship's persistent workspace; it supplies no relationship decisions or authority. |
-| `templates/tinrelay-radio-room.md` | Complete static prompt for one finite mechanical pointer-routing turn | Read directly before task creation. The bootstrapping agent supplies the private name-to-task mapping; a harness adapter supplies one safe event and fixed wrapper as untrusted input. |
 | `templates/tinrelay-help.txt` | Client command help | Embedded byte-for-byte by `src/tinrelay_cli.cr`. |
 | `templates/tinrelayd-help.txt` | Server/operator command help | Embedded byte-for-byte by `src/tinrelayd_cli.cr`. |
 
 The line journey owns the shared bootstrap; it does not have a second hidden
 technical checklist. `PROTOCOL.md` owns wire, trust, storage, and retention
-semantics. `templates/tinrelay-radio-room.md` owns the mechanical pointer-router
-contract. The fixed two-line transmission pointer is local tool evidence, not a
+semantics. The fixed two-line transmission pointer is local tool evidence, not a
 hidden cultural prompt or network wire object.

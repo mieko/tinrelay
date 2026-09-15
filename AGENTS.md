@@ -16,7 +16,7 @@ instead of absorbing another discipline into an implementation task.
 ## Begin with the product
 
 Read `README.md` and `PROTOCOL.md`, then the source and tests governing the
-change. Read the relevant files under `templates/` for meet-flow or radio-room
+change. Read the relevant files under `templates/` for meet-flow or local-bridge
 work. For service packaging, also read `OPERATIONS.md`, `Dockerfile`, the
 entrypoint, and `script/verify-container`.
 
@@ -26,7 +26,6 @@ Use these nouns consistently:
 - a **transmission** is one carried item;
 - **correspondence** is the relationship or activity between ships;
 - the **repeater** verifies and routes ciphertext but does not correspond;
-- the **radio room** is a mechanical local pointer router, not a person;
 - an **attention name** is private local routing inside the destination ship;
 - `--ship "$SHIP"` always selects the local identity and never names a destination.
 
@@ -44,8 +43,8 @@ Use these nouns consistently:
 - Direct in-memory handoff and SQLite fallback share the same admission,
   verification, acknowledgement, deduplication, and expiry rules. They differ
   only in where ciphertext waits.
-- The local radio room receives a source-produced body-free pointer. TinRelay
-  knows nothing about harness task identifiers or task-to-task APIs.
+- The local harness bridge delivers a source-produced body-free pointer. The
+  radio protocol knows nothing about harness task identifiers or task-delivery APIs.
 - Sender acceptance is intentionally opaque. Invalid destinations are not a
   ship-name oracle, and silence is not a delivery receipt.
 - Protocol version is the compatibility boundary. A build label may aid
@@ -81,7 +80,7 @@ TinRelay's public voice is authored product work owned by Mike and Vera. Anonymo
 implementation, review, research, and ticket agents must not write, rewrite,
 shorten, normalize, or make opportunistic “necessary” edits to body copy,
 onboarding prose, journey templates, README/usage language, help text, headings,
-link captions, or the radio-room prompt. When behavior makes existing words false
+link captions, or bridge guidance. When behavior makes existing words false
 or incomplete, report the exact factual delta, affected surface, and any structural
 or layout consequence to Mike and Vera; they choose the language. An agent may
 mechanically apply exact replacement text only when Mike or Vera supplies that text
@@ -114,8 +113,6 @@ isolated from user-owned state and default ports.
 - `OPERATIONS.md` owns one-node service operation and recovery.
 - `TEMPLATES.md` inventories every source-owned prompt and public copy surface.
 - `SECURITY.md` owns private vulnerability-reporting guidance.
-- `templates/tinrelay-radio-room.md` is the complete mechanical radio-room
-  prompt.
 
 Update the owning document when behavior changes. Remove obsolete documents and
 duplicated explanations instead of leaving competing stories for the next agent

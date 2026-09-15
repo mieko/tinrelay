@@ -1,7 +1,16 @@
 require "../tinrelay/atomic_private_file"
 
 module TinrelayCodexBridge
-  record PendingTargetBinding, local_id : String, task_id : String
+  enum DeliveryState
+    Ready
+    Delivered
+    ReceiptUnknown
+  end
+
+  record PendingTargetBinding,
+    local_id : String,
+    task_id : String,
+    state : DeliveryState
 
   class PendingTarget
     MAX_BYTES = 1024
@@ -18,15 +27,19 @@ module TinrelayCodexBridge
         buffer.to_s
       end
       value = JSON.parse(bytes).as_h
-      unless value.keys.sort == ["local_id", "task_id"]
+      keys = value.keys.sort
+      legacy = keys == ["local_id", "task_id"] ||
+               keys == ["local_id", "route", "task_id"]
+      unless legacy || keys == ["local_id", "state", "task_id"]
         raise Blocked.new("invalid_pending_target")
       end
       local_id = value["local_id"].as_s
       task_id = value["task_id"].as_s
+      state = legacy ? DeliveryState::Ready : parse_state(value["state"].as_s)
       raise Blocked.new("invalid_pending_target") unless valid_local_id?(local_id)
       raise Blocked.new("invalid_pending_target") unless valid_task_id?(task_id)
-      PendingTargetBinding.new(local_id, task_id)
-    rescue ex : File::Error
+      PendingTargetBinding.new(local_id, task_id, state)
+    rescue File::Error
       raise Blocked.new("pending_target_unreadable")
     rescue JSON::ParseException | TypeCastError | KeyError
       raise Blocked.new("invalid_pending_target")
@@ -39,12 +52,17 @@ module TinrelayCodexBridge
         end
         return current
       end
-      binding = PendingTargetBinding.new(local_id, task_id)
-      Tinrelay::AtomicPrivateFile.write(
-        @path,
-        {local_id: binding.local_id, task_id: binding.task_id}.to_json + '\n'
-      )
-      binding
+      write(PendingTargetBinding.new(local_id, task_id, DeliveryState::Ready))
+    end
+
+    def replace(
+      current : PendingTargetBinding,
+      task_id = current.task_id,
+      state = current.state,
+    ) : PendingTargetBinding
+      persisted = load || raise Blocked.new("pending_target_missing")
+      raise Blocked.new("pending_target_conflict") unless persisted == current
+      write(PendingTargetBinding.new(current.local_id, task_id, state))
     end
 
     def clear(local_id : String)
@@ -54,8 +72,20 @@ module TinrelayCodexBridge
       end
       File.delete(@path)
       File.open(File.dirname(@path), "r", &.fsync)
-    rescue ex : File::Error
+    rescue File::Error
       raise Blocked.new("pending_target_unwritable")
+    end
+
+    private def write(binding)
+      Tinrelay::AtomicPrivateFile.write(
+        @path,
+        {
+          local_id: binding.local_id,
+          task_id:  binding.task_id,
+          state:    state_name(binding.state),
+        }.to_json + '\n'
+      )
+      binding
     end
 
     private def valid_local_id?(value)
@@ -64,6 +94,24 @@ module TinrelayCodexBridge
 
     private def valid_task_id?(value)
       /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/.matches?(value)
+    end
+
+    private def parse_state(value)
+      case value
+      when "ready"           then DeliveryState::Ready
+      when "delivered"       then DeliveryState::Delivered
+      when "receipt_unknown" then DeliveryState::ReceiptUnknown
+      else                        raise Blocked.new("invalid_pending_target")
+      end
+    end
+
+    private def state_name(state)
+      case state
+      when DeliveryState::Ready          then "ready"
+      when DeliveryState::Delivered      then "delivered"
+      when DeliveryState::ReceiptUnknown then "receipt_unknown"
+      else                                    raise Blocked.new("invalid_pending_target")
+      end
     end
   end
 end

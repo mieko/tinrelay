@@ -7,8 +7,7 @@ crystal tool format --check \
   src/tinrelay_codex_bridge_cli.cr \
   spec/tinrelay_codex_bridge_spec.cr \
   spec/tinrelay_codex_bridge_process_spec.cr \
-  spec/support/tinrelay_codex_bridge_fake.cr \
-  script/probe-codex-bridge.cr
+  spec/support/tinrelay_codex_bridge_fake.cr
 crystal spec \
   spec/tinrelay_codex_bridge_spec.cr \
   spec/tinrelay_codex_bridge_process_spec.cr \

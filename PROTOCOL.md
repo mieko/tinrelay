@@ -129,7 +129,7 @@ local key files.
 
 A local block is keyed to the pinned peer identity. It prevents accidental outbound
 correspondence and silently discards that peer's authenticated inbound correspondence
-or hails without body decryption, plaintext spooling, or radio-room attention. The
+or hails without body decryption, plaintext spooling, or local agent attention. The
 repeater learns no durable negative edge. Consequential severance closes the positive
 relationship and rotates the ship radio once. Only a finite explicit retained-peer set
 may acknowledge the new owner-authorized certificate during the transition. Peers that
@@ -252,15 +252,14 @@ name; it
 cannot wedge valid traffic behind it. Every later wait first resurfaces
 the oldest locally unrouted record. Each private spool file has one strict `kind`
 discriminator and exactly one visible evidence shape: signed transmission, rejected
-transmission, or content-free hail. Fields from another kind are a
-corrupt record, not ignored nullable data. The radio task forwards the wrapper verbatim and
-uses its bootstrap-owned exact-name/`*` mapping and moves that ID to the routed
-directory only after native pointer delivery reports success. A crash after durable spooling but before
-relay cleanup leaves the local pointer available; the bounded relay copy may be
-deduplicated and acknowledged later. A crash after native delivery but before the
-local move may repeat the same pointer. The routed directory is the local completion
-boundary; any later handling or reading belongs above TinRelay. Process death
-naturally removes parked-wait availability.
+transmission, or content-free hail. Fields from another kind are a corrupt record,
+not ignored nullable data. A local harness adapter moves the exact ID to the routed
+directory only after its own delivery contract reports receipt. How an adapter
+preserves an uncertain receipt across restart belongs above this protocol. A crash
+after durable spooling but before relay cleanup leaves the local pointer available;
+the bounded relay copy may be deduplicated and acknowledged later. The routed
+directory is the local completion boundary; any later handling or reading belongs
+above TinRelay. Process death naturally removes parked-wait availability.
 
 `tinrelay --ship "$SHIP" radio status "$LOCAL_ID"` is outside the wire protocol. It
 reads and verifies only that exact local spool record in pending or routed,
@@ -276,9 +275,9 @@ TINRELAY LOCAL POINTER
 ```
 
 The JSON is compact and has exactly those keys in that order. It contains no
-command, path, body, Markdown, or trailing prose. The radio room forwards the
-complete wrapper unchanged; a local correspondent deliberately inspects the
-immutable record by its ID outside that mechanical task.
+command, path, body, Markdown, or trailing prose. A local harness adapter delivers
+the complete wrapper unchanged; a correspondent deliberately inspects the immutable
+record by its ID.
 
 Enforced defaults:
 
@@ -315,9 +314,9 @@ The public edge may return HTTP 503 with exactly
 under maintenance. `back_at` is an ISO 8601 expectation, not a guarantee. The
 client parses this bounded shape strictly and writes its own fixed diagnostic; it
 never displays edge-supplied prose. Any other 503 remains generic unavailability.
-Maintenance is not correspondence, never enters the radio room, and authorizes no
-command or local action. During transmission, every 503 leaves acceptance unknown
-and preserves the exact local outbox item for explicit idempotent retry. During hail
+Maintenance is not correspondence, never becomes a local delivery event, and
+authorizes no command or local action. During transmission, every 503 leaves
+acceptance unknown and preserves the exact local outbox item for explicit idempotent retry. During hail
 submission, acceptance remains unknown; within the original hail's one-hour lifetime,
 the operator may run `hail` again. The rerun either creates the first stored hail or
 is absorbed as a duplicate. After that lifetime, it is a new hail.

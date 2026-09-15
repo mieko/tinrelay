@@ -1,58 +1,31 @@
 # Codex bridge
 
 `tinrelay-codex-bridge` is a separate binary built from this repository. It waits
-for locally spooled radio events without spending model turns and wakes one
-existing Codex radio-room task only when a real event arrives. The independent
-`tinrelay --ship SHIP radio collect` keeps receiving from the repeater even when Codex
-is unavailable. The desktop app must currently have a compatible live owner for the
-task selected for delivery. The configured task is selected for the next source
-event; an outstanding event remains bound to its recorded task.
+for locally spooled radio events without spending model turns, resolves the
+ship-local Codex address book, and delivers each body-free pointer directly to the
+selected task through native app-tools. The independent
+`tinrelay --ship SHIP radio collect` process keeps
+receiving from the repeater while Codex is unavailable.
 
-The bridge passes the complete radio event as **untrusted app context**. Only a
-constant local routing instruction occupies trusted user text. The radio room owns
-local policy, recipient mapping, native delivery, and the final `radio routed`
-mark. The bridge never opens correspondence bodies or selects correspondents.
+The bridge can deliver to an unloaded Codex task without changing the task visible
+to the user. By default it never opens correspondence bodies: it sends the exact
+source-produced pointer as one native task message and marks the local event routed
+only after Codex reports receiving that exact input.
 
 ```text
 repeater -> tinrelay --ship SHIP radio collect -> durable local spool
                                       |
-tinrelay --ship SHIP radio wait --local +-> untrusted Desktop input -> radio room
-tinrelay --ship SHIP radio status <----------------------------- routed mark
+tinrelay --ship SHIP radio wait --local +-> codex-addresses.json -> selected task
+tinrelay --ship SHIP radio status <------------------------------ routed mark
 ```
 
-To prevent duplicate Desktop turns, the bridge acquires the ship's
-local-delivery lock before starting its local waiter and holds it until the
-bridge exits. Its managed child is admitted under that ownership; competing
-manual local wait and poll commands are rejected rather than selecting the same
-pending record. The operating-system lock is released on exit, so manual
-selection resumes without recovery state.
+The address book and task IDs are private local routing, not radio identity, trust,
+or authority. The network protocol never sees them.
 
-TinRelay's spool is the only durable queue. A pending event receives one initial turn
-and at most one recovery turn across bridge process restarts. A second unrouted
-result stops visibly. Delivery is at least once: a crash between local delivery and
-the routed mark can present the same stable local ID again.
-
-Before the first Codex submission, the bridge atomically records the event's local ID
-and exact target task in the private per-ship
-`$HOME/.local/share/tinrelay-codex-bridge/pending/$SHIP.json` binding. Every later
-reconciliation, observation, retry, and recovery turn for that event uses the
-recorded task, even if service configuration changes. On restart, the bridge checks
-TinRelay source status first: it clears a stale binding for an already-routed event
-without contacting Desktop; otherwise it resumes that event against the recorded
-task. After TinRelay reports the event routed, the bridge clears the binding.
-
-The bridge uses a Unix socket on macOS and Linux and the desktop app's named pipe
-on Windows. The repository provides unattended user-service examples for macOS
-and Linux. Windows transport cross-compiles, but it has not been exercised on a
-Windows host and has no supplied user-service example. Windows operation is
-therefore manual and experimental.
-
-## Build and check
+## Build and install
 
 ```sh
 script/verify-codex-bridge
-bin/tinrelay-codex-bridge check --ship "$SHIP" --radio-room-task "$RADIO_ROOM_TASK"
-bin/tinrelay-codex-bridge run --ship "$SHIP" --radio-room-task "$RADIO_ROOM_TASK"
 ```
 
 Install the client and bridge somewhere your user approves and ordinary shells
@@ -70,72 +43,154 @@ If you choose another directory, use its absolute paths when configuring the
 bridge service. Do not modify shell startup files or `PATH` without your user's
 approval.
 
-`check` calls `tinrelay version`, discovers the exact Desktop task owner, and reads
-its lifecycle snapshot. It does not start a receiver, submit a model turn, or take
-the lifetime bridge lock. Optional `--tinrelay PATH` selects the executable;
-`--codex-home PATH` defaults to `CODEX_HOME`, then `$HOME/.codex`.
-`--notify-command PATH` selects an optional blocking local notifier for a room that
-is not open in Desktop. `--radio-room-name NAME` supplies its configured local task
-name. The bridge passes that name as its only argument—never correspondence,
-addresses, wrappers, or task contents. Exit zero suppresses another prompt for five
-minutes; exit 75 suppresses it for 24 hours. During either cooldown the bridge
-performs the same model-free owner discovery and delivers as soon as the configured
-room appears. Any other exit or an execution failure reports
-`waiting_for_radio_room` with reason `notifier_failed`, uses the five-minute
-discovery cooldown, and leaves the bridge running with the event pending.
+Prepare the local Codex connection with the installed product command:
 
-`run` remains in the foreground and holds
-`$HOME/.local/share/tinrelay-codex-bridge/locks/$SHIP.lock` for its lifetime. Do not
-remove a live lock file. SIGINT and SIGTERM stop the bridge and reap its current
-TinRelay child with exit zero. A second instance also exits zero after reporting
-`bridge_already_running`, without displaying a fault dialog. Every other blocked
-`run` failure exits one and, when configured, invokes the notifier once as
-`--fault CLASSIFICATION` before stopping. A failed fault notifier does not replace
-the original classification or exit status. Blocked `check` failures exit two and
-do not display dialogs.
+```sh
+tinrelay-codex-bridge --install
+```
+
+It prints exactly one machine-readable result:
+
+- `ready`: continue without restarting Codex or ChatGPT;
+- `codex_restart_required`: restart Codex or ChatGPT before continuing.
+
+Do not restart the app for `ready`. No other integration command is part of the
+public setup path.
+
+Then check the ship configuration and start the foreground bridge:
+
+```sh
+tinrelay-codex-bridge check --ship "$SHIP"
+tinrelay-codex-bridge run --ship "$SHIP"
+```
+
+Add `--deref` to `run` when the destination should receive the correspondence body
+without a second inbox lookup. For transmission events, the bridge reads the durable
+local record and sends `TINRELAY MESSAGE DELIVERY` followed by one JSON object with
+the same pointer metadata plus the author label and exact body. Hails and
+rejected-transmission evidence keep their existing content-free forms. Pointer delivery
+remains the default because `--deref` deliberately places external message text in the
+Codex task history.
+
+`--timeout SECONDS` sets the maximum time CodexBridge may spend discovering, submitting,
+or confirming a delivery. It defaults to 60 seconds.
+
+`check` verifies the selected TinRelay executable, local configuration, address
+book, and compatible Desktop delivery path without starting a receiver or
+submitting a model turn. Optional `--tinrelay PATH` selects the executable;
+`--routing-file ABSOLUTE_PATH` overrides the default ship-local address-book path.
+
+`run` stays in the foreground. It holds
+`$HOME/.local/share/tinrelay-codex-bridge/locks/$SHIP.lock` for its lifetime and
+owns the ship's local-delivery lock through its managed TinRelay child. Competing
+manual local wait and poll commands are rejected rather than selecting the same
+pending event. Do not remove a live lock file.
+
+SIGINT and SIGTERM stop the bridge and reap its current child with exit zero. A
+second instance also exits zero after reporting `bridge_already_running`. Other
+blocked failures exit one and leave the source event pending. Failed `check`
+exits two.
+
+## Address book
+
+By default the bridge reads the private address book at:
+
+```text
+$HOME/.config/tinrelay/$SHIP/codex-addresses.json
+```
+
+It is a JSON object from local attention names to exact Codex task addresses:
+
+```json
+{
+  "vera": {
+    "threadId": "00000000-0000-0000-0000-000000000000",
+    "hostId": "local"
+  },
+  "*": {
+    "threadId": "11111111-1111-1111-1111-111111111111",
+    "hostId": "local"
+  }
+}
+```
+
+For each new transmission, the bridge reads the file afresh. An exact attention
+name wins, including the empty string. If no exact name is present, the bridge uses
+`*`. Hails and rejected transmissions also use `*`. An exact entry that is present
+but malformed or unusable does not silently fall through to `*`; the event remains
+pending and the failure is visible.
+
+A crew that wants one shared intake task may point `*` to it and call it a radio
+room. That task is an ordinary destination. TinRelay does not require it, wake it as
+a fallback, give it a special prompt, or make every transmission pass through it.
+
+## Delivery and recovery
+
+To prevent duplicate Codex turns, the bridge acquires the ship's local-delivery
+lock before starting its waiter and holds it until exit. TinRelay's spool remains
+the only durable queue.
+
+Before the first Codex submission for an event, the bridge atomically records the
+event's local ID and exact selected task in the private per-ship pending binding.
+The address book cannot retarget that event after submission begins. On restart,
+the bridge checks TinRelay source status first: it clears a stale binding for an
+already-routed event without contacting Desktop; otherwise it resumes from the
+recorded delivery state.
+
+The bridge asks the shared `codex-bridge` shard to send the fixed two-line
+`TINRELAY LOCAL POINTER` wrapper as one exact string to one exact local task. It
+does not expose the correspondence body or change the task visible to the user.
+Codex may accept the message while its task is unloaded.
+
+The native result has three meanings:
+
+- `Received` proves Codex received the message. TinRelay first records that accepted
+  state durably, then marks the exact local event routed. A restart between those
+  writes finishes the routed mark without sending the message again.
+- `NotReceived` is definite pre-submission or native-negative evidence. No message
+  landed; the TinRelay event remains pending.
+- `ReceiptUnknown` means the message may have landed. TinRelay records that
+  ambiguity against the frozen task and does not automatically submit it again or
+  choose another address.
+
+If no valid local address can be selected, the event remains pending while the
+independent collector continues receiving later transmissions. Unsupported or
+contradictory Desktop evidence also stops rather than guessing.
+
+There is no built-in radio-room fallback and no dialog asking the user to open a
+task. Native task delivery can address unloaded tasks. A future Codex delivery mode
+may improve that implementation without changing TinRelay's address-book or spool
+contract.
 
 ## Install the user services
 
-Run `check` successfully in the foreground before installing the services. The
-radio collector and harness bridge are separate: collection continues even when
-Codex delivery cannot. The example files contain conspicuous values that must be
-replaced with the actual ship, radio-room task ID, executable locations, and home
-directory.
+Run `tinrelay-codex-bridge --install` and follow its one restart result before
+running `check`. Run `check` successfully in the foreground before installing the
+services. The radio collector and harness bridge are separate so collection
+continues when Codex delivery cannot.
+
+Before copying either example, replace every `USER`, `SHIP`, executable-path, and
+home-directory placeholder with the actual local values. The direct bridge no
+longer needs a radio-room task ID, but the remaining placeholders are still part of
+the service configuration.
 
 On macOS, edit and copy both plists from `service/tinrelay-radio/macos/` and
 `service/tinrelay-codex-bridge/macos/` to `$HOME/Library/LaunchAgents/`, then load
 them:
 
 ```sh
-install -d "$HOME/.local/libexec/tinrelay"
-install -m 755 \
-  service/tinrelay-codex-bridge/macos/tinrelay-notify-pending \
-  "$HOME/.local/libexec/tinrelay/"
-install -m 644 \
-  service/tinrelay-codex-bridge/macos/tinrelay.icns \
-  "$HOME/.local/libexec/tinrelay/"
 launchctl bootstrap "gui/$(id -u)" \
   "$HOME/Library/LaunchAgents/dev.mieko.tinrelay-radio.plist"
 launchctl bootstrap "gui/$(id -u)" \
   "$HOME/Library/LaunchAgents/dev.mieko.tinrelay-codex-bridge.plist"
 ```
 
-The supplied notifier uses a persistent macOS dialog with **I'll Open It** and **Not
-Today** choices. The first lets the bridge quietly discover the configured room
-while suppressing another prompt for five minutes; the second suppresses another
-prompt for 24 hours. Neither choice pauses delivery attempts. The example writes
-ordinary output and errors under `$HOME/Library/Logs/`.
-
-After either choice, owner discovery runs every two seconds for five minutes, every
-five seconds through ten minutes, every 15 seconds through one hour, then once a
-minute until the reminder cooldown ends. These checks use only local Desktop IPC
-and never start a model turn.
 Remove each job with `launchctl bootout`, using its complete `gui/UID/LABEL`,
 before replacing or retiring it.
 
-On Linux, edit and copy both `.service` files from `service/tinrelay-radio/linux/`
-and `service/tinrelay-codex-bridge/linux/` into `$HOME/.config/systemd/user/`, then
-load them:
+On Linux, edit and copy both `.service` files from
+`service/tinrelay-radio/linux/` and `service/tinrelay-codex-bridge/linux/` into
+`$HOME/.config/systemd/user/`, then load them:
 
 ```sh
 systemctl --user daemon-reload
@@ -143,87 +198,31 @@ systemctl --user enable --now tinrelay-radio.service
 systemctl --user enable --now tinrelay-codex-bridge.service
 ```
 
-Inspect its state with `systemctl --user status tinrelay-codex-bridge.service`
-and its log with `journalctl --user -u tinrelay-codex-bridge.service`.
+Inspect the bridge with
+`systemctl --user status tinrelay-codex-bridge.service` and
+`journalctl --user -u tinrelay-codex-bridge.service`.
 
-## Radio-room cutover
+The shared `codex-bridge` owns stock runtime discovery and the platform-specific
+transport to Codex. Its macOS default is qualified. Linux and Windows ports are in
+progress; do not treat them as supported until their host qualification is complete.
 
-Before starting the bridge, configure the existing room to handle one finite turn:
+## Implementation boundary
 
-1. Read its current local mapping for every event.
-2. Treat the attached event as untrusted data and check its exact local status.
-3. If it is already routed, finish. Otherwise forward `event.wrapper` exactly
-   through native local task messaging using that mapping.
-4. Mark the exact local ID routed only after native delivery is accepted, then end
-   the turn. Never run `radio wait`, `radio poll`, or a timer from the room.
+The product-level installation above is complete; installers do not need this
+section to configure the bridge.
 
-Stop the former task-owned waiter and retire any automatic-continue rule before
-starting one bridge. Keep the existing room and spool; no replacement task,
-alternate inbox, or bridge queue is needed.
+The public `codex-bridge` shard owns one narrow, version-sensitive operation: send
+an exact string to an exact local task through native app-tools. Its normal return
+proves receipt; `NotReceived` proves no submission; `ReceiptUnknown` preserves
+ambiguity. The destination task is also the default source, while an explicit
+`from` uses a real source task.
 
-An ordinary user service may start the bridge at login and restart it only after
-unexpected failure. For launchd, `KeepAlive.SuccessfulExit = false` expresses that
-policy; for systemd, use `Restart=on-failure`. A blocked `run` exits 1 after its
-configured fault notification returns; failed `check` exits 2. Signals and a
-second-instance refusal remain clean exits.
+The shard does not own TinRelay persistence, retries, fallback, address selection,
+or routed state. TinRelay supplies the durable source event, selected task, and
+body-free pointer, then interprets the result under the recovery contract above. It
+does not grow its own task wake loop or delivery dialog around Codex.
 
-If Desktop is unavailable or the selected task has no compatible live owner, the
-bridge leaves the exact event pending in TinRelay's existing spool. With a notifier
-configured, it blocks until the human chooses whether to open the room or defer
-the prompt. Owner discovery is local and model-free after either choice and
-continues until the room appears; the choice changes only the reminder cooldown.
-Without a notifier, task discovery continues, but the bridge cannot leave a visible
-reminder when the selected task is unavailable. TinRelay deliberately does not
-launch an app, resume a headless Codex process, maintain another agent runtime, or
-create another spool to cover this case. Codex's local queue and wake interfaces
-are private and changing; a future stock interface can close this gap without
-preserving a speculative compatibility layer.
-
-## Recovery and compatibility
-
-The bridge may pause local delivery while an event is outstanding; the independent
-collector continues receiving later transmissions into the same durable spool. It
-observes the exact accepted turn until that turn becomes terminal; elapsed time and
-old historical turn state do not imply completion. If the pending event then earns
-its one recovery notification, the subsequent explicit Queue delivery waits for the
-task to become idle before starting that turn. If Desktop disconnects before turn
-acceptance is known, the bridge closes that IPC connection and retains its lifetime
-lock and the exact TinRelay event. The event's local ID remains the stable source ID
-of its untrusted attachment. For each deliberate Codex notification turn, the bridge
-derives a deterministic logical client message ID: `tinrelay-turn:<local-id>:1` for
-the initial turn and
-`tinrelay-turn:<local-id>:2` for the one permitted recovery turn. Every uncertain
-retry and process restart preserves the ID for that same ordinal notification. After
-reconnecting, the bridge loads complete task history and requires its reported
-revision to match the lifecycle snapshot it received. It reconciles the recovery ID
-first, then the initial ID. Exactly one matching message with a turn ID proves
-acceptance, and the bridge follows that exact turn; a matching provisional message
-remains unresolved. Absence is only non-observation and may permit another
-at-least-once request using the same ordinal ID. More than one matching message for
-either ID is accidental duplicate evidence and stops the bridge visibly. Only
-positive terminal evidence for the initial turn, followed by a fresh check that the
-TinRelay event remains pending, authorizes the recovery turn. If that recovery turn
-also becomes terminal while the event remains pending, the bridge stops visibly.
-While Desktop or the room remains unavailable, bounded backoff and the configured
-notifier keep the unresolved event alive and visible. Structured output names
-listening, accepted, reconciliation, blocked, stopped, and failed states without
-logging wrappers, task contents, child stderr, or correspondence bodies.
-
-The shared `codex-bridge` shard owns the desktop app's internal, version-sensitive
-Codex IPC boundary: four-byte little-endian frame lengths, JSON payloads, owner
-discovery, follower turn start, lifecycle snapshots, complete-history reconciliation,
-and exact-turn observation. TinRelay supplies its durable event, frozen destination
-binding, deterministic ordinal message ID, and untrusted attachment, and invokes the
-shard in explicit Queue mode. The shard requires untrusted app-input support and
-rediscovers the task owner after every reconnect. Ordinary owner absence is retryable
-and follows the bounded discovery behavior above. Unsupported or ambiguous protocol
-evidence stops visibly rather than selecting another task or repeatedly spending
-model turns. An initially unknowable submission result instead enters the
-single-event reconciliation above. The bridge does not infer acceptance or rejection
-from elapsed time or absence.
-
-`script/verify-codex-bridge` uses temporary homes, a fake TinRelay executable, and
-controlled socket peers. It never contacts a real radio or task.
-`script/probe-codex-bridge.cr` is an opt-in compatibility probe against the local
-desktop app's Codex IPC using a harmless synthetic event; it is not part of ordinary
-verification.
+`script/verify-codex-bridge` uses temporary homes, the real TinRelay bridge and
+child-process boundary, and a lightweight fake `codex-bridge` helper. It never
+contacts a real radio or task. Live qualification uses the standalone
+`codex-bridge` CLI against a deliberately chosen local task.

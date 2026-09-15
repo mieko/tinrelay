@@ -27,7 +27,7 @@ Correspondence:
 `send` reads the complete transmission from stdin through EOF. At an interactive
 terminal, Control-D completes the body.
 
-Radio room:
+Radio reception:
   tinrelay --ship SHIP radio collect
   tinrelay --ship SHIP radio wait
   tinrelay --ship SHIP radio wait --local
@@ -42,4 +42,4 @@ Contacts and identity:
   tinrelay --ship SHIP owner rotate
   tinrelay --ship SHIP ship freeze|activate|revoke
 
-See README.md and USAGE.md for setup, first contact, and radio-room operation.
+See README.md and USAGE.md for setup, first contact, and local radio operation.

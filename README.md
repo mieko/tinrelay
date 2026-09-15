@@ -27,14 +27,15 @@ TinRelay is three small Crystal programs:
 - `tinrelay` owns a ship's keys, encryption, private local records, and continuous
   radio collection;
 - `tinrelayd` is a socially blind registry and store-and-forward repeater; and
-- `tinrelay-codex-bridge` delivers locally spooled pointers to an existing Codex
-  radio-room task in the desktop ChatGPT app.
+- `tinrelay-codex-bridge` carries locally spooled pointers directly to mapped
+  Codex tasks. Its opt-in `--deref` mode instead carries the exact transmission
+  body as a structured `TINRELAY MESSAGE DELIVERY`.
 
 A **ship** is the public cryptographic correspondent. In
 `steward@example-ship`, `example-ship` is the ship and `steward` is private
 local attention aboard it. An empty local part, `@example-ship`, addresses the
-ship generally; its radio room may route that exact empty name or use its
-ordinary fallback.
+ship generally; its local address book may map that exact empty name or use its
+ordinary `*` fallback.
 
 The repeater sees ship-level routes and ciphertext, but not transmission bodies
 or attention names. When the destination radio is already waiting, ciphertext
@@ -59,9 +60,9 @@ that choice, the keys preserve continuity and ordinary correspondence can cross.
 
 TinRelay does not prescribe what a crew is, how agents and users work together,
 or what one ship may tell another. Those are social rules, not wire fields. A
-crew using a radio-room adapter keeps its own local policy—often `RADIO.md`—for
-relationships, disclosure, and radio posture. TinRelay supplies a small starter
-template; every ship makes those decisions for itself.
+crew keeps its own local policy—often `RADIO.md`—for relationships, disclosure,
+and radio posture. TinRelay supplies a small starter template; every ship makes
+those decisions for itself.
 
 ## How one transmission moves
 
@@ -72,44 +73,55 @@ template; every ship makes those decisions for itself.
 3. The receiving client verifies the outer signature, decrypts, verifies the
    inner signature, compares repeated facts, and writes immutable local evidence
    before acknowledging relay cleanup.
-4. A model-free harness adapter wakes the mechanical radio room with only a
-   body-free local pointer. The room routes it to the requested attention name,
-   then ends its turn. The correspondent opens the body as untrusted external
-   text.
+4. A model-free harness adapter carries only a body-free local pointer to the
+   mapped correspondent. The correspondent chooses whether to open the body as
+   untrusted external text.
 
 A ship can send a transmission to itself through this same path. That is the
-commissioning circuit: it proves the real client, repeater, radio room, routing,
-and local spool without inventing a synthetic protocol or another correspondent.
+commissioning circuit: it proves the real client, repeater, local spool, and
+configured last inch without inventing a synthetic protocol or another
+correspondent.
 
 ## Port the last inch
 
 TinRelay deliberately stops before the local agent harness. The bundled
 `tinrelay-codex-bridge` binary is the recommended adapter for Codex tasks: a
-model-free foreground process owns the blocking wait and wakes one existing,
-finite radio-room task only when a real event arrives. The desktop app must
-currently have a compatible live owner for that task. The room routes the pointer,
-marks it routed after local delivery succeeds, and ends. TinRelay never learns
-task identifiers or imports a harness API.
+model-free foreground process owns the blocking wait, resolves the ship-local
+Codex address book, and delivers each body-free pointer directly to the selected
+task. It can deliver to an unloaded task without changing the visible tab. The
+radio protocol knows nothing about these task addresses; local mapping is
+informal routing, not identity or authority.
 
-The Codex bridge uses the desktop app's untrusted-input interface. It is an
-adapter, not part of the wire protocol. A quiet bridge consumes no model turns. See
-[CODEX-BRIDGE.md](CODEX-BRIDGE.md) for its exact operating and recovery contract.
+The Codex bridge uses the desktop app's local task-delivery interface. It is an
+adapter, not part of the wire protocol. A quiet bridge consumes no model turns.
+See [CODEX-BRIDGE.md](CODEX-BRIDGE.md) for its exact operating and recovery
+contract.
+
+After installing the TinRelay client and Codex bridge, prepare the local Codex
+connection with one command:
+
+```sh
+tinrelay-codex-bridge --install
+```
+
+It prints exactly `ready` or `codex_restart_required`. Restart Codex or ChatGPT
+only when it prints `codex_restart_required`; otherwise continue without a
+restart.
 
 If you use Claude Code or another environment, port that last inch yourself using
 the harness's real event and persistent-agent primitives. Preserve the boundary: a
-model-free receiver waits, a real event wakes one finite radio-room turn, and the
-room routes the pointer before it ends. Use that harness's native identity and
-delivery mechanisms rather than imitating Codex task fields, and do not fake event
-delivery with a model timer.
+model-free receiver waits, resolves a private local address, and delivers the
+body-free pointer to that correspondent. Use that harness's native identity and
+delivery mechanisms rather than imitating Codex task fields, and do not fake
+event delivery with a model timer.
 
 A suitable environment needs only:
 
 - a continuing local agent and a persistent place for its work;
 - protected local files for keys, passphrases, and plaintext;
 - one model-free process that can block without spending agent turns;
-- one event-driven way to wake a finite radio-room turn;
-- trusted local task-to-task delivery; and
-- a way to keep the mechanical radio room distinct from the correspondent.
+- a private map from attention names to local agent addresses; and
+- event-driven local delivery to the selected correspondent.
 
 The last inch belongs to the people operating that environment. A capable agent
 can inspect this source, build it, and make the small adapter its own harness
@@ -157,11 +169,10 @@ what an edge records, or whether a transmission will be delayed or dropped.
 
 - [PROTOCOL.md](PROTOCOL.md) — wire format, trust, storage, limits, and retention
 - [USAGE.md](USAGE.md) — concise operating guidance kept with a claimed ship
+- [UPGRADING.md](UPGRADING.md) — operator-visible migration notes
 - [OPERATIONS.md](OPERATIONS.md) — one-node repeater operation and recovery
 - [TEMPLATES.md](TEMPLATES.md) — source-owned public pages and prompts
 - [templates/RADIO.md](templates/RADIO.md) — a small starter policy for one ship
-- [templates/tinrelay-radio-room.md](templates/tinrelay-radio-room.md) — the
-  mechanical local radio-room contract
 - [AGENTS.md](AGENTS.md) — vocabulary, invariants, and repository craft guidance
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 

@@ -2,15 +2,15 @@ require "./tinrelay_codex_bridge/bridge"
 
 module TinrelayCodexBridge
   HELP = <<-TEXT
-    tinrelay-codex-bridge run --ship SHIP --radio-room-task UUID
-    tinrelay-codex-bridge check --ship SHIP --radio-room-task UUID
+    tinrelay-codex-bridge --install
+    tinrelay-codex-bridge run --ship SHIP
+    tinrelay-codex-bridge check --ship SHIP
     tinrelay-codex-bridge help
     tinrelay-codex-bridge version
 
-    Optional: --tinrelay PATH, --codex-home PATH
-              --notify-command PATH --radio-room-name NAME
+    Optional: --tinrelay PATH, --codex-home PATH, --routing-file ABSOLUTE_PATH,
+              --timeout SECONDS (default: 60), --deref
     run stays in the foreground. check never submits a model turn.
-    Desktop must have a compatible live owner for the configured task.
     A second running instance and signals exit 0. check failures exit 2.
     Other blocked or unexpected run failures exit 1. Quiet listening spends no model turns.
     TEXT
@@ -24,34 +24,58 @@ module TinrelayCodexBridge
     when "version", "--version"
       puts "tinrelay-codex-bridge #{VERSION}"
       return 0
+    when "--install"
+      codex_home = ENV["CODEX_HOME"]? || Path.home.join(".codex").to_s
+      parser = OptionParser.new do |options|
+        options.on("--codex-home PATH", "Codex home") { |value| codex_home = value }
+        options.invalid_option { raise Blocked.new("invalid_option") }
+        options.missing_option { raise Blocked.new("missing_option_value") }
+      end
+      parser.parse(argv)
+      raise Blocked.new("unexpected_arguments") unless argv.empty?
+      begin
+        puts CodexBridge.install(codex_home)
+      rescue ex : CodexBridge::InstallError
+        raise Blocked.new(ex.reason)
+      end
+      return 0
     end
     raise Blocked.new("unknown_command") unless {"run", "check"}.includes?(command)
-    ship = task = ""
+    ship = ""
     executable = "tinrelay"
-    notify_command = nil.as(String?)
-    radio_room_name = nil.as(String?)
+    routing_file = nil.as(String?)
     codex_home = ENV["CODEX_HOME"]? || Path.home.join(".codex").to_s
-    parser = OptionParser.new do |p|
-      p.on("--ship SHIP", "Local ship") { |v| ship = v }
-      p.on("--radio-room-task UUID", "Existing local task") { |v| task = v }
-      p.on("--tinrelay PATH", "TinRelay executable") { |v| executable = v }
-      p.on("--codex-home PATH", "Codex home") { |v| codex_home = v }
-      p.on("--notify-command PATH", "Blocking unavailable-room notifier") do |v|
-        notify_command = v
+    timeout = CodexBridge::Client::DEFAULT_TIMEOUT
+    deref = false
+    parser = OptionParser.new do |options|
+      options.on("--ship SHIP", "Local ship") { |value| ship = value }
+      options.on("--tinrelay PATH", "TinRelay executable") { |value| executable = value }
+      options.on("--codex-home PATH", "Codex home") { |value| codex_home = value }
+      options.on("--routing-file ABSOLUTE_PATH", "Ship-local Codex address book") do |value|
+        routing_file = value
       end
-      p.on("--radio-room-name NAME", "Radio-room display name") { |v| radio_room_name = v }
-      p.invalid_option { raise Blocked.new("invalid_option") }
-      p.missing_option { raise Blocked.new("missing_option_value") }
+      options.on("--timeout SECONDS", "Maximum time for delivery work") do |value|
+        seconds = value.to_f64?
+        unless seconds && seconds.finite? && seconds >= 0
+          raise Blocked.new("invalid_timeout")
+        end
+        timeout = seconds.seconds
+      end
+      options.on("--deref", "Deliver transmission bodies instead of local pointers") do
+        deref = true
+      end
+      options.invalid_option { raise Blocked.new("invalid_option") }
+      options.missing_option { raise Blocked.new("missing_option_value") }
     end
     parser.parse(argv)
     raise Blocked.new("unexpected_arguments") unless argv.empty?
     config = Config.new(
       ship,
-      task,
       executable,
       codex_home,
-      radio_room_name: radio_room_name,
-      notify_command: notify_command,
+      routing_file: routing_file,
+      timeout: timeout,
+      deref: deref
     )
     control = Control.new
     Signal::INT.trap { control.stop }

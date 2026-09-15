@@ -90,8 +90,62 @@ module TinrelayCodexBridge
       routed
     end
 
+    def dereference(event : Event) : String
+      return event.wrapper unless event.kind == "transmission"
+      result, output, _ = execute(["inbox", "show", event.id, "--ship", @config.ship])
+      raise Blocked.new("tinrelay_inbox_show_failed") unless result.success?
+      value = JSON.parse(output)
+      unless value["contract"].as_s == "tinrelay-inspected-inbox-v1" &&
+             value["kind"].as_s == "transmission" &&
+             value["local_id"].as_s == event.id &&
+             value["state"].as_s == "pending"
+        raise Blocked.new("invalid_inbox_output")
+      end
+
+      signed = value["signed_transmission"]
+      sender_ship = value["sender_ship"].as_s
+      recipient_ship = value["recipient_ship"].as_s
+      attention_label = value["attention_label"].as_s
+      author_label = optional_string(value["author_label"]?)
+      unless recipient_ship == @config.ship && attention_label == event.name &&
+             signed["sender_ship"].as_s == sender_ship &&
+             signed["recipient_ship"].as_s == recipient_ship &&
+             signed["to_label"].as_s == attention_label &&
+             optional_string(signed["from_label"]?) == author_label
+        raise Blocked.new("invalid_inbox_output")
+      end
+
+      delivery = {
+        contract:        "tinrelay-message-delivery-v1",
+        kind:            "transmission",
+        local_id:        event.id,
+        local_ship:      @config.ship,
+        sender_ship:     sender_ship,
+        attention_label: attention_label,
+        author_label:    author_label,
+        body:            signed["body"].as_s,
+      }
+      "TINRELAY MESSAGE DELIVERY\n#{delivery.to_json}"
+    rescue JSON::ParseException | TypeCastError | KeyError
+      raise Blocked.new("invalid_inbox_output")
+    end
+
     def routed?(local_id : String)
       status(local_id).first
+    end
+
+    def mark_routed(event : Event)
+      result, output, _ = execute([
+        "radio", "routed", event.id, "--ship", @config.ship,
+      ])
+      raise Blocked.new("tinrelay_routed_failed") unless result.success?
+      value = JSON.parse(output).as_h
+      unless value.keys.sort == ["id", "state"] &&
+             value["state"].as_s == "routed" && value["id"].as_s == event.id
+        raise Blocked.new("invalid_routed_output")
+      end
+    rescue JSON::ParseException | TypeCastError | KeyError
+      raise Blocked.new("invalid_routed_output")
     end
 
     private def status(local_id : String)
@@ -111,6 +165,11 @@ module TinrelayCodexBridge
       {routed, kind}
     rescue JSON::ParseException | TypeCastError | KeyError
       raise Blocked.new("invalid_radio_status")
+    end
+
+    private def optional_string(value : JSON::Any?) : String?
+      return unless value && !value.raw.nil?
+      value.as_s
     end
   end
 end
