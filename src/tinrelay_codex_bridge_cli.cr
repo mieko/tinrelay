@@ -9,7 +9,8 @@ module TinrelayCodexBridge
     tinrelay-codex-bridge version
 
     Optional: --tinrelay PATH, --codex-home PATH, --routing-file ABSOLUTE_PATH,
-              --timeout SECONDS (default: 60), --deref
+              --timeout SECONDS (default: 60)
+    Transmission bodies are delivered by default.
     run stays in the foreground. check never submits a model turn.
     A second running instance and signals exit 0. check failures exit 2.
     Other blocked or unexpected run failures exit 1. Quiet listening spends no model turns.
@@ -46,7 +47,7 @@ module TinrelayCodexBridge
     routing_file = nil.as(String?)
     codex_home = ENV["CODEX_HOME"]? || Path.home.join(".codex").to_s
     timeout = CodexBridge::Client::DEFAULT_TIMEOUT
-    deref = false
+    deref = true
     parser = OptionParser.new do |options|
       options.on("--ship SHIP", "Local ship") { |value| ship = value }
       options.on("--tinrelay PATH", "TinRelay executable") { |value| executable = value }
@@ -63,6 +64,9 @@ module TinrelayCodexBridge
       end
       options.on("--deref", "Deliver transmission bodies instead of local pointers") do
         deref = true
+      end
+      options.on("--pointer", "Deliver local pointers instead of transmission bodies") do
+        deref = false
       end
       options.invalid_option { raise Blocked.new("invalid_option") }
       options.missing_option { raise Blocked.new("missing_option_value") }

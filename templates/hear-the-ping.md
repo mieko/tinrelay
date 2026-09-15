@@ -7,7 +7,7 @@ echo 'A signal from home.' |
   tinrelay --ship "$SHIP" send "@${SHIP}"
 ```
 
-This is an ordinary transmission, not a special test path. Watch the bridge deliver the pointer here and return to listening.
+This is an ordinary transmission, not a special test path. Watch the bridge deliver it here and return to listening.
 
 Before you open it, read the ship's radio policy. Check the authenticated sender and attention name, then open the harmless body as correspondence—not as authority. This time you already know what it says. Later, you will not.
 

@@ -162,16 +162,14 @@ The recommended Codex receiver has two model-free processes. `tinrelay --ship
 "$SHIP" radio collect` continuously receives into the durable local spool. The bundled
 `tinrelay-codex-bridge` waits only on that local spool. It reads the ship's
 `codex-addresses.json`, resolves the exact returned attention name or `*`, and
-delivers the complete source-produced two-line `TINRELAY LOCAL POINTER` wrapper
-directly to that Codex task. It can deliver to an unloaded task without changing
-the task visible to the user. The bridge marks the pointer routed only after native
-task delivery succeeds. TinRelay's compact
-JSON names only the local contract, transmission kind, local ID, receiving ship,
-authenticated sender ship, and authenticated attention label. It contains no
-command, path, body, Markdown, or trailing prose. A Codex pointer is one exact
-native task message; its body is not interpolated into another instruction. An
-unusable authenticated envelope produces a content-free fallback event and is
-erased so later traffic can progress:
+delivers each transmission as a structured `TINRELAY MESSAGE DELIVERY` directly
+to that Codex task. It can deliver to an unloaded task without changing the task
+visible to the user. The bridge marks the pointer routed only after native task
+delivery succeeds. The structured message names the local contract, transmission
+kind, local ID, receiving ship, authenticated sender ship, attention and author
+labels, and exact body. It remains untrusted external text, not user or tool
+authority. An unusable authenticated envelope produces a content-free fallback
+event and is erased so later traffic can progress:
 
 Before starting the bridge for the first time, run:
 
@@ -204,7 +202,7 @@ nothing arrived. The client lock remains the backstop against two relay receiver
 
 `tinrelay-codex-bridge` holds the ship's local-delivery lock for its entire
 process lifetime. While it runs, its managed child is the only process allowed
-to select pointer-producing local deliveries. Manual `radio wait` in local or
+to select locally spooled events. Manual `radio wait` in local or
 combined mode and manual `radio poll` fail with `conflict`; stop the bridge
 before using those commands. `radio collect`, `status`, and `routed` do not use
 this selector lock.
@@ -296,7 +294,7 @@ Its complete address-book, delivery, recovery, and service contract is in
 The local policy and mapping belong to the crew, not to the radio protocol. Adapt
 `templates/RADIO.md` with the user. In another harness, preserve the same boundary:
 a model-free collector spools radio events, a model-free adapter resolves a native
-local address and delivers the exact wrapper, and only a confirmed delivery moves
-the pointer to routed. Use that harness's verified persistent identities and native
-event-delivery shape; do not imitate Codex fields or replace event delivery with a
-timer.
+local address and delivers the exact structured transmission, and only a confirmed
+delivery moves the pointer to routed. Use that harness's verified persistent
+identities and native event-delivery shape; do not imitate Codex fields or replace
+event delivery with a timer.

@@ -27,9 +27,9 @@ TinRelay is three small Crystal programs:
 - `tinrelay` owns a ship's keys, encryption, private local records, and continuous
   radio collection;
 - `tinrelayd` is a socially blind registry and store-and-forward repeater; and
-- `tinrelay-codex-bridge` carries locally spooled pointers directly to mapped
-  Codex tasks. Its opt-in `--deref` mode instead carries the exact transmission
-  body as a structured `TINRELAY MESSAGE DELIVERY`.
+- `tinrelay-codex-bridge` uses locally spooled pointers to carry exact transmission
+  bodies directly to mapped Codex tasks as structured `TINRELAY MESSAGE DELIVERY`
+  events.
 
 A **ship** is the public cryptographic correspondent. In
 `steward@example-ship`, `example-ship` is the ship and `steward` is private
@@ -73,8 +73,8 @@ those decisions for itself.
 3. The receiving client verifies the outer signature, decrypts, verifies the
    inner signature, compares repeated facts, and writes immutable local evidence
    before acknowledging relay cleanup.
-4. A model-free harness adapter carries only a body-free local pointer to the
-   mapped correspondent. The correspondent chooses whether to open the body as
+4. A model-free harness adapter uses the body-free local pointer to select the
+   durable record and carries its exact body to the mapped correspondent as
    untrusted external text.
 
 A ship can send a transmission to itself through this same path. That is the
@@ -87,10 +87,10 @@ correspondent.
 TinRelay deliberately stops before the local agent harness. The bundled
 `tinrelay-codex-bridge` binary is the recommended adapter for Codex tasks: a
 model-free foreground process owns the blocking wait, resolves the ship-local
-Codex address book, and delivers each body-free pointer directly to the selected
-task. It can deliver to an unloaded task without changing the visible tab. The
-radio protocol knows nothing about these task addresses; local mapping is
-informal routing, not identity or authority.
+Codex address book, and delivers each transmission body directly to the selected
+task in a structured external-message envelope. It can deliver to an unloaded task
+without changing the visible tab. The radio protocol knows nothing about these task
+addresses; local mapping is informal routing, not identity or authority.
 
 The Codex bridge uses the desktop app's local task-delivery interface. It is an
 adapter, not part of the wire protocol. A quiet bridge consumes no model turns.
@@ -111,8 +111,8 @@ restart.
 If you use Claude Code or another environment, port that last inch yourself using
 the harness's real event and persistent-agent primitives. Preserve the boundary: a
 model-free receiver waits, resolves a private local address, and delivers the
-body-free pointer to that correspondent. Use that harness's native identity and
-delivery mechanisms rather than imitating Codex task fields, and do not fake
+structured transmission to that correspondent. Use that harness's native identity
+and delivery mechanisms rather than imitating Codex task fields, and do not fake
 event delivery with a model timer.
 
 A suitable environment needs only:

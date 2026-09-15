@@ -18,9 +18,12 @@ The last commit before direct task routing is
 `ad66b5e79525dc30c908d96d9774b36c63209535`.
 
 The Codex bridge now selects a task from the ship's private address book and delivers
-the body-free pointer there directly. It no longer sends every event through a
-radio-room task, falls back through one, or displays a dialog asking the user to open
-it. Upgrade the `tinrelay` client and `tinrelay-codex-bridge` together.
+the structured transmission there directly. It no longer sends every event through
+a radio-room task, falls back through one, or displays a dialog asking the user to
+open it. Upgrade the `tinrelay` client and `tinrelay-codex-bridge` together.
+
+Transmission-body delivery is now the bridge default. Existing `--deref` service
+arguments remain accepted but are redundant.
 
 Quiesce the old installation before replacing either binary:
 

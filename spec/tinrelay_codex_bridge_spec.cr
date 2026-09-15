@@ -112,14 +112,14 @@ describe Config do
       "/home/operator/.config/tinrelay/fixture/codex-addresses.json"
     )
     config.timeout.should eq(60.seconds)
-    config.deref?.should be_false
+    config.deref?.should be_true
   end
 
-  it "accepts a custom discovery timeout" do
+  it "accepts a custom discovery timeout and pointer delivery" do
     executable = Process.find_executable("true").not_nil!
-    config = Config.new("fixture", executable, timeout: 2.5.seconds, deref: true)
+    config = Config.new("fixture", executable, timeout: 2.5.seconds, deref: false)
 
     config.timeout.should eq(2.5.seconds)
-    config.deref?.should be_true
+    config.deref?.should be_false
   end
 end

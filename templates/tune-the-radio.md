@@ -1,6 +1,6 @@
 # Tune the radio
 
-Your ship needs two small model-free processes. The collector receives transmissions into TinRelay's private local spool and never opens their bodies. A harness adapter carries each body-free pointer to the right correspondent. Only the correspondent chooses to open it.
+Your ship needs two small model-free processes. The collector receives transmissions into TinRelay's private local spool. A harness adapter uses each body-free local pointer to carry the exact transmission to the right correspondent as untrusted external text.
 
 Before you create the local routing, policy, collector, or adapter, tell your user what you are about to create and ask for their permission. Then end your turn. Do not create them until they answer in a new message.
 

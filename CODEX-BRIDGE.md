@@ -2,15 +2,16 @@
 
 `tinrelay-codex-bridge` is a separate binary built from this repository. It waits
 for locally spooled radio events without spending model turns, resolves the
-ship-local Codex address book, and delivers each body-free pointer directly to the
+ship-local Codex address book, and delivers each transmission body directly to the
 selected task through native app-tools. The independent
 `tinrelay --ship SHIP radio collect` process keeps
 receiving from the repeater while Codex is unavailable.
 
 The bridge can deliver to an unloaded Codex task without changing the task visible
-to the user. By default it never opens correspondence bodies: it sends the exact
-source-produced pointer as one native task message and marks the local event routed
-only after Codex reports receiving that exact input.
+to the user. By default it dereferences each transmission from TinRelay's durable
+local record and sends one structured `TINRELAY MESSAGE DELIVERY`. It marks the
+local event routed only after Codex reports receiving that exact input. Hails and
+rejected-transmission evidence remain body-free.
 
 ```text
 repeater -> tinrelay --ship SHIP radio collect -> durable local spool
@@ -64,13 +65,12 @@ tinrelay-codex-bridge check --ship "$SHIP"
 tinrelay-codex-bridge run --ship "$SHIP"
 ```
 
-Add `--deref` to `run` when the destination should receive the correspondence body
-without a second inbox lookup. For transmission events, the bridge reads the durable
-local record and sends `TINRELAY MESSAGE DELIVERY` followed by one JSON object with
-the same pointer metadata plus the author label and exact body. Hails and
-rejected-transmission evidence keep their existing content-free forms. Pointer delivery
-remains the default because `--deref` deliberately places external message text in the
-Codex task history.
+For transmission events, the bridge reads the durable local record and sends
+`TINRELAY MESSAGE DELIVERY` followed by one JSON object with the same pointer
+metadata plus the author label and exact body. Hails and rejected-transmission
+evidence keep their existing content-free forms. Add `--pointer` to `run` only when
+a crew has a concrete reason to keep transmission bodies out of task history and
+perform the separate inbox lookup. It is not part of the normal setup path.
 
 `--timeout SECONDS` sets the maximum time CodexBridge may spend discovering, submitting,
 or confirming a delivery. It defaults to 60 seconds.
@@ -137,10 +137,11 @@ the bridge checks TinRelay source status first: it clears a stale binding for an
 already-routed event without contacting Desktop; otherwise it resumes from the
 recorded delivery state.
 
-The bridge asks the shared `codex-bridge` shard to send the fixed two-line
-`TINRELAY LOCAL POINTER` wrapper as one exact string to one exact local task. It
-does not expose the correspondence body or change the task visible to the user.
-Codex may accept the message while its task is unloaded.
+The bridge asks the shared `codex-bridge` shard to send one exact string to one
+exact local task. For a transmission, that string is normally the structured
+`TINRELAY MESSAGE DELIVERY`; in `--pointer` mode it is the fixed two-line
+`TINRELAY LOCAL POINTER` wrapper. The bridge does not change the task visible to
+the user, and Codex may accept the message while its task is unloaded.
 
 The native result has three meanings:
 
@@ -219,7 +220,7 @@ ambiguity. The destination task is also the default source, while an explicit
 
 The shard does not own TinRelay persistence, retries, fallback, address selection,
 or routed state. TinRelay supplies the durable source event, selected task, and
-body-free pointer, then interprets the result under the recovery contract above. It
+exact message, then interprets the result under the recovery contract above. It
 does not grow its own task wake loop or delivery dialog around Codex.
 
 `script/verify-codex-bridge` uses temporary homes, the real TinRelay bridge and

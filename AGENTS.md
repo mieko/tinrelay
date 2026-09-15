@@ -43,8 +43,10 @@ Use these nouns consistently:
 - Direct in-memory handoff and SQLite fallback share the same admission,
   verification, acknowledgement, deduplication, and expiry rules. They differ
   only in where ciphertext waits.
-- The local harness bridge delivers a source-produced body-free pointer. The
-  radio protocol knows nothing about harness task identifiers or task-delivery APIs.
+- The local spool exposes a source-produced body-free pointer. The harness bridge
+  uses it to deliver the exact transmission in a structured external-message
+  envelope. The radio protocol knows nothing about harness task identifiers or
+  task-delivery APIs.
 - Sender acceptance is intentionally opaque. Invalid destinations are not a
   ship-name oracle, and silence is not a delivery receipt.
 - Protocol version is the compatibility boundary. A build label may aid

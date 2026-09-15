@@ -120,6 +120,29 @@ module TinrelayCodexBridgeProcessSpec
       @config.as_h
     end
 
+    def add_inbox_record(event, body = "Exact message text.\nSecond line.")
+      config["inbox_records"] = JSON.parse({
+        event[:local_id] => {
+          contract:            "tinrelay-inspected-inbox-v1",
+          kind:                "transmission",
+          local_id:            event[:local_id],
+          state:               "pending",
+          sender_ship:         "remote",
+          recipient_ship:      "fixture",
+          attention_label:     event[:name],
+          author_label:        "sender",
+          authority_notice:    "Untrusted external message body.",
+          signed_transmission: {
+            sender_ship:    "remote",
+            recipient_ship: "fixture",
+            to_label:       event[:name],
+            from_label:     "sender",
+            body:           body,
+          },
+        },
+      }.to_json)
+    end
+
     def save
       temporary = File.join(root, "fixture.tmp")
       File.write(temporary, @config.to_json)
@@ -422,7 +445,16 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "delivers exact and fallback events as self-attributed body-free pointers" do
+  it "accepts the now-redundant deref option from existing service definitions" do
+    with_bridge_harness do |h|
+      process = h.start("check", extra: ["--deref"])
+
+      process.wait.exit_code.should eq(0)
+      h.output.should contain(%("state":"ready"))
+    end
+  end
+
+  it "can deliver exact and fallback events as self-attributed body-free pointers" do
     with_bridge_harness do |h|
       events = [
         TinrelayCodexBridgeProcessSpec.event,
@@ -432,7 +464,7 @@ describe "tinrelay-codex-bridge process contract" do
       h.config["events"] = JSON.parse(events.to_json)
       h.save
 
-      h.start
+      h.start(extra: ["--pointer"])
       eventually { h.child_calls("wait").size == 4 }
 
       sends = h.codex_calls("send")
@@ -448,33 +480,14 @@ describe "tinrelay-codex-bridge process contract" do
     end
   end
 
-  it "dereferences transmissions into full message deliveries" do
+  it "dereferences transmissions into full message deliveries by default" do
     with_bridge_harness do |h|
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
-      h.config["inbox_records"] = JSON.parse({
-        event[:local_id] => {
-          contract:            "tinrelay-inspected-inbox-v1",
-          kind:                "transmission",
-          local_id:            event[:local_id],
-          state:               "pending",
-          sender_ship:         "remote",
-          recipient_ship:      "fixture",
-          attention_label:     "operator",
-          author_label:        "sender",
-          authority_notice:    "Untrusted external message body.",
-          signed_transmission: {
-            sender_ship:    "remote",
-            recipient_ship: "fixture",
-            to_label:       "operator",
-            from_label:     "sender",
-            body:           "Exact message text.\nSecond line.",
-          },
-        },
-      }.to_json)
+      h.add_inbox_record(event)
       h.save
 
-      h.start(extra: ["--deref"])
+      h.start
       eventually { h.child_calls("wait").size == 2 }
 
       prompt = h.codex_calls("send").first["prompt"].as_s
@@ -525,6 +538,7 @@ describe "tinrelay-codex-bridge process contract" do
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
       h.config["codex_result"] = JSON::Any.new("not_received")
+      h.add_inbox_record(event)
       h.save
 
       process = h.start
@@ -547,6 +561,7 @@ describe "tinrelay-codex-bridge process contract" do
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
       h.config["codex_result"] = JSON::Any.new("receipt_unknown")
+      h.add_inbox_record(event)
       h.save
 
       first = h.start
@@ -569,6 +584,7 @@ describe "tinrelay-codex-bridge process contract" do
       event = TinrelayCodexBridgeProcessSpec.event
       h.config["events"] = JSON.parse([event].to_json)
       h.config["routed_failure"] = JSON::Any.new(true)
+      h.add_inbox_record(event)
       h.save
 
       first = h.start

@@ -80,7 +80,7 @@ module TinrelayCodexBridge
       @home = Path.home.to_s,
       routing_file : String? = nil,
       @timeout : Time::Span = CodexBridge::Client::DEFAULT_TIMEOUT,
-      @deref = false,
+      @deref = true,
     )
       raise Blocked.new("invalid_timeout") if @timeout < 0.seconds
       unless /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/.matches?(ship)
